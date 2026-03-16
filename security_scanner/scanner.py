@@ -1663,7 +1663,506 @@ class ShodanVulnChecker:
 
 
 # ---------------------------------------------------------------------------
-# 21. Dehashed Credential Leak Checker (optional API key)
+# 21. External IP Discovery & Per-IP Vulnerability Scanner
+# ---------------------------------------------------------------------------
+
+class ExternalIPDiscoveryChecker:
+    """
+    Discovers all external IP addresses linked to a domain (A, AAAA, MX, NS,
+    SPF, subdomains), enriches each with geo/ASN info from ip-api.com, then
+    scans each IP through Shodan InternetDB for CVEs (enriched with CVSS,
+    EPSS, and CISA KEV).
+    """
+    INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
+    NVD_URL        = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    EPSS_URL       = "https://api.first.org/data/v1/epss"
+    KEV_URL        = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    IP_API_BATCH   = "http://ip-api.com/batch"
+    CRT_SH_URL     = "https://crt.sh/?q=%.{domain}&output=json"
+    MAX_IPS_TO_SCAN = 20
+    MAX_SUBDOMAINS  = 30
+
+    # ---- IP Discovery helpers ------------------------------------------------
+
+    def _resolve_a(self, domain: str) -> dict:
+        """Resolve A and AAAA records for a hostname. Returns {ip: [sources]}."""
+        ips = {}
+        for rtype in ("A", "AAAA"):
+            try:
+                answers = dns.resolver.resolve(domain, rtype, lifetime=5)
+                for r in answers:
+                    ip = str(r)
+                    ips.setdefault(ip, [])
+                    ips[ip].append(f"{rtype} record")
+            except Exception:
+                pass
+        return ips
+
+    def _discover_mx_ips(self, domain: str) -> dict:
+        ips = {}
+        try:
+            answers = dns.resolver.resolve(domain, "MX", lifetime=5)
+            for mx in answers:
+                host = str(mx.exchange).rstrip(".")
+                for rtype in ("A", "AAAA"):
+                    try:
+                        a = dns.resolver.resolve(host, rtype, lifetime=5)
+                        for r in a:
+                            ip = str(r)
+                            ips.setdefault(ip, [])
+                            ips[ip].append(f"MX: {host}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return ips
+
+    def _discover_ns_ips(self, domain: str) -> dict:
+        ips = {}
+        try:
+            answers = dns.resolver.resolve(domain, "NS", lifetime=5)
+            for ns in answers:
+                host = str(ns.target).rstrip(".")
+                try:
+                    a = dns.resolver.resolve(host, "A", lifetime=5)
+                    for r in a:
+                        ip = str(r)
+                        ips.setdefault(ip, [])
+                        ips[ip].append(f"NS: {host}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return ips
+
+    def _parse_spf_ips(self, domain: str) -> dict:
+        ips = {}
+        try:
+            answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
+            for txt in answers:
+                val = str(txt).strip('"')
+                if not val.startswith("v=spf1"):
+                    continue
+                parts = val.split()
+                for p in parts:
+                    p_lower = p.lower()
+                    if p_lower.startswith("ip4:") or p_lower.startswith("+ip4:"):
+                        addr = p.split(":", 1)[1].split("/")[0]
+                        ips.setdefault(addr, []).append("SPF ip4")
+                    elif p_lower.startswith("ip6:") or p_lower.startswith("+ip6:"):
+                        addr = p.split(":", 1)[1].split("/")[0]
+                        ips.setdefault(addr, []).append("SPF ip6")
+        except Exception:
+            pass
+        return ips
+
+    def _discover_subdomain_ips(self, domain: str) -> dict:
+        ips = {}
+        if not REQUESTS_AVAILABLE:
+            return ips
+        try:
+            r = requests.get(
+                self.CRT_SH_URL.format(domain=domain),
+                timeout=15, headers={"User-Agent": USER_AGENT}
+            )
+            if r.status_code != 200:
+                return ips
+            entries = r.json()
+            seen = set()
+            subs = []
+            for entry in entries:
+                names = entry.get("name_value", "").split("\n")
+                for name in names:
+                    name = name.strip().lower().lstrip("*.")
+                    if name and name != domain and domain in name and name not in seen:
+                        seen.add(name)
+                        subs.append(name)
+                        if len(subs) >= self.MAX_SUBDOMAINS:
+                            break
+                if len(subs) >= self.MAX_SUBDOMAINS:
+                    break
+
+            def resolve_sub(sub):
+                results = {}
+                try:
+                    a = dns.resolver.resolve(sub, "A", lifetime=3)
+                    for rec in a:
+                        ip = str(rec)
+                        results.setdefault(ip, []).append(f"subdomain: {sub}")
+                except Exception:
+                    pass
+                return results
+
+            with ThreadPoolExecutor(max_workers=10) as ex:
+                futures = {ex.submit(resolve_sub, s): s for s in subs}
+                for f in as_completed(futures, timeout=30):
+                    try:
+                        sub_ips = f.result()
+                        for ip, sources in sub_ips.items():
+                            ips.setdefault(ip, []).extend(sources)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return ips
+
+    # ---- IP Enrichment -------------------------------------------------------
+
+    def _enrich_ips_geo(self, ip_list: list) -> dict:
+        """Batch query ip-api.com for geo/ASN info. Returns {ip: info_dict}."""
+        enriched = {}
+        if not REQUESTS_AVAILABLE or not ip_list:
+            return enriched
+        # ip-api.com batch supports up to 100 IPs
+        batch = [{"query": ip, "fields": "query,org,as,isp,country,city,hosting,reverse"}
+                 for ip in ip_list[:100]]
+        try:
+            r = requests.post(self.IP_API_BATCH, json=batch, timeout=10,
+                              headers={"User-Agent": USER_AGENT})
+            if r.status_code == 200:
+                for item in r.json():
+                    ip = item.get("query", "")
+                    enriched[ip] = {
+                        "org": item.get("org", ""),
+                        "asn": item.get("as", "").split()[0] if item.get("as") else "",
+                        "isp": item.get("isp", ""),
+                        "country": item.get("country", ""),
+                        "city": item.get("city", ""),
+                        "hosting": item.get("hosting", False),
+                        "reverse_dns": item.get("reverse", ""),
+                    }
+        except Exception:
+            pass
+        return enriched
+
+    # ---- Per-IP Vulnerability Scanning (reuse ShodanVulnChecker logic) -------
+
+    def _cvss_severity(self, score: float) -> str:
+        if score >= 9.0: return "critical"
+        if score >= 7.0: return "high"
+        if score >= 4.0: return "medium"
+        return "low"
+
+    def _fetch_cvss(self, cve_id: str) -> dict:
+        try:
+            r = requests.get(self.NVD_URL, params={"cveId": cve_id},
+                             headers={"User-Agent": USER_AGENT}, timeout=8)
+            if r.status_code != 200:
+                return {}
+            data = r.json()
+            vuln = data.get("vulnerabilities", [{}])[0].get("cve", {})
+            desc = next((d["value"] for d in vuln.get("descriptions", [])
+                         if d.get("lang") == "en"), "")
+            metrics = vuln.get("metrics", {})
+            for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                m = metrics.get(key)
+                if m:
+                    base = m[0].get("cvssData", {})
+                    score = base.get("baseScore", 0.0)
+                    return {
+                        "cve_id": cve_id, "description": desc[:200],
+                        "cvss_score": score, "severity": self._cvss_severity(score),
+                        "vector": base.get("vectorString", ""),
+                    }
+            return {"cve_id": cve_id, "description": desc[:200], "cvss_score": 0.0,
+                    "severity": "unknown", "vector": ""}
+        except Exception:
+            return {"cve_id": cve_id, "description": "", "cvss_score": 0.0,
+                    "severity": "unknown", "vector": ""}
+
+    def _fetch_epss_batch(self, cve_ids: list) -> dict:
+        if not cve_ids:
+            return {}
+        try:
+            r = requests.get(self.EPSS_URL, params={"cve": ",".join(cve_ids)},
+                             headers={"User-Agent": USER_AGENT}, timeout=10)
+            if r.status_code != 200:
+                return {}
+            data = r.json().get("data", [])
+            return {
+                item["cve"]: {
+                    "epss_score": float(item.get("epss", 0)),
+                    "epss_percentile": float(item.get("percentile", 0)),
+                }
+                for item in data
+            }
+        except Exception:
+            return {}
+
+    def _fetch_kev_set(self) -> dict:
+        try:
+            r = requests.get(self.KEV_URL, headers={"User-Agent": USER_AGENT}, timeout=12)
+            if r.status_code != 200:
+                return {}
+            vulns = r.json().get("vulnerabilities", [])
+            return {
+                v["cveID"]: {
+                    "kev_due_date": v.get("dueDate", ""),
+                    "kev_ransomware": v.get("knownRansomwareCampaignUse", "Unknown"),
+                }
+                for v in vulns if "cveID" in v
+            }
+        except Exception:
+            return {}
+
+    def _scan_ip_vulns(self, ip: str, kev_data: dict) -> dict:
+        """Query Shodan InternetDB for a single IP and enrich CVEs."""
+        vuln_result = {
+            "open_ports": [], "cve_count": 0, "cves": [],
+            "critical_count": 0, "high_count": 0, "medium_count": 0, "low_count": 0,
+            "max_cvss": 0.0, "max_epss": 0.0, "kev_count": 0,
+        }
+        try:
+            r = requests.get(self.INTERNETDB_URL.format(ip=ip),
+                             headers={"User-Agent": USER_AGENT}, timeout=8)
+            if r.status_code == 404:
+                return vuln_result
+            if r.status_code != 200:
+                return vuln_result
+            data = r.json()
+            vuln_result["open_ports"] = data.get("ports", [])
+            raw_cves = data.get("vulns", [])
+            vuln_result["cve_count"] = len(raw_cves)
+
+            # Enrich top 5 CVEs per IP (keep scan time reasonable)
+            enriched = []
+            for cve_id in raw_cves[:5]:
+                info = self._fetch_cvss(cve_id)
+                if info:
+                    enriched.append(info)
+                    sev = info.get("severity", "unknown")
+                    if sev == "critical":   vuln_result["critical_count"] += 1
+                    elif sev == "high":     vuln_result["high_count"] += 1
+                    elif sev == "medium":   vuln_result["medium_count"] += 1
+                    else:                   vuln_result["low_count"] += 1
+
+            # Count remaining CVEs conservatively
+            vuln_result["medium_count"] += max(0, len(raw_cves) - 5)
+
+            # EPSS enrichment
+            cve_ids = [c["cve_id"] for c in enriched if c.get("cve_id")]
+            epss_data = self._fetch_epss_batch(cve_ids)
+            for cve in enriched:
+                cid = cve.get("cve_id", "")
+                if cid in epss_data:
+                    cve["epss_score"] = epss_data[cid]["epss_score"]
+                    cve["epss_percentile"] = epss_data[cid]["epss_percentile"]
+                else:
+                    cve["epss_score"] = None
+                    cve["epss_percentile"] = None
+
+            # KEV enrichment
+            for cve in enriched:
+                cid = cve.get("cve_id", "")
+                if cid in kev_data:
+                    cve["kev_exploited"] = True
+                    cve["kev_due_date"] = kev_data[cid].get("kev_due_date", "")
+                    cve["kev_ransomware"] = kev_data[cid].get("kev_ransomware", "Unknown")
+                else:
+                    cve["kev_exploited"] = False
+                    cve["kev_due_date"] = None
+                    cve["kev_ransomware"] = None
+
+            vuln_result["cves"] = enriched
+
+            # Aggregate stats
+            cvss_scores = [c["cvss_score"] for c in enriched if c.get("cvss_score")]
+            epss_scores = [c["epss_score"] for c in enriched if c.get("epss_score") is not None]
+            vuln_result["max_cvss"] = round(max(cvss_scores), 1) if cvss_scores else 0.0
+            vuln_result["max_epss"] = round(max(epss_scores), 4) if epss_scores else 0.0
+            vuln_result["kev_count"] = sum(1 for c in enriched if c.get("kev_exploited"))
+
+        except Exception:
+            pass
+        return vuln_result
+
+    # ---- Main check ----------------------------------------------------------
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "total_unique_ips": 0,
+            "ipv4_count": 0,
+            "ipv6_count": 0,
+            "ip_addresses": [],
+            "aggregate_vulns": {
+                "total_cves": 0, "critical_count": 0, "high_count": 0,
+                "medium_count": 0, "max_cvss": 0.0, "max_epss": 0.0,
+                "kev_count": 0, "ips_with_vulns": 0,
+            },
+            "unique_asns": 0,
+            "unique_countries": 0,
+            "issues": [],
+            "score": 100,
+        }
+        try:
+            # --- Phase 1: Discover all IPs ---
+            all_ips = {}  # {ip: [list of sources]}
+
+            # Get primary domain IP to skip (already scanned by ShodanVulnChecker)
+            primary_ip = None
+            try:
+                primary_ip = socket.gethostbyname(domain)
+            except Exception:
+                pass
+
+            # Collect IPs from all sources
+            for discovery_fn in (
+                lambda: self._resolve_a(domain),
+                lambda: self._discover_mx_ips(domain),
+                lambda: self._discover_ns_ips(domain),
+                lambda: self._parse_spf_ips(domain),
+                lambda: self._discover_subdomain_ips(domain),
+            ):
+                try:
+                    found = discovery_fn()
+                    for ip, sources in found.items():
+                        all_ips.setdefault(ip, []).extend(sources)
+                except Exception:
+                    pass
+
+            # Deduplicate sources per IP
+            for ip in all_ips:
+                all_ips[ip] = list(dict.fromkeys(all_ips[ip]))
+
+            unique_ips = list(all_ips.keys())
+            result["total_unique_ips"] = len(unique_ips)
+            result["ipv4_count"] = sum(1 for ip in unique_ips if ":" not in ip)
+            result["ipv6_count"] = sum(1 for ip in unique_ips if ":" in ip)
+
+            # --- Phase 2: Geo/ASN enrichment ---
+            # Only enrich IPv4 (ip-api.com doesn't reliably handle IPv6)
+            ipv4_list = [ip for ip in unique_ips if ":" not in ip]
+            geo_data = self._enrich_ips_geo(ipv4_list)
+
+            # --- Phase 3: Per-IP vulnerability scanning ---
+            # Fetch KEV once for all IPs
+            kev_data = self._fetch_kev_set()
+
+            # Select IPs to scan (skip primary, cap at MAX_IPS_TO_SCAN)
+            ips_to_scan = [ip for ip in ipv4_list if ip != primary_ip][:self.MAX_IPS_TO_SCAN]
+
+            ip_vuln_results = {}
+            for ip in ips_to_scan:
+                ip_vuln_results[ip] = self._scan_ip_vulns(ip, kev_data)
+                time.sleep(0.3)  # rate-limit Shodan queries
+
+            # --- Phase 4: Build result objects ---
+            ip_entries = []
+            agg = result["aggregate_vulns"]
+            asns = set()
+            countries = set()
+            no_rdns_count = 0
+            residential_found = False
+
+            for ip in unique_ips:
+                geo = geo_data.get(ip, {})
+                vuln = ip_vuln_results.get(ip, {})
+
+                entry = {
+                    "ip": ip,
+                    "version": "ipv6" if ":" in ip else "ipv4",
+                    "sources": all_ips[ip],
+                    "reverse_dns": geo.get("reverse_dns", ""),
+                    "org": geo.get("org", ""),
+                    "asn": geo.get("asn", ""),
+                    "isp": geo.get("isp", ""),
+                    "country": geo.get("country", ""),
+                    "city": geo.get("city", ""),
+                    "hosting": geo.get("hosting", None),
+                    "is_primary": ip == primary_ip,
+                    "shodan": vuln if vuln else None,
+                }
+                ip_entries.append(entry)
+
+                if geo.get("asn"):
+                    asns.add(geo["asn"])
+                if geo.get("country"):
+                    countries.add(geo["country"])
+                if geo.get("hosting") is False and ":" not in ip:
+                    residential_found = True
+                if not geo.get("reverse_dns") and ":" not in ip:
+                    no_rdns_count += 1
+
+                # Aggregate vulnerability counts
+                if vuln:
+                    agg["total_cves"] += vuln.get("cve_count", 0)
+                    agg["critical_count"] += vuln.get("critical_count", 0)
+                    agg["high_count"] += vuln.get("high_count", 0)
+                    agg["medium_count"] += vuln.get("medium_count", 0)
+                    agg["kev_count"] += vuln.get("kev_count", 0)
+                    if vuln.get("max_cvss", 0) > agg["max_cvss"]:
+                        agg["max_cvss"] = vuln["max_cvss"]
+                    if vuln.get("max_epss", 0) > agg["max_epss"]:
+                        agg["max_epss"] = vuln["max_epss"]
+                    if vuln.get("cve_count", 0) > 0:
+                        agg["ips_with_vulns"] += 1
+
+            result["ip_addresses"] = ip_entries
+            result["unique_asns"] = len(asns)
+            result["unique_countries"] = len(countries)
+
+            # --- Phase 5: Risk scoring ---
+            penalty = 0
+            penalty += agg["critical_count"] * 25
+            penalty += agg["high_count"] * 10
+            penalty += agg["medium_count"] * 3
+            penalty += agg["kev_count"] * 25
+            # High EPSS across all IPs
+            high_epss = 0
+            for ip_entry in ip_entries:
+                vuln = ip_entry.get("shodan") or {}
+                for cve in vuln.get("cves", []):
+                    if (cve.get("epss_score") or 0) >= 0.1:
+                        high_epss += 1
+            penalty += high_epss * 10
+            if residential_found:
+                penalty += 10
+            penalty += min(15, no_rdns_count * 5)
+            if len(unique_ips) > 20:
+                penalty += 5
+
+            result["score"] = max(0, 100 - min(100, penalty))
+
+            # --- Phase 6: Build issues ---
+            if agg["critical_count"] > 0:
+                result["issues"].append(
+                    f"CRITICAL: {agg['critical_count']} critical CVE(s) found across external IPs — patch immediately"
+                )
+            if agg["high_count"] > 0:
+                result["issues"].append(
+                    f"{agg['high_count']} high-severity CVE(s) across external IPs — review urgently"
+                )
+            if agg["kev_count"] > 0:
+                result["issues"].append(
+                    f"CRITICAL: {agg['kev_count']} CVE(s) listed in CISA KEV across external IPs"
+                )
+            if high_epss > 0:
+                result["issues"].append(
+                    f"{high_epss} CVE(s) with EPSS ≥ 10% across external IPs"
+                )
+            if residential_found:
+                result["issues"].append(
+                    "Residential (non-hosting) IP detected — possible shadow IT or misconfiguration"
+                )
+            if no_rdns_count > 2:
+                result["issues"].append(
+                    f"{no_rdns_count} IP(s) without reverse DNS — poor infrastructure hygiene"
+                )
+            if len(unique_ips) > 20:
+                result["issues"].append(
+                    f"Large external IP footprint ({len(unique_ips)} IPs) — increased attack surface"
+                )
+
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 22. Dehashed Credential Leak Checker (optional API key)
 # ---------------------------------------------------------------------------
 
 class DehashedChecker:
@@ -1765,21 +2264,22 @@ class RiskScorer:
     All weights must sum to 100 when WAF bonus excluded.
     """
     WEIGHTS = {
-        "ssl":                  0.12,
+        "ssl":                  0.11,
         "email_security":       0.06,
         "email_hardening":      0.04,
         "breaches":             0.10,
         "http_headers":         0.05,
         "website_security":     0.05,
-        "exposed_admin":        0.11,
+        "exposed_admin":        0.10,
         "high_risk_protocols":  0.10,
-        "dnsbl":                0.08,
+        "dnsbl":                0.07,
         "tech_stack":           0.07,
         "payment_security":     0.04,
         "vpn_remote":           0.04,
         "subdomains":           0.04,
         "shodan_vulns":         0.08,
         "dehashed":             0.02,
+        "external_ips":         0.03,
     }
 
     RECOMMENDATIONS = {
@@ -1815,6 +2315,13 @@ class RiskScorer:
         "EPSS ≥ 10%": "Prioritise patching CVEs with high EPSS scores — these have a significant probability of exploitation within 30 days.",
         "credential record(s) found in Dehashed": "Notify affected users and enforce mandatory password reset for all leaked accounts.",
         "Plaintext or hashed passwords found": "Enforce immediate password reset and review authentication systems for all affected accounts.",
+        "critical CVE(s) found across external IPs": "Patch critical CVEs on all external-facing servers — not just the primary domain IP.",
+        "high-severity CVE(s) across external IPs": "Review and patch high-severity CVEs across your entire external IP footprint.",
+        "CVE(s) listed in CISA KEV across external IPs": "URGENT: Confirmed exploited vulnerabilities found on secondary IPs — patch within 48 hours.",
+        "EPSS ≥ 10% across external IPs": "Prioritise patching high-EPSS CVEs across all external IPs — high probability of near-term exploitation.",
+        "Residential (non-hosting) IP detected": "Investigate residential IPs in your infrastructure — may indicate shadow IT, misconfigured services, or compromised devices.",
+        "IP(s) without reverse DNS": "Configure reverse DNS (PTR records) for all external IPs — improves email deliverability and security posture.",
+        "Large external IP footprint": "Review and consolidate your external IP footprint — a large attack surface increases exposure to threats.",
     }
 
     def calculate(self, results: dict) -> tuple:
@@ -1874,6 +2381,9 @@ class RiskScorer:
         dehashed_total = dehashed.get("total_entries", 0)
         dehashed_risk = min(100, dehashed_total * 2) if dehashed.get("status") not in ("no_api_key", "auth_failed") else 0
 
+        # External IP discovery risk
+        ext_ip_risk = inv(results.get("external_ips", {}).get("score", 100))
+
         weighted = (
             ssl_risk         * self.WEIGHTS["ssl"] +
             email_risk       * self.WEIGHTS["email_security"] +
@@ -1889,7 +2399,8 @@ class RiskScorer:
             vpn_risk         * self.WEIGHTS["vpn_remote"] +
             sub_risk         * self.WEIGHTS["subdomains"] +
             shodan_risk      * self.WEIGHTS["shodan_vulns"] +
-            dehashed_risk    * self.WEIGHTS["dehashed"]
+            dehashed_risk    * self.WEIGHTS["dehashed"] +
+            ext_ip_risk      * self.WEIGHTS["external_ips"]
         )
 
         risk_score = round(weighted * 10)
@@ -1973,6 +2484,7 @@ class SecurityScanner:
             "website_security":    (WebsiteSecurityChecker().check,    domain),
             "payment_security":    (PaymentSecurityChecker().check,    domain),
             "shodan_vulns":        (ShodanVulnChecker().check,         domain),
+            "external_ips":        (ExternalIPDiscoveryChecker().check, domain),
             "dehashed":            (DehashedChecker().check,           domain),
         }
 

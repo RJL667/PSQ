@@ -454,6 +454,128 @@
       </div>
     </div>
 
+    <!-- External IP Discovery -->
+    {% set extip = results.categories.external_ips %}
+    {% set extip_agg = extip.aggregate_vulns or {} %}
+    {% set extip_tl = 'tl-crimson' if extip_agg.critical_count > 0 or extip_agg.kev_count > 0 else ('tl-red' if extip_agg.high_count > 0 else ('tl-amber' if extip_agg.total_cves > 0 else 'tl-green')) %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ extip_tl }}"></div><div class="cat-title">External IP Discovery</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">{{ extip.total_unique_ips | default(0) }} IPs found</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <!-- Summary stats -->
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+          <div class="mini-stat"><div class="stat-val">{{ extip.total_unique_ips | default(0) }}</div><div class="stat-lbl">Total IPs</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.ipv4_count | default(0) }}</div><div class="stat-lbl">IPv4</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.ipv6_count | default(0) }}</div><div class="stat-lbl">IPv6</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.unique_asns | default(0) }}</div><div class="stat-lbl">ASNs</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.unique_countries | default(0) }}</div><div class="stat-lbl">Countries</div></div>
+          {% if extip_agg.ips_with_vulns > 0 %}
+          <div class="mini-stat"><div class="stat-val color-red">{{ extip_agg.ips_with_vulns }}</div><div class="stat-lbl">IPs w/ CVEs</div></div>
+          {% endif %}
+          {% if extip_agg.kev_count > 0 %}
+          <div class="mini-stat"><div class="stat-val color-red">{{ extip_agg.kev_count }}</div><div class="stat-lbl">CISA KEV</div></div>
+          {% endif %}
+        </div>
+
+        <!-- Aggregate vulnerability summary -->
+        {% if extip_agg.total_cves > 0 %}
+        <div style="background:rgba(255,60,60,0.06);border:1px solid rgba(255,60,60,0.15);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+          <strong style="color:#e74c3c;">&#9888; Vulnerability Summary Across All IPs:</strong>
+          {{ extip_agg.total_cves }} total CVEs
+          {% if extip_agg.critical_count > 0 %} &bull; <span class="color-red">{{ extip_agg.critical_count }} Critical</span>{% endif %}
+          {% if extip_agg.high_count > 0 %} &bull; <span style="color:#e67e22;">{{ extip_agg.high_count }} High</span>{% endif %}
+          {% if extip_agg.max_cvss > 0 %} &bull; Max CVSS: {{ extip_agg.max_cvss }}{% endif %}
+          {% if extip_agg.max_epss > 0 %} &bull; Max EPSS: {{ "%.1f" | format(extip_agg.max_epss * 100) }}%{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- IP table -->
+        {% if extip.ip_addresses %}
+        <div style="overflow-x:auto;">
+          <table class="kv-table" style="width:100%;font-size:0.85rem;">
+            <thead>
+              <tr style="background:rgba(30,58,138,0.06);">
+                <th style="text-align:left;padding:8px;">IP Address</th>
+                <th style="text-align:left;padding:8px;">Source</th>
+                <th style="text-align:left;padding:8px;">Org / ASN</th>
+                <th style="text-align:left;padding:8px;">Country</th>
+                <th style="text-align:center;padding:8px;">Ports</th>
+                <th style="text-align:center;padding:8px;">CVEs</th>
+                <th style="text-align:center;padding:8px;">Worst CVSS</th>
+                <th style="text-align:center;padding:8px;">KEV</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ip_entry in extip.ip_addresses %}
+              {% set vuln = ip_entry.shodan or {} %}
+              {% set row_class = 'style="background:rgba(255,60,60,0.05);"' if vuln.get('critical_count', 0) > 0 or vuln.get('kev_count', 0) > 0 else '' %}
+              <tr {{ row_class }}>
+                <td style="padding:8px;font-family:monospace;white-space:nowrap;">
+                  {{ ip_entry.ip }}
+                  {% if ip_entry.is_primary %}<span class="badge badge-blue" style="font-size:0.65rem;margin-left:4px;">PRIMARY</span>{% endif %}
+                  {% if ip_entry.hosting == false %}<span class="badge badge-amber" style="font-size:0.65rem;margin-left:4px;">RESIDENTIAL</span>{% endif %}
+                </td>
+                <td style="padding:8px;font-size:0.8rem;">{{ ip_entry.sources | join(', ') | truncate(60) }}</td>
+                <td style="padding:8px;font-size:0.8rem;">{{ ip_entry.org | default('—') }}{% if ip_entry.asn %} <span style="color:#888;">({{ ip_entry.asn }})</span>{% endif %}</td>
+                <td style="padding:8px;">{{ ip_entry.country | default('—') }}</td>
+                <td style="padding:8px;text-align:center;">{% if vuln.get('open_ports') %}{{ vuln.open_ports | length }}{% else %}—{% endif %}</td>
+                <td style="padding:8px;text-align:center;">
+                  {% if vuln.get('cve_count', 0) > 0 %}
+                    <span class="{% if vuln.get('critical_count', 0) > 0 %}color-red{% elif vuln.get('high_count', 0) > 0 %}color-amber{% else %}color-green{% endif %}" style="font-weight:600;">{{ vuln.cve_count }}</span>
+                  {% else %}0{% endif %}
+                </td>
+                <td style="padding:8px;text-align:center;">
+                  {% if vuln.get('max_cvss', 0) > 0 %}
+                    <span class="{% if vuln.get('max_cvss', 0) >= 9.0 %}color-red{% elif vuln.get('max_cvss', 0) >= 7.0 %}color-amber{% else %}color-green{% endif %}" style="font-weight:600;">{{ vuln.max_cvss }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td style="padding:8px;text-align:center;">
+                  {% if vuln.get('kev_count', 0) > 0 %}<span class="badge badge-red" style="animation:pulse 2s infinite;">EXPLOITED</span>{% else %}—{% endif %}
+                </td>
+              </tr>
+              <!-- Expandable CVE details per IP -->
+              {% if vuln.get('cves') %}
+              <tr>
+                <td colspan="8" style="padding:0;">
+                  <details style="padding:4px 12px 8px;">
+                    <summary style="cursor:pointer;font-size:0.8rem;color:#1e3a8a;font-weight:600;">Show {{ vuln.get('cves', []) | length }} enriched CVE(s) for {{ ip_entry.ip }}</summary>
+                    <table style="width:100%;font-size:0.78rem;margin-top:6px;border-collapse:collapse;">
+                      <tr style="background:rgba(30,58,138,0.04);"><th style="text-align:left;padding:4px;">CVE</th><th style="padding:4px;">CVSS</th><th style="padding:4px;">EPSS</th><th style="padding:4px;">KEV</th><th style="text-align:left;padding:4px;">Description</th></tr>
+                      {% for cve in vuln.get('cves', []) %}
+                      <tr style="border-bottom:1px solid #eee;">
+                        <td style="padding:4px;font-family:monospace;white-space:nowrap;">{{ cve.cve_id }}</td>
+                        <td style="padding:4px;text-align:center;">
+                          <span class="{% if cve.cvss_score >= 9.0 %}color-red{% elif cve.cvss_score >= 7.0 %}color-amber{% elif cve.cvss_score >= 4.0 %}color-green{% else %}{% endif %}" style="font-weight:600;">{{ cve.cvss_score }}</span>
+                          <span style="font-size:0.7rem;color:#888;">({{ cve.severity }})</span>
+                        </td>
+                        <td style="padding:4px;text-align:center;">
+                          {% if cve.epss_score is not none %}
+                            <span style="font-weight:600;color:{% if cve.epss_score >= 0.5 %}#e74c3c{% elif cve.epss_score >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.1f" | format(cve.epss_score * 100) }}%</span>
+                          {% else %}—{% endif %}
+                        </td>
+                        <td style="padding:4px;text-align:center;">{% if cve.kev_exploited %}<span class="badge badge-red" style="font-size:0.65rem;">KEV</span>{% else %}—{% endif %}</td>
+                        <td style="padding:4px;font-size:0.75rem;">{{ cve.description | default('') | truncate(120) }}</td>
+                      </tr>
+                      {% endfor %}
+                    </table>
+                  </details>
+                </td>
+              </tr>
+              {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p style="color:#888;font-style:italic;">No external IPs discovered.</p>
+        {% endif %}
+
+        {% if extip.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in extip.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+    </div>
+
   </div>
 
   <!-- =================== EXPOSURE & REPUTATION =================== -->

@@ -563,6 +563,59 @@ def cat_shodan(d, S):
     return build_cat_card("CVE / Known Vulnerabilities", col, summary, rows, sv.get("issues", []), S)
 
 
+def cat_external_ips(d, S):
+    ext = d.get("external_ips", {})
+    agg = ext.get("aggregate_vulns", {})
+    total_ips = ext.get("total_unique_ips", 0)
+    crit = agg.get("critical_count", 0)
+    high = agg.get("high_count", 0)
+    kev = agg.get("kev_count", 0)
+    col = C_CRITICAL if crit > 0 or kev > 0 else (C_RED if high > 0 else (C_AMBER if agg.get("total_cves", 0) > 0 else C_GREEN))
+    summary = f"{total_ips} IPs found"
+
+    rows = [
+        ("Total unique IPs",  total_ips),
+        ("IPv4 / IPv6",       f"{ext.get('ipv4_count', 0)} / {ext.get('ipv6_count', 0)}"),
+        ("Unique ASNs",       ext.get("unique_asns", 0)),
+        ("Unique countries",  ext.get("unique_countries", 0)),
+    ]
+    if agg.get("total_cves", 0) > 0:
+        rows.append(("Total CVEs across IPs", agg["total_cves"]))
+        rows.append(("Severity breakdown",    f"Critical: {crit}  |  High: {high}  |  Medium: {agg.get('medium_count', 0)}"))
+        rows.append(("IPs with CVEs",         agg.get("ips_with_vulns", 0)))
+    if agg.get("max_cvss", 0) > 0:
+        rows.append(("Max CVSS",              agg["max_cvss"]))
+    if agg.get("max_epss", 0) > 0:
+        rows.append(("Max EPSS",              f"{agg['max_epss'] * 100:.1f}%"))
+    if kev > 0:
+        rows.append(("CISA KEV",              f"{kev} CVE(s) confirmed actively exploited"))
+
+    # Per-IP details (top 10)
+    for ip_entry in ext.get("ip_addresses", [])[:10]:
+        ip = ip_entry.get("ip", "")
+        org = ip_entry.get("org", "")
+        country = ip_entry.get("country", "")
+        vuln = ip_entry.get("shodan") or {}
+        cve_count = vuln.get("cve_count", 0)
+        label_parts = []
+        if org:
+            label_parts.append(org)
+        if country:
+            label_parts.append(country)
+        if vuln.get("open_ports"):
+            label_parts.append(f"Ports: {', '.join(str(p) for p in vuln['open_ports'][:6])}")
+        if cve_count > 0:
+            label_parts.append(f"{cve_count} CVE(s)")
+        if vuln.get("max_cvss", 0) > 0:
+            label_parts.append(f"CVSS {vuln['max_cvss']}")
+        if vuln.get("kev_count", 0) > 0:
+            label_parts.append("KEV: EXPLOITED")
+        sources = ", ".join(ip_entry.get("sources", []))[:50]
+        rows.append((f"{ip} ({sources})", "  |  ".join(label_parts) if label_parts else "No data"))
+
+    return build_cat_card("External IP Discovery", col, summary, rows, ext.get("issues", []), S)
+
+
 def cat_dehashed(d, S):
     dh     = d.get("dehashed", {})
     status = dh.get("status", "completed")
@@ -637,6 +690,9 @@ def build_summary_table(results: dict, S) -> Table:
             C_GREEN if waf else C_AMBER),
         row("RDP Exposed",           "YES — CRITICAL" if vpn_rdp else "No",
             C_CRITICAL if vpn_rdp else C_GREEN),
+        row("External IPs",          f"{cats.get('external_ips', {}).get('total_unique_ips', 0)} IPs ({cats.get('external_ips', {}).get('aggregate_vulns', {}).get('ips_with_vulns', 0)} with CVEs)",
+            _tl(cats.get("external_ips", {}).get("aggregate_vulns", {}).get("critical_count", 0) == 0,
+                cats.get("external_ips", {}).get("aggregate_vulns", {}).get("high_count", 0) == 0)),
     ]
 
     tbl = Table(rows, colWidths=[14, 70 * mm, INNER_W - 14 - 70 * mm])
@@ -750,6 +806,7 @@ def generate_pdf(results: dict) -> bytes:
     story += cat_hrp(cats, S)
     story += cat_cloud(cats, S)
     story += cat_vpn(cats, S)
+    story += cat_external_ips(cats, S)
 
     # ── Exposure & Reputation ────────────────────────────────────────────────
     story += section_header("EXPOSURE & REPUTATION", S)
