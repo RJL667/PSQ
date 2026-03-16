@@ -1453,10 +1453,13 @@ class PaymentSecurityChecker:
 class ShodanVulnChecker:
     """
     Queries Shodan's free InternetDB for CVEs associated with the domain's IP.
-    Enriches top CVEs with CVSS scores from the NVD API (also free, no key).
+    Enriches top CVEs with CVSS scores from NVD, EPSS from FIRST.org, and
+    checks against the CISA KEV (Known Exploited Vulnerabilities) catalog.
     """
     INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
     NVD_URL        = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    EPSS_URL       = "https://api.first.org/data/v1/epss"
+    KEV_URL        = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 
     def _cvss_severity(self, score: float) -> str:
         if score >= 9.0: return "critical"
@@ -1492,6 +1495,45 @@ class ShodanVulnChecker:
         except Exception:
             return {"cve_id": cve_id, "description": "", "cvss_score": 0.0, "severity": "unknown", "vector": ""}
 
+    def _fetch_epss_batch(self, cve_ids: list) -> dict:
+        """Batch-query FIRST.org EPSS API. Returns {cve_id: {epss, percentile}}."""
+        if not cve_ids:
+            return {}
+        try:
+            r = requests.get(self.EPSS_URL,
+                             params={"cve": ",".join(cve_ids)},
+                             headers={"User-Agent": USER_AGENT}, timeout=10)
+            if r.status_code != 200:
+                return {}
+            data = r.json().get("data", [])
+            return {
+                item["cve"]: {
+                    "epss_score": float(item.get("epss", 0)),
+                    "epss_percentile": float(item.get("percentile", 0)),
+                }
+                for item in data
+            }
+        except Exception:
+            return {}
+
+    def _fetch_kev_set(self) -> dict:
+        """Fetch CISA KEV catalog. Returns {cve_id: {due_date, ...}}."""
+        try:
+            r = requests.get(self.KEV_URL,
+                             headers={"User-Agent": USER_AGENT}, timeout=12)
+            if r.status_code != 200:
+                return {}
+            vulns = r.json().get("vulnerabilities", [])
+            return {
+                v["cveID"]: {
+                    "kev_due_date": v.get("dueDate", ""),
+                    "kev_ransomware": v.get("knownRansomwareCampaignUse", "Unknown"),
+                }
+                for v in vulns if "cveID" in v
+            }
+        except Exception:
+            return {}
+
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed",
@@ -1504,6 +1546,10 @@ class ShodanVulnChecker:
             "high_count": 0,
             "medium_count": 0,
             "low_count": 0,
+            "max_epss": 0.0,
+            "avg_epss": 0.0,
+            "high_epss_count": 0,
+            "kev_count": 0,
             "score": 100,
             "issues": [],
         }
@@ -1543,6 +1589,38 @@ class ShodanVulnChecker:
             for cve_id in raw_cves[10:]:
                 result["medium_count"] += 1  # conservative estimate
 
+            # --- EPSS enrichment (batch query all CVE IDs) ---
+            all_cve_ids = [c.get("cve_id") for c in enriched if c.get("cve_id")]
+            epss_data = self._fetch_epss_batch(all_cve_ids)
+            for cve in enriched:
+                cve_id = cve.get("cve_id", "")
+                if cve_id in epss_data:
+                    cve["epss_score"] = epss_data[cve_id]["epss_score"]
+                    cve["epss_percentile"] = epss_data[cve_id]["epss_percentile"]
+                else:
+                    cve["epss_score"] = None
+                    cve["epss_percentile"] = None
+
+            # --- CISA KEV enrichment ---
+            kev_data = self._fetch_kev_set()
+            for cve in enriched:
+                cve_id = cve.get("cve_id", "")
+                if cve_id in kev_data:
+                    cve["kev_exploited"] = True
+                    cve["kev_due_date"] = kev_data[cve_id].get("kev_due_date", "")
+                    cve["kev_ransomware"] = kev_data[cve_id].get("kev_ransomware", "Unknown")
+                else:
+                    cve["kev_exploited"] = False
+                    cve["kev_due_date"] = None
+                    cve["kev_ransomware"] = None
+
+            # --- Aggregate EPSS / KEV stats ---
+            epss_scores = [c["epss_score"] for c in enriched if c.get("epss_score") is not None]
+            result["max_epss"] = round(max(epss_scores), 4) if epss_scores else 0.0
+            result["avg_epss"] = round(sum(epss_scores) / len(epss_scores), 4) if epss_scores else 0.0
+            result["high_epss_count"] = sum(1 for s in epss_scores if s >= 0.1)
+            result["kev_count"] = sum(1 for c in enriched if c.get("kev_exploited"))
+
             result["cves"] = enriched
 
             # Build issues
@@ -1558,11 +1636,23 @@ class ShodanVulnChecker:
                 result["issues"].append(
                     f"{result['medium_count']} medium-severity CVE(s) detected — schedule patching"
                 )
+            if result["kev_count"] > 0:
+                result["issues"].append(
+                    f"CRITICAL: {result['kev_count']} CVE(s) listed in CISA KEV — confirmed actively exploited in the wild"
+                )
+            if result["high_epss_count"] > 0:
+                result["issues"].append(
+                    f"{result['high_epss_count']} CVE(s) with EPSS ≥ 10% — high probability of near-term exploitation"
+                )
 
-            # Score: 100 minus penalty per severity
+            # Score: 100 minus penalty per severity + EPSS/KEV penalties
             penalty = (result["critical_count"] * 30 +
                        result["high_count"] * 15 +
                        result["medium_count"] * 5)
+            # Extra penalty for KEV-listed CVEs (confirmed exploitation)
+            penalty += result["kev_count"] * 25
+            # Extra penalty for high-EPSS CVEs (likely to be exploited)
+            penalty += result["high_epss_count"] * 10
             result["score"] = max(0, 100 - min(100, penalty))
 
         except Exception as e:
@@ -1721,6 +1811,8 @@ class RiskScorer:
         "critical CVE(s) found": "Patch critical CVEs on your public-facing servers immediately — attackers actively exploit these.",
         "high-severity CVE(s) detected": "Review and patch high-severity CVEs — schedule remediation within 30 days.",
         "medium-severity CVE(s) detected": "Review medium-severity CVEs and schedule patching within 90 days.",
+        "listed in CISA KEV": "URGENT: Vulnerabilities confirmed exploited in the wild (CISA KEV). Patch these within 48 hours — attackers are actively targeting them.",
+        "EPSS ≥ 10%": "Prioritise patching CVEs with high EPSS scores — these have a significant probability of exploitation within 30 days.",
         "credential record(s) found in Dehashed": "Notify affected users and enforce mandatory password reset for all leaked accounts.",
         "Plaintext or hashed passwords found": "Enforce immediate password reset and review authentication systems for all affected accounts.",
     }

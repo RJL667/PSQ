@@ -533,17 +533,34 @@ def cat_shodan(d, S):
     if sv.get("tags"):
         rows.append(("Tags", ", ".join(sv["tags"])))
 
-    # Detailed CVE rows with severity + CVSS + description
+    # EPSS / KEV aggregate stats
+    kev_count = sv.get("kev_count", 0)
+    max_epss = sv.get("max_epss", 0)
+    high_epss = sv.get("high_epss_count", 0)
+    if kev_count > 0:
+        rows.append(("CISA KEV", f"{kev_count} CVE(s) confirmed actively exploited"))
+    if max_epss > 0:
+        rows.append(("Max EPSS", f"{max_epss * 100:.1f}% probability of exploitation (30-day)"))
+    if high_epss > 0:
+        rows.append(("High EPSS (≥10%)", f"{high_epss} CVE(s) with significant exploitation probability"))
+
+    # Detailed CVE rows with severity + CVSS + EPSS + KEV
     for cve in sv.get("cves", [])[:8]:
         sev = cve.get("severity", "unknown").upper()
         cvss = cve.get("cvss_score", 0)
-        desc = cve.get("description", "")[:120]
+        desc = cve.get("description", "")[:100]
+        epss = cve.get("epss_score")
+        kev = cve.get("kev_exploited", False)
         label = f"{sev}  |  CVSS {cvss}"
+        if epss is not None:
+            label += f"  |  EPSS {epss * 100:.1f}%"
+        if kev:
+            label += "  |  KEV: EXPLOITED"
         if desc:
             label += f"  —  {desc}"
         rows.append((cve.get("cve_id", ""), label))
 
-    return build_cat_card("CVE / Known Vulnerabilities (Shodan)", col, summary, rows, sv.get("issues", []), S)
+    return build_cat_card("CVE / Known Vulnerabilities", col, summary, rows, sv.get("issues", []), S)
 
 
 def cat_dehashed(d, S):

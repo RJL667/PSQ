@@ -577,6 +577,8 @@
           {% if sv.high_count > 0 %}<span><span class="badge badge-red">High {{ sv.high_count }}</span></span>{% endif %}
           {% if sv.medium_count > 0 %}<span><span class="badge badge-amber">Medium {{ sv.medium_count }}</span></span>{% endif %}
           {% if sv.low_count > 0 %}<span><span class="badge badge-green">Low {{ sv.low_count }}</span></span>{% endif %}
+          {% if sv.kev_count is defined and sv.kev_count > 0 %}<span><span class="badge badge-red" style="background:#dc2626;animation:pulse 2s infinite;">⚡ {{ sv.kev_count }} in CISA KEV</span></span>{% endif %}
+          {% if sv.max_epss is defined and sv.max_epss > 0 %}<span><span class="badge {% if sv.max_epss >= 0.5 %}badge-red{% elif sv.max_epss >= 0.1 %}badge-amber{% else %}badge-green{% endif %}">Max EPSS: {{ (sv.max_epss * 100) | round(1) }}%</span></span>{% endif %}
           {% if sv.tags %}<span style="color:var(--muted);">Tags: {{ sv.tags | join(', ') }}</span>{% endif %}
         </div>
         {% if sv.cves %}
@@ -588,7 +590,8 @@
               <th style="width:80px;">Severity</th>
               <th>Name</th>
               <th style="width:60px;">CVSS</th>
-              <th style="width:60px;">Status</th>
+              <th style="width:70px;">EPSS</th>
+              <th style="width:60px;">KEV</th>
             </tr>
           </thead>
           <tbody>
@@ -606,11 +609,24 @@
                 {% if cve.description %}<div style="color:var(--muted);font-size:.74rem;margin-top:2px;">{{ cve.description }}</div>{% endif %}
               </td>
               <td><span class="badge {% if cve.cvss_score >= 7.0 %}badge-red{% elif cve.cvss_score >= 4.0 %}badge-amber{% else %}badge-green{% endif %}">{{ cve.cvss_score }}</span></td>
-              <td><span style="color:var(--medium);font-weight:500;">Active</span></td>
+              <td>
+                {% if cve.epss_score is not none %}
+                <span class="badge {% if cve.epss_score >= 0.5 %}badge-red{% elif cve.epss_score >= 0.1 %}badge-amber{% else %}badge-green{% endif %}">{{ (cve.epss_score * 100) | round(1) }}%</span>
+                {% else %}
+                <span style="color:var(--muted);">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if cve.kev_exploited %}<span class="badge badge-red" style="background:#dc2626;font-size:.68rem;">EXPLOITED</span>
+                {% else %}<span style="color:var(--muted);">—</span>{% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
+        <p style="color:var(--muted);font-size:.72rem;margin-top:8px;">
+          <b>CVSS</b> = severity impact (0-10) &nbsp;|&nbsp; <b>EPSS</b> = probability of exploitation within 30 days (FIRST.org) &nbsp;|&nbsp; <b>KEV</b> = CISA Known Exploited Vulnerabilities catalog
+        </p>
         {% elif sv_total == 0 %}
         <p style="color:var(--green);font-size:.84rem;">No known CVEs detected for this IP.</p>
         {% endif %}
