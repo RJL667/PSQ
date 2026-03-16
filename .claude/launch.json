@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "http-server",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "security-scanner",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["security_scanner/app.py"],
+      "port": 5001
+    }
+  ]
+}

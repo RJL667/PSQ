@@ -1,0 +1,11 @@
+# Core HTTP + DNS + crypto
+requests>=2.31.0
+dnspython>=2.4.2
+cryptography>=41.0.0
+
+# Flask API
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Optional: richer TLS fingerprinting (not required at runtime)
+# python-nmap>=0.7.1   # requires nmap binary: apt install nmap / brew install nmap

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security Report — {{ domain }}</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #222636;
+      --border: #2e3347;
+      --text: #e2e8f0;
+      --muted: #7c85a2;
+      --low: #22c55e;
+      --medium: #f59e0b;
+      --high: #f97316;
+      --critical: #ef4444;
+      --blue: #3b82f6;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 15px; line-height: 1.6; }
+    a { color: var(--blue); text-decoration: none; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+
+    /* Header */
+    .header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .logo { font-size: 1.1rem; font-weight: 700; color: var(--blue); letter-spacing: -0.5px; }
+    .domain-badge { background: var(--surface2); border: 1px solid var(--border); padding: 6px 14px; border-radius: 999px; font-size: 0.9rem; font-weight: 600; }
+    .timestamp { color: var(--muted); font-size: 0.82rem; }
+
+    /* Pending state */
+    .pending-card { text-align: center; padding: 60px 20px; }
+    .spinner { width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Hero row */
+    .hero { display: grid; grid-template-columns: 260px 1fr; gap: 20px; margin-bottom: 24px; }
+    @media (max-width: 700px) { .hero { grid-template-columns: 1fr; } }
+
+    /* Risk gauge */
+    .gauge-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .gauge-wrap { position: relative; width: 200px; height: 110px; }
+    .gauge-wrap svg { width: 200px; height: 110px; }
+    .gauge-label { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); text-align: center; }
+    .gauge-score { font-size: 2.4rem; font-weight: 800; line-height: 1; }
+    .gauge-max { font-size: 0.8rem; color: var(--muted); }
+    .risk-pill { padding: 6px 20px; border-radius: 999px; font-weight: 700; font-size: 1rem; }
+    .risk-Low    { background: #14532d; color: var(--low); }
+    .risk-Medium { background: #78350f; color: var(--medium); }
+    .risk-High   { background: #7c2d12; color: var(--high); }
+    .risk-Critical { background: #7f1d1d; color: var(--critical); }
+
+    /* Summary stats */
+    .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 500px) { .summary-card { grid-template-columns: 1fr 1fr; } }
+    .stat { text-align: center; }
+    .stat-val { font-size: 1.8rem; font-weight: 800; }
+    .stat-lbl { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+    .color-red { color: var(--critical); }
+    .color-amber { color: var(--medium); }
+    .color-green { color: var(--low); }
+
+    /* Category grid */
+    .categories { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .cat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .cat-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; cursor: pointer; user-select: none; transition: background 0.15s; }
+    .cat-header:hover { background: var(--surface2); }
+    .cat-left { display: flex; align-items: center; gap: 12px; }
+    .traffic-light { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+    .tl-green  { background: var(--low);      box-shadow: 0 0 8px var(--low); }
+    .tl-amber  { background: var(--medium);   box-shadow: 0 0 8px var(--medium); }
+    .tl-red    { background: var(--high);     box-shadow: 0 0 8px var(--high); }
+    .tl-crimson{ background: var(--critical); box-shadow: 0 0 8px var(--critical); }
+    .cat-title { font-weight: 600; font-size: 0.95rem; }
+    .cat-grade { font-weight: 700; font-size: 1.1rem; }
+    .chevron { color: var(--muted); font-size: 0.8rem; transition: transform 0.2s; }
+    .cat-body { display: none; padding: 0 18px 16px; border-top: 1px solid var(--border); }
+    .cat-body.open { display: block; }
+    .chevron.open { transform: rotate(180deg); }
+
+    /* Issue list */
+    .issue-list { list-style: none; margin-top: 12px; }
+    .issue-item { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+    .issue-item:last-child { border-bottom: none; }
+    .issue-icon { flex-shrink: 0; margin-top: 2px; }
+    .issue-ok { color: var(--low); }
+    .issue-warn { color: var(--medium); }
+    .issue-err  { color: var(--critical); }
+
+    /* Key-value table */
+    .kv-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+    .kv-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .kv-table td:first-child { color: var(--muted); white-space: nowrap; width: 40%; }
+    .kv-table tr:last-child td { border-bottom: none; }
+
+    /* Pill badges */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; }
+    .badge-green  { background: #14532d; color: var(--low); }
+    .badge-red    { background: #7f1d1d; color: var(--critical); }
+    .badge-amber  { background: #78350f; color: var(--medium); }
+    .badge-grey   { background: var(--border); color: var(--muted); }
+
+    /* Port list */
+    .port-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .port-chip { padding: 3px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; }
+    .port-high   { background: #7f1d1d; color: var(--critical); }
+    .port-medium { background: #78350f; color: var(--medium); }
+    .port-info   { background: var(--surface2); color: var(--muted); }
+
+    /* Recommendations */
+    .rec-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 24px; }
+    .rec-title { font-size: 1rem; font-weight: 700; margin-bottom: 14px; }
+    .rec-list { list-style: none; }
+    .rec-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+    .rec-item:last-child { border-bottom: none; }
+    .rec-num { flex-shrink: 0; width: 24px; height: 24px; background: var(--blue); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; margin-top: 1px; }
+
+    /* Footer */
+    .footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 20px 0; border-top: 1px solid var(--border); margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">&#128737; CyberRisk Assessment</div>
+    <div class="domain-badge">{{ domain }}</div>
+    {% if results %}
+    <div class="timestamp">Scanned {{ results.scan_timestamp[:19].replace('T',' ') }} UTC</div>
+    {% endif %}
+  </div>
+
+  {% if status == 'pending' %}
+  <!-- Pending State -->
+  <div class="pending-card">
+    <div class="spinner"></div>
+    <h2 style="margin-bottom:8px;">Scan in progress…</h2>
+    <p style="color:var(--muted);margin-bottom:20px;">Running passive checks on <strong>{{ domain }}</strong></p>
+    <p style="color:var(--muted);font-size:0.85rem;">This page refreshes automatically every 5 seconds.</p>
+  </div>
+  <script>
+    setTimeout(() => location.reload(), 5000);
+  </script>
+
+  {% elif status == 'failed' %}
+  <div class="pending-card">
+    <p style="font-size:2rem;margin-bottom:12px;">&#10060;</p>
+    <h2>Scan failed</h2>
+    <p style="color:var(--muted);margin-top:8px;">Unable to complete the security assessment for <strong>{{ domain }}</strong>.</p>
+  </div>
+
+  {% elif results %}
+  <!-- ================================================================ -->
+  <!-- RESULTS                                                           -->
+  <!-- ================================================================ -->
+  <script>var RESULTS = {{ results_json | safe }};</script>
+
+  <!-- Hero row: gauge + summary -->
+  <div class="hero">
+    <!-- Gauge -->
+    <div class="gauge-card">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 200 110" fill="none" xmlns="http://www.w3.org/2000/svg" id="gauge-svg">
+          <!-- Track -->
+          <path d="M 20 100 A 80 80 0 0 1 180 100" stroke="#2e3347" stroke-width="16" stroke-linecap="round"/>
+          <!-- Coloured arc filled by score -->
+          <path id="gauge-arc" d="M 20 100 A 80 80 0 0 1 180 100" stroke="#ef4444" stroke-width="16" stroke-linecap="round"
+                stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+          <!-- Needle -->
+          <line id="gauge-needle" x1="100" y1="100" x2="100" y2="28" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="100" cy="100" r="5" fill="white"/>
+        </svg>
+        <div class="gauge-label">
+          <div class="gauge-score" id="gauge-score">{{ results.overall_risk_score }}</div>
+          <div class="gauge-max">/ 1000</div>
+        </div>
+      </div>
+      <span class="risk-pill risk-{{ results.risk_level }}">{{ results.risk_level }} Risk</span>
+    </div>
+
+    <!-- Summary stats -->
+    <div class="summary-card">
+      {% set cats = results.categories %}
+
+      <!-- SSL -->
+      <div class="stat">
+        <div class="stat-val {% if cats.ssl.grade == 'F' or cats.ssl.grade == 'D' %}color-red{% elif cats.ssl.grade in ['A+','A','B'] %}color-green{% else %}color-amber{% endif %}">
+          {{ cats.ssl.grade | default('?') }}
+        </div>
+        <div class="stat-lbl">SSL Grade</div>
+      </div>
+
+      <!-- Email score -->
+      <div class="stat">
+        <div class="stat-val {% if cats.email_security.score <= 4 %}color-red{% elif cats.email_security.score >= 8 %}color-green{% else %}color-amber{% endif %}">
+          {{ cats.email_security.score | default(0) }}<span style="font-size:1rem">/10</span>
+        </div>
+        <div class="stat-lbl">Email Security</div>
+      </div>
+
+      <!-- Breaches -->
+      <div class="stat">
+        <div class="stat-val {% if cats.breaches.breach_count > 5 %}color-red{% elif cats.breaches.breach_count > 0 %}color-amber{% else %}color-green{% endif %}">
+          {{ cats.breaches.breach_count | default(0) }}
+        </div>
+        <div class="stat-lbl">Known Breaches</div>
+      </div>
+
+      <!-- Open ports -->
+      {% set port_count = cats.dns_infrastructure.open_ports | length %}
+      <div class="stat">
+        <div class="stat-val {% if port_count > 5 %}color-red{% elif port_count > 2 %}color-amber{% else %}color-green{% endif %}">
+          {{ port_count }}
+        </div>
+        <div class="stat-lbl">Open Ports</div>
+      </div>
+
+      <!-- Header score -->
+      <div class="stat">
+        <div class="stat-val {% if cats.http_headers.score < 40 %}color-red{% elif cats.http_headers.score >= 80 %}color-green{% else %}color-amber{% endif %}">
+          {{ cats.http_headers.score | default(0) }}%
+        </div>
+        <div class="stat-lbl">Headers Score</div>
+      </div>
+
+      <!-- Overall -->
+      <div class="stat">
+        <div class="stat-val {% if results.overall_risk_score >= 600 %}color-red{% elif results.overall_risk_score >= 200 %}color-amber{% else %}color-green{% endif %}">
+          {{ results.overall_risk_score }}
+        </div>
+        <div class="stat-lbl">Risk Score</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category cards -->
+  <div class="categories">
+
+    <!-- 1. SSL/TLS -->
+    {% set ssl = results.categories.ssl %}
+    {% set ssl_tl = 'tl-green' if ssl.grade in ['A+','A','B'] else ('tl-amber' if ssl.grade == 'C' else 'tl-red') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left">
+          <div class="traffic-light {{ ssl_tl }}"></div>
+          <div class="cat-title">SSL / TLS</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="cat-grade">{{ ssl.grade }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          {% if ssl.certificate %}
+          <tr><td>Subject</td><td>{{ ssl.certificate.subject | default('—') }}</td></tr>
+          <tr><td>Issuer</td><td>{{ ssl.certificate.issuer | default('—') }}</td></tr>
+          <tr><td>Expires</td><td>
+            {{ ssl.certificate.expiry_date | default('—') }}
+            {% if ssl.certificate.is_expired %}<span class="badge badge-red">EXPIRED</span>{% elif ssl.certificate.expiring_soon %}<span class="badge badge-amber">Soon</span>{% endif %}
+          </td></tr>
+          <tr><td>Days left</td><td>{{ ssl.certificate.days_until_expiry | default('—') }}</td></tr>
+          {% endif %}
+          <tr><td>TLS 1.0</td><td>{% if ssl.tls_versions and ssl.tls_versions['TLS 1.0'] %}<span class="badge badge-red">Enabled &#9888;</span>{% else %}<span class="badge badge-green">Disabled</span>{% endif %}</td></tr>
+          <tr><td>TLS 1.1</td><td>{% if ssl.tls_versions and ssl.tls_versions['TLS 1.1'] %}<span class="badge badge-amber">Enabled</span>{% else %}<span class="badge badge-green">Disabled</span>{% endif %}</td></tr>
+          <tr><td>TLS 1.2</td><td>{% if ssl.tls_versions and ssl.tls_versions['TLS 1.2'] %}<span class="badge badge-green">Enabled</span>{% else %}<span class="badge badge-grey">Not detected</span>{% endif %}</td></tr>
+          <tr><td>TLS 1.3</td><td>{% if ssl.tls_versions and ssl.tls_versions['TLS 1.3'] %}<span class="badge badge-green">Enabled</span>{% else %}<span class="badge badge-grey">Not detected</span>{% endif %}</td></tr>
+          <tr><td>Cipher</td><td>
+            {% if ssl.cipher_suite %}
+              {{ ssl.cipher_suite.name | default('Unknown') }}
+              {% if ssl.cipher_suite.is_weak %}<span class="badge badge-red">Weak</span>{% else %}<span class="badge badge-green">Strong</span>{% endif %}
+            {% else %}—{% endif %}
+          </td></tr>
+          <tr><td>HSTS</td><td>{% if ssl.hsts %}<span class="badge badge-green">Present</span>{% else %}<span class="badge badge-red">Missing</span>{% endif %}</td></tr>
+        </table>
+        {% if ssl.issues %}
+        <ul class="issue-list" style="margin-top:10px;">
+          {% for issue in ssl.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ issue }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 2. Email Security -->
+    {% set em = results.categories.email_security %}
+    {% set em_tl = 'tl-green' if em.score >= 8 else ('tl-amber' if em.score >= 5 else 'tl-red') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left">
+          <div class="traffic-light {{ em_tl }}"></div>
+          <div class="cat-title">Email Security</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="cat-grade">{{ em.score | default(0) }}/10</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>SPF</td><td>
+            {% if em.spf and em.spf.present %}<span class="badge badge-green">Present</span> {% if not em.spf.valid %}<span class="badge badge-amber">Check validity</span>{% endif %}
+            {% else %}<span class="badge badge-red">Missing</span>{% endif %}
+          </td></tr>
+          {% if em.spf and em.spf.record %}<tr><td>SPF record</td><td style="word-break:break-all;font-size:0.8rem;">{{ em.spf.record }}</td></tr>{% endif %}
+          <tr><td>DMARC</td><td>
+            {% if em.dmarc and em.dmarc.present %}
+              <span class="badge badge-green">Present</span>
+              {% if em.dmarc.policy == 'reject' %}<span class="badge badge-green">reject</span>
+              {% elif em.dmarc.policy == 'quarantine' %}<span class="badge badge-amber">quarantine</span>
+              {% else %}<span class="badge badge-red">none</span>{% endif %}
+            {% else %}<span class="badge badge-red">Missing</span>{% endif %}
+          </td></tr>
+          <tr><td>DKIM</td><td>
+            {% if em.dkim and em.dkim.selectors_found %}
+              <span class="badge badge-green">Found</span> {{ em.dkim.selectors_found | join(', ') }}
+            {% else %}<span class="badge badge-amber">Not found</span>{% endif %}
+          </td></tr>
+          <tr><td>MX Records</td><td>
+            {% if em.mx and em.mx.records %}{{ em.mx.records | length }} record(s)
+            {% else %}<span class="badge badge-grey">None</span>{% endif %}
+          </td></tr>
+        </table>
+        {% if em.issues %}
+        <ul class="issue-list" style="margin-top:10px;">
+          {% for issue in em.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ issue }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 3. HTTP Security Headers -->
+    {% set hh = results.categories.http_headers %}
+    {% set hh_tl = 'tl-green' if hh.score >= 80 else ('tl-amber' if hh.score >= 50 else 'tl-red') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left">
+          <div class="traffic-light {{ hh_tl }}"></div>
+          <div class="cat-title">HTTP Security Headers</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="cat-grade">{{ hh.score | default(0) }}%</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          {% if hh.headers %}
+            {% for name, data in hh.headers.items() %}
+            <tr>
+              <td>{{ name }}</td>
+              <td>
+                {% if data.present %}
+                  <span class="badge badge-green">&#10003;</span>
+                  {% if data.value %}<span style="font-size:0.78rem;color:var(--muted);margin-left:4px;">{{ data.value[:60] }}{% if data.value|length > 60 %}…{% endif %}</span>{% endif %}
+                {% else %}
+                  <span class="badge badge-red">Missing</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="2" style="color:var(--muted);">Could not retrieve headers</td></tr>
+          {% endif %}
+        </table>
+      </div>
+    </div>
+
+    <!-- 4. DNS & Infrastructure -->
+    {% set dns = results.categories.dns_infrastructure %}
+    {% set dns_high = dns.open_ports | selectattr('risk', 'equalto', 'high') | list | length if dns.open_ports else 0 %}
+    {% set dns_tl = 'tl-crimson' if dns_high > 0 else ('tl-amber' if (dns.open_ports | length) > 2 else 'tl-green') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left">
+          <div class="traffic-light {{ dns_tl }}"></div>
+          <div class="cat-title">DNS &amp; Infrastructure</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="cat-grade">{{ (dns.open_ports | length) if dns.open_ports else 0 }} ports</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        {% if dns.server_info %}
+        <table class="kv-table">
+          {% for k, v in dns.server_info.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+          {% if dns.reverse_dns %}<tr><td>Reverse DNS</td><td>{{ dns.reverse_dns }}</td></tr>{% endif %}
+        </table>
+        {% endif %}
+        {% if dns.open_ports %}
+        <div style="margin-top:10px;font-size:0.82rem;color:var(--muted);margin-bottom:6px;">Open Ports</div>
+        <div class="port-list">
+          {% for p in dns.open_ports %}
+          <span class="port-chip port-{{ p.risk }}">{{ p.port }}/{{ p.service }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if dns.issues %}
+        <ul class="issue-list" style="margin-top:12px;">
+          {% for issue in dns.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ issue }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 5. Breach Exposure -->
+    {% set br = results.categories.breaches %}
+    {% set br_tl = 'tl-crimson' if br.breach_count > 5 else ('tl-red' if br.breach_count > 0 else 'tl-green') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left">
+          <div class="traffic-light {{ br_tl }}"></div>
+          <div class="cat-title">Credential Exposure</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="cat-grade">{{ br.breach_count | default(0) }} breach{% if br.breach_count != 1 %}es{% endif %}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        {% if br.status == 'requires_api_key' %}
+        <p style="color:var(--muted);font-size:0.88rem;margin-top:10px;">&#128274; HIBP API key required for domain breach lookup. Set <code>HIBP_API_KEY</code> environment variable.</p>
+        {% elif br.breach_count == 0 %}
+        <p style="color:var(--low);font-size:0.88rem;margin-top:10px;">&#10003; No known breaches found for this domain.</p>
+        {% else %}
+        <table class="kv-table">
+          <tr><td>Total breaches</td><td><strong style="color:var(--critical);">{{ br.breach_count }}</strong></td></tr>
+          <tr><td>Most recent</td><td>{{ br.most_recent_breach | default('Unknown') }}</td></tr>
+          <tr><td>Data exposed</td><td style="font-size:0.82rem;">{{ br.data_classes | join(', ') if br.data_classes else '—' }}</td></tr>
+        </table>
+        {% if br.breaches %}
+        <div style="margin-top:10px;font-size:0.82rem;">
+          {% for b in br.breaches[:5] %}
+          <div style="padding:5px 0;border-bottom:1px solid var(--border);">
+            <strong>{{ b.name }}</strong> — {{ b.date }} ({{ '{:,}'.format(b.pwn_count) if b.pwn_count else '?' }} accounts)
+          </div>
+          {% endfor %}
+          {% if br.breaches | length > 5 %}<div style="color:var(--muted);font-size:0.8rem;margin-top:4px;">…and {{ (br.breaches | length) - 5 }} more</div>{% endif %}
+        </div>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 6. Website Security -->
+    {% set ws = results.categories.website_security %}
+    {% set ws_tl = 'tl-green' if ws.score >= 80 else ('tl-amber' if ws.score >= 50 else 'tl-red') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left">
+          <div class="traffic-light {{ ws_tl }}"></div>
+          <div class="cat-title">Website Security</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="cat-grade">{{ ws.score | default(0) }}%</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>HTTPS enforced</td><td>{% if ws.https_enforced %}<span class="badge badge-green">Yes</span>{% else %}<span class="badge badge-red">No</span>{% endif %}</td></tr>
+          <tr><td>CMS detected</td><td>
+            {% if ws.cms and ws.cms.detected %}
+              {{ ws.cms.detected }}{% if ws.cms.version %} {{ ws.cms.version }}{% endif %}
+            {% else %}None detected{% endif %}
+          </td></tr>
+          <tr><td>Mixed content</td><td>{% if ws.mixed_content %}<span class="badge badge-red">Detected</span>{% else %}<span class="badge badge-green">None</span>{% endif %}</td></tr>
+          {% if ws.cookies %}
+          <tr><td>Cookie Secure flag</td><td>{% if ws.cookies.secure %}<span class="badge badge-green">OK</span>{% else %}<span class="badge badge-red">Issues found</span>{% endif %}</td></tr>
+          <tr><td>Cookie HttpOnly</td><td>{% if ws.cookies.httponly %}<span class="badge badge-green">OK</span>{% else %}<span class="badge badge-amber">Issues found</span>{% endif %}</td></tr>
+          <tr><td>Cookie SameSite</td><td>{% if ws.cookies.samesite %}<span class="badge badge-green">OK</span>{% else %}<span class="badge badge-amber">Issues found</span>{% endif %}</td></tr>
+          {% endif %}
+        </table>
+        {% if ws.issues %}
+        <ul class="issue-list" style="margin-top:10px;">
+          {% for issue in ws.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ issue }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+
+  </div><!-- /categories -->
+
+  <!-- Recommendations -->
+  {% if results.recommendations %}
+  <div class="rec-section">
+    <div class="rec-title">&#128203; Remediation Recommendations</div>
+    <ul class="rec-list">
+      {% for rec in results.recommendations %}
+      <li class="rec-item">
+        <div class="rec-num">{{ loop.index }}</div>
+        <div>{{ rec }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Gauge JS -->
+  <script>
+  (function(){
+    var score = {{ results.overall_risk_score }};
+    var pct = score / 1000;
+    // Arc: half-circle = 251.2 px (π × r = π × 80 ≈ 251.3)
+    var arcLen = 251.2;
+    var arc = document.getElementById('gauge-arc');
+    var offset = arcLen - (arcLen * pct);
+    arc.style.strokeDashoffset = offset;
+    // Colour
+    var colour = pct < 0.2 ? '#22c55e' : pct < 0.4 ? '#f59e0b' : pct < 0.6 ? '#f97316' : '#ef4444';
+    arc.setAttribute('stroke', colour);
+    // Needle: 0 score = -90deg (pointing left), 1000 = +90deg (pointing right)
+    var angle = -90 + (pct * 180);
+    var rad = angle * Math.PI / 180;
+    var cx = 100, cy = 100, len = 62;
+    var x2 = cx + len * Math.cos(rad);
+    var y2 = cy + len * Math.sin(rad);
+    var needle = document.getElementById('gauge-needle');
+    needle.setAttribute('x2', x2.toFixed(1));
+    needle.setAttribute('y2', y2.toFixed(1));
+  })();
+  </script>
+
+  {% endif %}{# end results #}
+
+  <div class="footer">
+    Passive external assessment only &bull; No intrusive testing &bull; For insurance underwriting use
+  </div>
+</div>
+
+<script>
+function toggle(header) {
+  var body = header.nextElementSibling;
+  var chevron = header.querySelector('.chevron');
+  body.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
+</script>
+</body>
+</html>
