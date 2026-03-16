@@ -7,5 +7,5 @@ cryptography>=41.0.0
 flask>=3.0.0
 flask-cors>=4.0.0
 
-# Optional: richer TLS fingerprinting (not required at runtime)
-# python-nmap>=0.7.1   # requires nmap binary: apt install nmap / brew install nmap
+# WHOIS domain intelligence
+python-whois>=0.9.4

@@ -12,7 +12,7 @@ import time
 import threading
 from datetime import datetime, timezone
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import requests
@@ -37,18 +37,10 @@ USER_AGENT = "Mozilla/5.0 CyberInsuranceScanner/1.0 (passive assessment)"
 # ---------------------------------------------------------------------------
 
 class SSLChecker:
-    """Passive SSL/TLS certificate and configuration assessment."""
-
     def check(self, domain: str) -> dict:
         result = {
-            "status": "completed",
-            "certificate": {},
-            "tls_versions": {},
-            "cipher_suite": {},
-            "hsts": False,
-            "grade": "F",
-            "score": 0,
-            "issues": [],
+            "status": "completed", "certificate": {}, "tls_versions": {},
+            "cipher_suite": {}, "hsts": False, "grade": "F", "score": 0, "issues": [],
         }
         try:
             result["certificate"] = self._get_certificate(domain)
@@ -56,17 +48,14 @@ class SSLChecker:
             result["cipher_suite"] = self._get_cipher_suite(domain)
             result["hsts"] = self._check_hsts(domain)
             grade, score, issues = self._calculate_grade(
-                result["certificate"],
-                result["tls_versions"],
-                result["cipher_suite"],
-                result["hsts"],
+                result["certificate"], result["tls_versions"],
+                result["cipher_suite"], result["hsts"]
             )
             result["grade"] = grade
             result["score"] = score
             result["issues"] = issues
         except Exception as e:
-            result["status"] = "error"
-            result["error"] = str(e)
+            result["status"] = "error"; result["error"] = str(e)
             result["issues"] = [f"SSL check error: {e}"]
         return result
 
@@ -104,10 +93,8 @@ class SSLChecker:
     def _check_tls_versions(self, domain: str) -> dict:
         versions = {"TLS 1.0": False, "TLS 1.1": False, "TLS 1.2": False, "TLS 1.3": False}
         checks = {
-            "TLS 1.2": ("TLSv1_2", True),
-            "TLS 1.3": ("TLSv1_3", True),
-            "TLS 1.0": ("TLSv1", False),
-            "TLS 1.1": ("TLSv1_1", False),
+            "TLS 1.2": ("TLSv1_2", True), "TLS 1.3": ("TLSv1_3", True),
+            "TLS 1.0": ("TLSv1", False), "TLS 1.1": ("TLSv1_1", False),
         }
         for label, (attr, verify) in checks.items():
             if not hasattr(ssl.TLSVersion, attr):
@@ -115,8 +102,7 @@ class SSLChecker:
             try:
                 ver = getattr(ssl.TLSVersion, attr)
                 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                ctx.minimum_version = ver
-                ctx.maximum_version = ver
+                ctx.minimum_version = ver; ctx.maximum_version = ver
                 ctx.check_hostname = verify
                 ctx.verify_mode = ssl.CERT_REQUIRED if verify else ssl.CERT_NONE
                 with socket.create_connection((domain, 443), timeout=DEFAULT_TIMEOUT) as raw:
@@ -134,12 +120,8 @@ class SSLChecker:
                     c = s.cipher()
                     if c:
                         weak = ["RC4", "DES", "3DES", "MD5", "NULL", "EXPORT", "ANON"]
-                        return {
-                            "name": c[0],
-                            "protocol": c[1],
-                            "bits": c[2] or 0,
-                            "is_weak": any(w in c[0].upper() for w in weak),
-                        }
+                        return {"name": c[0], "protocol": c[1], "bits": c[2] or 0,
+                                "is_weak": any(w in c[0].upper() for w in weak)}
         except Exception as e:
             return {"name": "Unknown", "bits": 0, "is_weak": True, "error": str(e)}
         return {"name": "Unknown", "bits": 0, "is_weak": True}
@@ -148,10 +130,8 @@ class SSLChecker:
         if not REQUESTS_AVAILABLE:
             return False
         try:
-            r = requests.get(
-                f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
             return "strict-transport-security" in r.headers
         except Exception:
             return False
@@ -171,7 +151,7 @@ class SSLChecker:
         if not tls.get("TLS 1.2") and not tls.get("TLS 1.3"):
             ded += 30; issues.append("No modern TLS version (1.2/1.3) detected")
         if cipher.get("is_weak"):
-            ded += 20; issues.append(f"Weak cipher: {cipher.get('name','Unknown')}")
+            ded += 20; issues.append(f"Weak cipher: {cipher.get('name', 'Unknown')}")
         if not hsts:
             ded += 10; issues.append("HSTS header missing")
         score = max(0, 100 - ded)
@@ -184,8 +164,6 @@ class SSLChecker:
 # ---------------------------------------------------------------------------
 
 class EmailSecurityChecker:
-    """SPF, DKIM, DMARC, MX assessment."""
-
     DKIM_SELECTORS = ["default", "google", "selector1", "selector2", "mail", "dkim", "k1", "smtp"]
 
     def check(self, domain: str) -> dict:
@@ -195,24 +173,19 @@ class EmailSecurityChecker:
             "dmarc": {"present": False, "policy": None, "record": None},
             "dkim": {"selectors_found": []},
             "mx": {"records": []},
-            "score": 0,
-            "issues": [],
+            "score": 0, "issues": [],
         }
         if not DNS_AVAILABLE:
-            result["status"] = "error"
-            result["error"] = "dnspython not installed"
-            return result
+            result["status"] = "error"; result["error"] = "dnspython not installed"; return result
         try:
             result["spf"] = self._check_spf(domain)
             result["dmarc"] = self._check_dmarc(domain)
             result["dkim"] = self._check_dkim(domain)
             result["mx"] = self._check_mx(domain)
             result["score"], result["issues"] = self._calculate_score(
-                result["spf"], result["dmarc"], result["dkim"]
-            )
+                result["spf"], result["dmarc"], result["dkim"])
         except Exception as e:
-            result["status"] = "error"
-            result["error"] = str(e)
+            result["status"] = "error"; result["error"] = str(e)
         return result
 
     def _check_spf(self, domain: str) -> dict:
@@ -221,11 +194,12 @@ class EmailSecurityChecker:
             for rdata in answers:
                 txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
                 if txt.startswith("v=spf1"):
-                    valid = "all" in txt or "-all" in txt or "~all" in txt
-                    return {"present": True, "valid": valid, "record": txt}
+                    valid = "all" in txt
+                    return {"present": True, "valid": valid, "record": txt,
+                            "dangerous": "+all" in txt}
         except Exception:
             pass
-        return {"present": False, "valid": False, "record": None}
+        return {"present": False, "valid": False, "record": None, "dangerous": False}
 
     def _check_dmarc(self, domain: str) -> dict:
         try:
@@ -254,7 +228,8 @@ class EmailSecurityChecker:
         records = []
         try:
             answers = dns.resolver.resolve(domain, "MX", lifetime=DEFAULT_TIMEOUT)
-            records = sorted([{"preference": r.preference, "exchange": str(r.exchange)} for r in answers], key=lambda x: x["preference"])
+            records = sorted([{"preference": r.preference, "exchange": str(r.exchange)} for r in answers],
+                             key=lambda x: x["preference"])
         except Exception:
             pass
         return {"records": records}
@@ -263,12 +238,14 @@ class EmailSecurityChecker:
         score, issues = 10, []
         if not spf["present"]:
             score -= 3; issues.append("No SPF record — spoofing risk")
+        elif spf.get("dangerous"):
+            score -= 3; issues.append("SPF uses '+all' — allows any server to send on your behalf")
         elif not spf["valid"]:
-            score -= 1; issues.append("SPF record exists but may be invalid")
+            score -= 1; issues.append("SPF record may be invalid")
         if not dmarc["present"]:
             score -= 4; issues.append("No DMARC record — phishing risk")
         elif dmarc["policy"] == "none":
-            score -= 2; issues.append("DMARC policy is 'none' — monitoring only, no enforcement")
+            score -= 2; issues.append("DMARC policy is 'none' — no enforcement")
         elif dmarc["policy"] == "quarantine":
             score -= 1; issues.append("DMARC policy is 'quarantine' — consider upgrading to 'reject'")
         if not dkim["selectors_found"]:
@@ -277,12 +254,101 @@ class EmailSecurityChecker:
 
 
 # ---------------------------------------------------------------------------
-# 3. HTTP Security Headers
+# 3. Email Hardening (MTA-STS, DANE, BIMI)
+# ---------------------------------------------------------------------------
+
+class EmailHardeningChecker:
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "mta_sts": {"present": False, "mode": None},
+            "bimi": {"present": False, "has_vmc": False},
+            "dane": {"present": False},
+            "issues": [], "score": 0,
+        }
+        if not DNS_AVAILABLE or not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+        try:
+            result["mta_sts"] = self._check_mta_sts(domain)
+            result["bimi"] = self._check_bimi(domain)
+            result["dane"] = self._check_dane(domain)
+            result["score"], result["issues"] = self._calculate_score(
+                result["mta_sts"], result["bimi"], result["dane"])
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+    def _check_mta_sts(self, domain: str) -> dict:
+        try:
+            answers = dns.resolver.resolve(f"_mta-sts.{domain}", "TXT", lifetime=5)
+            for rdata in answers:
+                txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
+                if "v=STSv1" in txt:
+                    # Also try to fetch the policy file
+                    mode = None
+                    try:
+                        r = requests.get(f"https://mta-sts.{domain}/.well-known/mta-sts.txt",
+                                         timeout=5, headers={"User-Agent": USER_AGENT})
+                        m = re.search(r"mode:\s*(\w+)", r.text)
+                        mode = m.group(1) if m else "unknown"
+                    except Exception:
+                        mode = "unknown"
+                    return {"present": True, "mode": mode}
+        except Exception:
+            pass
+        return {"present": False, "mode": None}
+
+    def _check_bimi(self, domain: str) -> dict:
+        try:
+            answers = dns.resolver.resolve(f"default._bimi.{domain}", "TXT", lifetime=5)
+            for rdata in answers:
+                txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
+                if "v=BIMI1" in txt:
+                    has_vmc = "a=https" in txt.lower()
+                    return {"present": True, "has_vmc": has_vmc}
+        except Exception:
+            pass
+        return {"present": False, "has_vmc": False}
+
+    def _check_dane(self, domain: str) -> dict:
+        # Check TLSA record for primary MX
+        try:
+            mx_answers = dns.resolver.resolve(domain, "MX", lifetime=5)
+            if mx_answers:
+                mx_host = str(sorted(mx_answers, key=lambda r: r.preference)[0].exchange).rstrip(".")
+                try:
+                    dns.resolver.resolve(f"_25._tcp.{mx_host}", "TLSA", lifetime=5)
+                    return {"present": True}
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return {"present": False}
+
+    def _calculate_score(self, mta_sts, bimi, dane) -> tuple:
+        score, issues = 0, []
+        if mta_sts["present"]:
+            score += 4
+            if mta_sts["mode"] == "enforce":
+                score += 2
+        else:
+            issues.append("No MTA-STS policy — inbound email susceptible to TLS downgrade attacks")
+        if bimi["present"]:
+            score += 2
+            if bimi["has_vmc"]:
+                score += 1
+        if dane["present"]:
+            score += 1
+        else:
+            issues.append("DANE/TLSA not configured for mail servers")
+        return min(score, 10), issues
+
+
+# ---------------------------------------------------------------------------
+# 4. HTTP Security Headers
 # ---------------------------------------------------------------------------
 
 class HTTPHeaderChecker:
-    """Checks for presence of security-related HTTP response headers."""
-
     HEADERS = {
         "content-security-policy": ("Content-Security-Policy", 20),
         "x-frame-options": ("X-Frame-Options", 15),
@@ -293,29 +359,17 @@ class HTTPHeaderChecker:
     }
 
     def check(self, domain: str) -> dict:
-        result = {
-            "status": "completed",
-            "headers": {},
-            "score": 0,
-            "issues": [],
-        }
+        result = {"status": "completed", "headers": {}, "score": 0, "issues": []}
         if not REQUESTS_AVAILABLE:
-            result["status"] = "error"
-            result["error"] = "requests not installed"
-            return result
+            result["status"] = "error"; result["error"] = "requests not installed"; return result
         try:
-            r = requests.get(
-                f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
             headers_lower = {k.lower(): v for k, v in r.headers.items()}
             total_weight, earned = 0, 0
             for key, (label, weight) in self.HEADERS.items():
                 present = key in headers_lower
-                result["headers"][label] = {
-                    "present": present,
-                    "value": headers_lower.get(key, None),
-                }
+                result["headers"][label] = {"present": present, "value": headers_lower.get(key)}
                 total_weight += weight
                 if present:
                     earned += weight
@@ -323,39 +377,453 @@ class HTTPHeaderChecker:
                     result["issues"].append(f"Missing security header: {label}")
             result["score"] = round((earned / total_weight) * 100) if total_weight else 0
         except Exception as e:
-            result["status"] = "error"
-            result["error"] = str(e)
+            result["status"] = "error"; result["error"] = str(e)
         return result
 
 
 # ---------------------------------------------------------------------------
-# 4. DNS & Infrastructure
+# 5. WAF Detection
 # ---------------------------------------------------------------------------
 
-class DNSInfrastructureChecker:
-    """DNS records, reverse DNS, open ports, server fingerprinting."""
-
-    HIGH_RISK_PORTS = {
-        21: "FTP", 23: "Telnet", 3306: "MySQL", 3389: "RDP", 5900: "VNC",
+class WAFChecker:
+    WAF_SIGNATURES = {
+        "Cloudflare": {
+            "headers": ["cf-ray", "cf-cache-status"],
+            "cookies": ["__cfduid", "cf_clearance"],
+            "body": ["cloudflare"],
+        },
+        "AWS WAF / CloudFront": {
+            "headers": ["x-amz-cf-id", "x-amzn-requestid", "x-cache"],
+            "cookies": ["awselb", "awsalb"],
+            "body": [],
+        },
+        "Imperva / Incapsula": {
+            "headers": ["x-iinfo", "x-cdn"],
+            "cookies": ["visid_incap", "_incap_ses"],
+            "body": ["incap_ses", "visid_incap"],
+        },
+        "Akamai": {
+            "headers": ["x-akamai-transformed", "akamai-origin-hop", "x-check-cacheable"],
+            "cookies": ["ak_bmsc", "bm_sz"],
+            "body": [],
+        },
+        "Sucuri": {
+            "headers": ["x-sucuri-id", "x-sucuri-cache"],
+            "cookies": [],
+            "body": ["sucuri"],
+        },
+        "F5 BIG-IP ASM": {
+            "headers": ["x-wa-info", "x-frame-options"],
+            "cookies": ["ts", "f5avr"],
+            "body": [],
+        },
+        "Barracuda": {
+            "headers": [],
+            "cookies": ["barra_counter_session"],
+            "body": [],
+        },
     }
-    MEDIUM_RISK_PORTS = {
-        22: "SSH", 25: "SMTP", 110: "POP3", 143: "IMAP",
-    }
-    INFO_PORTS = {
-        80: "HTTP", 443: "HTTPS", 993: "IMAPS", 995: "POP3S",
-        8080: "HTTP-Alt", 8443: "HTTPS-Alt",
-    }
-    ALL_PORTS = {**HIGH_RISK_PORTS, **MEDIUM_RISK_PORTS, **INFO_PORTS}
 
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed",
-            "dns_records": {},
-            "reverse_dns": None,
-            "open_ports": [],
-            "server_info": {},
+            "detected": False,
+            "waf_name": None,
+            "all_detected": [],
             "issues": [],
-            "risk_score": 0,
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+        try:
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            headers_lower = {k.lower(): v.lower() for k, v in r.headers.items()}
+            cookies_lower = {k.lower(): v.lower() for k, v in r.cookies.items()}
+            body_lower = r.text[:5000].lower()
+
+            detected = []
+            for waf_name, sigs in self.WAF_SIGNATURES.items():
+                matched = False
+                for h in sigs["headers"]:
+                    if h in headers_lower:
+                        matched = True; break
+                if not matched:
+                    for c in sigs["cookies"]:
+                        if c in cookies_lower:
+                            matched = True; break
+                if not matched:
+                    for b in sigs["body"]:
+                        if b in body_lower:
+                            matched = True; break
+                if matched:
+                    detected.append(waf_name)
+
+            if detected:
+                result["detected"] = True
+                result["waf_name"] = detected[0]
+                result["all_detected"] = detected
+            else:
+                result["issues"].append("No WAF detected — web application firewall recommended")
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 6. Cloud & CDN Provider Detection
+# ---------------------------------------------------------------------------
+
+class CloudCDNChecker:
+    CLOUD_CNAMES = {
+        "Cloudflare": [".cloudflare.com", ".cloudflare.net"],
+        "AWS CloudFront": [".cloudfront.net"],
+        "AWS": [".amazonaws.com", ".awsglobalaccelerator.com", ".elb.amazonaws.com"],
+        "Azure": [".azurewebsites.net", ".trafficmanager.net", ".azure-api.net", ".cloudapp.azure.com"],
+        "GCP": [".appspot.com", ".run.app", ".googleapis.com"],
+        "Akamai": [".akamaiedge.net", ".akamaihd.net", ".akamaistream.net"],
+        "Fastly": [".fastly.net", ".fastlylb.net"],
+        "Vercel": [".vercel.app", ".vercel-dns.com"],
+        "Netlify": [".netlify.app", ".netlify.com"],
+    }
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "provider": None,
+            "cdn_detected": False,
+            "ip_addresses": [],
+            "hosting_type": "unknown",
+            "issues": [],
+        }
+        if not DNS_AVAILABLE:
+            result["status"] = "error"; return result
+        try:
+            # Resolve IPs
+            try:
+                ips = [str(r) for r in dns.resolver.resolve(domain, "A", lifetime=DEFAULT_TIMEOUT)]
+                result["ip_addresses"] = ips
+            except Exception:
+                pass
+
+            # Chase CNAME chain
+            cname_chain = []
+            try:
+                target = domain
+                for _ in range(5):
+                    try:
+                        answers = dns.resolver.resolve(target, "CNAME", lifetime=5)
+                        cname = str(answers[0].target)
+                        cname_chain.append(cname)
+                        target = cname
+                    except Exception:
+                        break
+            except Exception:
+                pass
+
+            all_cnames = " ".join(cname_chain).lower()
+
+            for provider, patterns in self.CLOUD_CNAMES.items():
+                if any(p in all_cnames for p in patterns):
+                    result["provider"] = provider
+                    result["cdn_detected"] = True
+                    result["hosting_type"] = "cloud/cdn"
+                    break
+
+            if not result["provider"] and result["ip_addresses"]:
+                result["hosting_type"] = "self-hosted or undetected cloud"
+
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 7. Domain Intelligence (WHOIS)
+# ---------------------------------------------------------------------------
+
+class DomainIntelChecker:
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "registrar": None,
+            "creation_date": None,
+            "expiry_date": None,
+            "domain_age_days": None,
+            "privacy_protected": False,
+            "issues": [],
+        }
+        try:
+            import whois
+            w = whois.whois(domain)
+            creation = w.creation_date
+            expiry = w.expiration_date
+            if isinstance(creation, list):
+                creation = creation[0]
+            if isinstance(expiry, list):
+                expiry = expiry[0]
+
+            result["registrar"] = str(w.registrar) if w.registrar else None
+
+            if creation:
+                age = (datetime.now() - creation.replace(tzinfo=None)).days
+                result["creation_date"] = str(creation.date()) if hasattr(creation, 'date') else str(creation)
+                result["domain_age_days"] = age
+                if age < 365:
+                    result["issues"].append(f"Domain is less than 1 year old ({age} days) — higher fraud risk")
+                elif age < 730:
+                    result["issues"].append(f"Domain is less than 2 years old ({age} days)")
+
+            if expiry:
+                result["expiry_date"] = str(expiry.date()) if hasattr(expiry, 'date') else str(expiry)
+                days_to_expiry = (expiry.replace(tzinfo=None) - datetime.now()).days
+                if days_to_expiry < 30:
+                    result["issues"].append(f"Domain expires in {days_to_expiry} days — renewal risk")
+
+            # Detect privacy protection
+            whois_raw = str(w).lower()
+            privacy_keywords = ["redacted", "privacy", "withheld", "protected", "proxy"]
+            result["privacy_protected"] = any(k in whois_raw for k in privacy_keywords)
+
+        except ImportError:
+            result["status"] = "skipped"
+            result["error"] = "python-whois not installed"
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 8. Subdomain Discovery (Certificate Transparency)
+# ---------------------------------------------------------------------------
+
+class SubdomainChecker:
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "subdomains": [],
+            "risky_subdomains": [],
+            "total_count": 0,
+            "issues": [],
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+
+        RISKY_KEYWORDS = ["dev", "staging", "test", "admin", "api", "old", "beta",
+                          "backup", "db", "database", "internal", "vpn", "remote",
+                          "jenkins", "gitlab", "jira", "grafana", "kibana", "phpmyadmin"]
+        try:
+            r = requests.get(
+                f"https://crt.sh/?q=%.{domain}&output=json",
+                timeout=20, headers={"User-Agent": USER_AGENT}
+            )
+            if r.status_code == 200:
+                entries = r.json()
+                seen = set()
+                subdomains = []
+                for entry in entries:
+                    names = entry.get("name_value", "").split("\n")
+                    for name in names:
+                        name = name.strip().lower().lstrip("*.")
+                        if name and name != domain and domain in name and name not in seen:
+                            seen.add(name)
+                            subdomains.append(name)
+
+                subdomains = subdomains[:100]  # cap at 100
+                result["subdomains"] = subdomains
+                result["total_count"] = len(subdomains)
+
+                risky = [s for s in subdomains if any(k in s for k in RISKY_KEYWORDS)]
+                result["risky_subdomains"] = risky
+
+                if risky:
+                    result["issues"].append(
+                        f"{len(risky)} risky subdomain(s) found in public CT logs: {', '.join(risky[:5])}"
+                    )
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 9. Exposed Admin Panels & Sensitive Paths
+# ---------------------------------------------------------------------------
+
+class ExposedAdminChecker:
+    PATHS = {
+        "critical": [
+            "/.env", "/.git/HEAD", "/.git/config", "/wp-config.php",
+            "/config.php", "/database.yml", "/.htpasswd", "/backup.sql",
+            "/dump.sql", "/db.sql", "/backup.zip", "/backup.tar.gz",
+        ],
+        "high": [
+            "/admin", "/administrator", "/wp-admin", "/wp-login.php",
+            "/phpmyadmin", "/cpanel", "/whm", "/webmail",
+            "/jenkins", "/grafana", "/kibana", "/portainer",
+            "/jira", "/confluence", "/gitlab", "/rancher",
+            "/.well-known/", "/api/v1/users", "/api/v2/users",
+        ],
+        "medium": [
+            "/server-status", "/server-info", "/status", "/health",
+            "/metrics", "/actuator", "/actuator/health", "/actuator/env",
+            "/swagger-ui.html", "/swagger-ui/", "/api-docs", "/openapi.json",
+            "/robots.txt", "/sitemap.xml", "/phpinfo.php",
+        ],
+    }
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "exposed": [],
+            "critical_count": 0,
+            "high_count": 0,
+            "issues": [],
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+
+        exposed = []
+
+        def probe(path, risk):
+            try:
+                r = requests.get(
+                    f"https://{domain}{path}", timeout=4,
+                    allow_redirects=False, headers={"User-Agent": USER_AGENT}
+                )
+                # 200 = exposed, 401/403 = exists but auth required (still noteworthy for critical)
+                if r.status_code == 200 or (risk == "critical" and r.status_code in [401, 403]):
+                    return {"path": path, "status": r.status_code, "risk": risk}
+            except Exception:
+                pass
+            return None
+
+        all_paths = [(p, "critical") for p in self.PATHS["critical"]] + \
+                    [(p, "high") for p in self.PATHS["high"]] + \
+                    [(p, "medium") for p in self.PATHS["medium"]]
+
+        with ThreadPoolExecutor(max_workers=15) as ex:
+            futures = {ex.submit(probe, path, risk): (path, risk) for path, risk in all_paths}
+            for f in as_completed(futures, timeout=25):
+                try:
+                    r = f.result()
+                    if r:
+                        exposed.append(r)
+                except Exception:
+                    pass
+
+        result["exposed"] = sorted(exposed, key=lambda x: ["critical", "high", "medium"].index(x["risk"]))
+        result["critical_count"] = sum(1 for e in exposed if e["risk"] == "critical")
+        result["high_count"] = sum(1 for e in exposed if e["risk"] == "high")
+
+        for e in exposed:
+            if e["risk"] == "critical":
+                result["issues"].append(f"CRITICAL: Sensitive file exposed — {e['path']} (HTTP {e['status']})")
+            elif e["risk"] == "high":
+                result["issues"].append(f"Admin panel accessible — {e['path']} (HTTP {e['status']})")
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 10. VPN / Remote Access Detection
+# ---------------------------------------------------------------------------
+
+class VPNRemoteAccessChecker:
+    VPN_SIGNATURES = {
+        "Cisco AnyConnect": {
+            "paths": ["/+CSCOE+/logon.html", "/+webvpn+/"],
+            "body_keywords": ["anyconnect", "cisco ssl vpn"],
+        },
+        "Fortinet FortiGate SSL VPN": {
+            "paths": ["/remote/login", "/remote/logincheck"],
+            "body_keywords": ["fortinet", "fortigate", "ssl-vpn"],
+        },
+        "Pulse Secure / Ivanti": {
+            "paths": ["/dana-na/auth/url_default/welcome.cgi"],
+            "body_keywords": ["pulse secure", "ivanti"],
+        },
+        "Palo Alto GlobalProtect": {
+            "paths": ["/global-protect/getsoftware.esp", "/ssl-vpn/"],
+            "body_keywords": ["globalprotect", "palo alto"],
+        },
+        "Citrix Gateway": {
+            "paths": ["/citrix/xenapp", "/Citrix/XenApp", "/vpn/index.html"],
+            "body_keywords": ["citrix gateway", "netscaler"],
+        },
+        "Microsoft RDS Web": {
+            "paths": ["/RDWeb/Pages/en-US/login.aspx", "/RDWeb/"],
+            "body_keywords": ["remote desktop", "rdweb"],
+        },
+        "OpenVPN Access Server": {
+            "paths": ["/"],
+            "body_keywords": ["openvpn access server", "openvpn-as"],
+        },
+        "SonicWall SSL VPN": {
+            "paths": ["/cgi-bin/sslvpnclient", "/prx/000/http/localhost/cgi-bin/welcome"],
+            "body_keywords": ["sonicwall", "netextender"],
+        },
+    }
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "vpn_detected": False,
+            "vpn_name": None,
+            "rdp_exposed": False,
+            "issues": [],
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+
+        # Check RDP
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3)
+            rdp_open = s.connect_ex((domain, 3389)) == 0
+            s.close()
+            result["rdp_exposed"] = rdp_open
+            if rdp_open:
+                result["issues"].append("RDP (port 3389) is exposed — directly accessible from internet")
+        except Exception:
+            pass
+
+        # Probe VPN login pages
+        for vpn_name, sigs in self.VPN_SIGNATURES.items():
+            for path in sigs["paths"]:
+                try:
+                    r = requests.get(
+                        f"https://{domain}{path}", timeout=5,
+                        allow_redirects=True, headers={"User-Agent": USER_AGENT}
+                    )
+                    body = r.text[:3000].lower()
+                    if any(kw in body for kw in sigs["body_keywords"]):
+                        result["vpn_detected"] = True
+                        result["vpn_name"] = vpn_name
+                        break
+                except Exception:
+                    pass
+            if result["vpn_detected"]:
+                break
+
+        if not result["vpn_detected"]:
+            result["issues"].append("No VPN/remote access gateway detected — remote access method unknown")
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 11. DNS & Infrastructure
+# ---------------------------------------------------------------------------
+
+class DNSInfrastructureChecker:
+    HIGH_RISK_PORTS = {21: "FTP", 23: "Telnet", 3306: "MySQL", 3389: "RDP", 5900: "VNC"}
+    MEDIUM_RISK_PORTS = {22: "SSH", 25: "SMTP", 110: "POP3", 143: "IMAP"}
+    INFO_PORTS = {80: "HTTP", 443: "HTTPS", 993: "IMAPS", 995: "POP3S", 8080: "HTTP-Alt", 8443: "HTTPS-Alt"}
+    ALL_PORTS = {**HIGH_RISK_PORTS, **MEDIUM_RISK_PORTS, **INFO_PORTS}
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed", "dns_records": {}, "reverse_dns": None,
+            "open_ports": [], "server_info": {}, "issues": [], "risk_score": 0,
         }
         try:
             if DNS_AVAILABLE:
@@ -365,8 +833,7 @@ class DNSInfrastructureChecker:
             result["server_info"] = self._fingerprint_server(domain)
             result["risk_score"], result["issues"] = self._assess_risk(result["open_ports"])
         except Exception as e:
-            result["status"] = "error"
-            result["error"] = str(e)
+            result["status"] = "error"; result["error"] = str(e)
         return result
 
     def _get_dns_records(self, domain: str) -> dict:
@@ -395,6 +862,7 @@ class DNSInfrastructureChecker:
             return []
 
         open_ports = []
+
         def probe(port):
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -425,10 +893,8 @@ class DNSInfrastructureChecker:
             return {}
         info = {}
         try:
-            r = requests.get(
-                f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
             for h in ["Server", "X-Powered-By", "X-Generator", "X-AspNet-Version"]:
                 if h in r.headers:
                     info[h] = r.headers[h]
@@ -440,51 +906,306 @@ class DNSInfrastructureChecker:
         issues, score = [], 0
         for p in open_ports:
             if p["risk"] == "high":
-                score += 40
-                issues.append(f"High-risk port open: {p['port']} ({p['service']})")
+                score += 40; issues.append(f"High-risk port open: {p['port']} ({p['service']})")
             elif p["risk"] == "medium":
-                score += 15
-                issues.append(f"Medium-risk port open: {p['port']} ({p['service']})")
+                score += 15; issues.append(f"Medium-risk port open: {p['port']} ({p['service']})")
         return min(score, 150), issues
 
 
 # ---------------------------------------------------------------------------
-# 5. Breach / Credential Exposure
+# 12. High-Risk Protocol & Database Exposure
+# ---------------------------------------------------------------------------
+
+class HighRiskProtocolChecker:
+    CRITICAL_SERVICES = {
+        445: "SMB (file sharing)",
+        161: "SNMP",
+        27017: "MongoDB",
+        6379: "Redis",
+        9200: "Elasticsearch",
+        5432: "PostgreSQL",
+        1433: "MSSQL",
+        5984: "CouchDB",
+        7001: "Oracle WebLogic",
+        8888: "Jupyter Notebook",
+        11211: "Memcached",
+        2375: "Docker API (unencrypted)",
+        2376: "Docker API",
+        9092: "Kafka",
+        4848: "GlassFish Admin",
+        8069: "Odoo ERP",
+    }
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "exposed_services": [],
+            "critical_count": 0,
+            "issues": [],
+        }
+        try:
+            ip = socket.gethostbyname(domain)
+        except Exception:
+            return result
+
+        exposed = []
+
+        def probe(port, service):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                if s.connect_ex((ip, port)) == 0:
+                    return {"port": port, "service": service}
+            except Exception:
+                pass
+            finally:
+                try: s.close()
+                except: pass
+            return None
+
+        with ThreadPoolExecutor(max_workers=20) as ex:
+            futures = {ex.submit(probe, port, svc): port for port, svc in self.CRITICAL_SERVICES.items()}
+            for f in as_completed(futures, timeout=30):
+                try:
+                    r = f.result()
+                    if r:
+                        exposed.append(r)
+                except Exception:
+                    pass
+
+        result["exposed_services"] = sorted(exposed, key=lambda x: x["port"])
+        result["critical_count"] = len(exposed)
+
+        for e in exposed:
+            result["issues"].append(
+                f"CRITICAL: {e['service']} (port {e['port']}) exposed to internet — "
+                f"database/service should never be publicly accessible"
+            )
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 13. Security Policy (security.txt + VDP)
+# ---------------------------------------------------------------------------
+
+class SecurityPolicyChecker:
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "security_txt": {"present": False, "path": None, "has_contact": False, "has_pgp": False},
+            "robots_txt": {"present": False, "disallows_count": 0},
+            "issues": [],
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+
+        # Check security.txt
+        for path in ["/.well-known/security.txt", "/security.txt"]:
+            try:
+                r = requests.get(f"https://{domain}{path}", timeout=5,
+                                 headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200 and "Contact:" in r.text:
+                    result["security_txt"] = {
+                        "present": True, "path": path,
+                        "has_contact": "Contact:" in r.text,
+                        "has_pgp": "Encryption:" in r.text or "-----BEGIN PGP" in r.text,
+                    }
+                    break
+            except Exception:
+                pass
+
+        if not result["security_txt"]["present"]:
+            result["issues"].append("No security.txt found — no vulnerability disclosure policy (VDP) detected")
+
+        # Check robots.txt
+        try:
+            r = requests.get(f"https://{domain}/robots.txt", timeout=5,
+                             headers={"User-Agent": USER_AGENT})
+            if r.status_code == 200:
+                disallows = r.text.lower().count("disallow:")
+                result["robots_txt"] = {"present": True, "disallows_count": disallows}
+        except Exception:
+            pass
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 14. DNSBL / IP Reputation
+# ---------------------------------------------------------------------------
+
+class DNSBLChecker:
+    IP_DNSBLS = [
+        "zen.spamhaus.org",
+        "bl.spamcop.net",
+        "dnsbl.sorbs.net",
+        "b.barracudacentral.org",
+        "dnsbl-1.uceprotect.net",
+    ]
+    DOMAIN_DNSBLS = [
+        "dbl.spamhaus.org",
+        "uribl.com",
+    ]
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "ip_listings": [],
+            "domain_listings": [],
+            "blacklisted": False,
+            "issues": [],
+        }
+        if not DNS_AVAILABLE:
+            result["status"] = "error"; return result
+
+        try:
+            ip = socket.gethostbyname(domain)
+            reversed_ip = ".".join(reversed(ip.split(".")))
+
+            # IP-based checks
+            for dnsbl in self.IP_DNSBLS:
+                try:
+                    dns.resolver.resolve(f"{reversed_ip}.{dnsbl}", "A", lifetime=5)
+                    result["ip_listings"].append(dnsbl)
+                except Exception:
+                    pass
+
+            # Domain-based checks
+            for dnsbl in self.DOMAIN_DNSBLS:
+                try:
+                    dns.resolver.resolve(f"{domain}.{dnsbl}", "A", lifetime=5)
+                    result["domain_listings"].append(dnsbl)
+                except Exception:
+                    pass
+
+            all_listings = result["ip_listings"] + result["domain_listings"]
+            result["blacklisted"] = len(all_listings) > 0
+
+            if all_listings:
+                result["issues"].append(
+                    f"Domain/IP listed on {len(all_listings)} blacklist(s): {', '.join(all_listings)}"
+                )
+
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 15. Technology Stack & EOL/CVE Check
+# ---------------------------------------------------------------------------
+
+class TechStackChecker:
+    EOL_SIGNATURES = {
+        "PHP/5": {"risk": "critical", "note": "PHP 5.x — end-of-life Dec 2018, no security patches"},
+        "PHP/7.0": {"risk": "critical", "note": "PHP 7.0 — end-of-life Dec 2019"},
+        "PHP/7.1": {"risk": "critical", "note": "PHP 7.1 — end-of-life Dec 2019"},
+        "PHP/7.2": {"risk": "high", "note": "PHP 7.2 — end-of-life Nov 2020"},
+        "PHP/7.3": {"risk": "high", "note": "PHP 7.3 — end-of-life Dec 2021"},
+        "PHP/7.4": {"risk": "medium", "note": "PHP 7.4 — end-of-life Nov 2022"},
+        "ASP.NET/1": {"risk": "critical", "note": "ASP.NET 1.x — end-of-life"},
+        "ASP.NET/2": {"risk": "critical", "note": "ASP.NET 2.0 — end-of-life Jul 2011"},
+        "ASP.NET/3": {"risk": "critical", "note": "ASP.NET 3.x — end-of-life"},
+        "Apache/2.2": {"risk": "high", "note": "Apache 2.2 — end-of-life Dec 2017"},
+        "nginx/1.14": {"risk": "medium", "note": "nginx 1.14 — legacy stable branch"},
+        "nginx/1.12": {"risk": "high", "note": "nginx 1.12 — end-of-life"},
+        "nginx/1.10": {"risk": "critical", "note": "nginx 1.10 — end-of-life"},
+        "OpenSSL/1.0": {"risk": "critical", "note": "OpenSSL 1.0.x — end-of-life Dec 2019"},
+        "OpenSSL/1.1.0": {"risk": "high", "note": "OpenSSL 1.1.0 — end-of-life Sep 2019"},
+    }
+
+    CMS_SIGNATURES = {
+        "WordPress": ["/wp-content/", "/wp-includes/", "wp-json"],
+        "Joomla": ["/components/com_", "Joomla!", "/media/jui/"],
+        "Drupal": ["/sites/default/", "Drupal.settings", "/modules/system/"],
+        "Wix": ["wixsite.com", "wix-code"],
+        "Shopify": ["cdn.shopify.com", "Shopify.theme"],
+        "Squarespace": ["squarespace.com", "data-squarespace"],
+        "Magento": ["Mage.Cookies", "/skin/frontend/", "magento"],
+        "PrestaShop": ["prestashop", "/themes/default-bootstrap/"],
+    }
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "server_software": [],
+            "cms": {"detected": None, "version": None},
+            "eol_detected": [],
+            "issues": [],
+            "score": 100,
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+        try:
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            body = r.text[:100000]
+            all_headers_str = str(r.headers)
+
+            # Collect disclosed software versions from headers
+            for h in ["Server", "X-Powered-By", "X-Generator", "X-AspNet-Version"]:
+                if h in r.headers:
+                    result["server_software"].append(f"{h}: {r.headers[h]}")
+
+            # Check for EOL versions
+            combined = (all_headers_str + body).lower()
+            for sig, info in self.EOL_SIGNATURES.items():
+                if sig.lower() in combined:
+                    result["eol_detected"].append({**info, "software": sig})
+                    result["issues"].append(f"EOL software detected: {info['note']}")
+                    if info["risk"] == "critical":
+                        result["score"] -= 40
+                    elif info["risk"] == "high":
+                        result["score"] -= 25
+                    elif info["risk"] == "medium":
+                        result["score"] -= 10
+
+            # CMS detection
+            for cms, sigs in self.CMS_SIGNATURES.items():
+                if any(sig in body or sig in all_headers_str for sig in sigs):
+                    version = None
+                    if cms == "WordPress":
+                        m = re.search(r"wp-includes/js/wp-emoji-release\.min\.js\?ver=([\d.]+)", body)
+                        if not m:
+                            m = re.search(r'content="WordPress ([\d.]+)"', body)
+                        version = m.group(1) if m else None
+                    result["cms"] = {"detected": cms, "version": version}
+                    break
+
+            result["score"] = max(0, result["score"])
+
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 16. Breach / Credential Exposure (HIBP)
 # ---------------------------------------------------------------------------
 
 class BreachChecker:
-    """Check Have I Been Pwned for domain breach exposure."""
-
     HIBP_URL = "https://haveibeenpwned.com/api/v3/breaches"
 
     def check(self, domain: str, api_key: Optional[str] = None) -> dict:
         result = {
-            "status": "completed",
-            "breach_count": 0,
-            "breaches": [],
-            "most_recent_breach": None,
-            "data_classes": [],
-            "issues": [],
+            "status": "completed", "breach_count": 0, "breaches": [],
+            "most_recent_breach": None, "data_classes": [], "issues": [],
         }
         if not REQUESTS_AVAILABLE:
-            result["status"] = "error"
-            result["error"] = "requests not installed"
-            return result
+            result["status"] = "error"; result["error"] = "requests not installed"; return result
         try:
             headers = {"User-Agent": USER_AGENT}
             if api_key:
                 headers["hibp-api-key"] = api_key
-            # Public endpoint — filter by domain
-            r = requests.get(
-                self.HIBP_URL, params={"domain": domain},
-                headers=headers, timeout=DEFAULT_TIMEOUT
-            )
+            r = requests.get(self.HIBP_URL, params={"domain": domain},
+                             headers=headers, timeout=DEFAULT_TIMEOUT)
             if r.status_code == 200:
                 breaches = r.json()
                 if breaches:
                     result["breach_count"] = len(breaches)
-                    dates = []
-                    all_classes = set()
+                    dates, all_classes = [], set()
                     for b in breaches:
                         dates.append(b.get("BreachDate", ""))
                         all_classes.update(b.get("DataClasses", []))
@@ -501,25 +1222,59 @@ class BreachChecker:
                     result["issues"].append(f"Domain found in {len(breaches)} known data breach(es)")
             elif r.status_code == 401:
                 result["status"] = "requires_api_key"
-                result["error"] = "HIBP API key required for detailed lookup"
+                result["error"] = "HIBP API key required"
             elif r.status_code == 404:
-                pass  # No breaches found
+                pass
             else:
                 result["status"] = "error"
-                result["error"] = f"HIBP API returned status {r.status_code}"
+                result["error"] = f"HIBP API returned {r.status_code}"
         except Exception as e:
-            result["status"] = "error"
-            result["error"] = str(e)
+            result["status"] = "error"; result["error"] = str(e)
         return result
 
 
 # ---------------------------------------------------------------------------
-# 6. Website Security Basics
+# 17. HTTP Security Headers
+# ---------------------------------------------------------------------------
+
+class HTTPHeaderChecker:
+    HEADERS = {
+        "content-security-policy": ("Content-Security-Policy", 20),
+        "x-frame-options": ("X-Frame-Options", 15),
+        "x-content-type-options": ("X-Content-Type-Options", 15),
+        "strict-transport-security": ("Strict-Transport-Security", 20),
+        "referrer-policy": ("Referrer-Policy", 15),
+        "permissions-policy": ("Permissions-Policy", 15),
+    }
+
+    def check(self, domain: str) -> dict:
+        result = {"status": "completed", "headers": {}, "score": 0, "issues": []}
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; result["error"] = "requests not installed"; return result
+        try:
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            headers_lower = {k.lower(): v for k, v in r.headers.items()}
+            total_weight, earned = 0, 0
+            for key, (label, weight) in self.HEADERS.items():
+                present = key in headers_lower
+                result["headers"][label] = {"present": present, "value": headers_lower.get(key)}
+                total_weight += weight
+                if present:
+                    earned += weight
+                else:
+                    result["issues"].append(f"Missing security header: {label}")
+            result["score"] = round((earned / total_weight) * 100) if total_weight else 0
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 18. Website Security Basics
 # ---------------------------------------------------------------------------
 
 class WebsiteSecurityChecker:
-    """HTTPS enforcement, cookies, mixed content, CMS detection."""
-
     CMS_SIGNATURES = {
         "WordPress": ["/wp-content/", "/wp-includes/", "wp-json"],
         "Joomla": ["/components/com_", "Joomla!", "/media/jui/"],
@@ -532,37 +1287,28 @@ class WebsiteSecurityChecker:
 
     def check(self, domain: str) -> dict:
         result = {
-            "status": "completed",
-            "https_enforced": False,
+            "status": "completed", "https_enforced": False,
             "cookies": {"secure": True, "httponly": True, "samesite": True, "details": []},
-            "mixed_content": False,
-            "cms": {"detected": None, "version": None},
-            "issues": [],
-            "score": 0,
+            "mixed_content": False, "cms": {"detected": None, "version": None},
+            "issues": [], "score": 0,
         }
         if not REQUESTS_AVAILABLE:
-            result["status"] = "error"
-            result["error"] = "requests not installed"
-            return result
+            result["status"] = "error"; result["error"] = "requests not installed"; return result
         try:
             result["https_enforced"] = self._check_https_redirect(domain)
             result["cookies"] = self._check_cookies(domain)
             result["mixed_content"] = self._check_mixed_content(domain)
             result["cms"] = self._detect_cms(domain)
             result["score"], result["issues"] = self._calculate_score(
-                result["https_enforced"], result["cookies"], result["mixed_content"]
-            )
+                result["https_enforced"], result["cookies"], result["mixed_content"])
         except Exception as e:
-            result["status"] = "error"
-            result["error"] = str(e)
+            result["status"] = "error"; result["error"] = str(e)
         return result
 
     def _check_https_redirect(self, domain: str) -> bool:
         try:
-            r = requests.get(
-                f"http://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
+            r = requests.get(f"http://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
             return r.url.startswith("https://")
         except Exception:
             return False
@@ -570,15 +1316,13 @@ class WebsiteSecurityChecker:
     def _check_cookies(self, domain: str) -> dict:
         info = {"secure": True, "httponly": True, "samesite": True, "details": []}
         try:
-            r = requests.get(
-                f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
             for cookie in r.cookies:
                 detail = {
-                    "name": cookie.name,
-                    "secure": cookie.secure,
-                    "httponly": cookie.has_nonstandard_attr("HttpOnly") or getattr(cookie, "_rest", {}).get("HttpOnly") is not None,
+                    "name": cookie.name, "secure": cookie.secure,
+                    "httponly": cookie.has_nonstandard_attr("HttpOnly") or
+                                getattr(cookie, "_rest", {}).get("HttpOnly") is not None,
                     "samesite": cookie.get_nonstandard_attr("SameSite"),
                 }
                 info["details"].append(detail)
@@ -594,31 +1338,23 @@ class WebsiteSecurityChecker:
 
     def _check_mixed_content(self, domain: str) -> bool:
         try:
-            r = requests.get(
-                f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
-            content = r.text[:50000]
-            return bool(re.search(r'<(?:script|img|link|iframe)[^>]+src=["\']http://', content, re.I))
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            return bool(re.search(r'<(?:script|img|link|iframe)[^>]+src=["\']http://', r.text[:50000], re.I))
         except Exception:
             return False
 
     def _detect_cms(self, domain: str) -> dict:
         try:
-            r = requests.get(
-                f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                allow_redirects=True, headers={"User-Agent": USER_AGENT}
-            )
-            text = r.text[:100000]
-            all_headers = str(r.headers)
-            combined = text + all_headers
+            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            combined = r.text[:100000] + str(r.headers)
             for cms, sigs in self.CMS_SIGNATURES.items():
                 if any(sig in combined for sig in sigs):
                     version = None
                     if cms == "WordPress":
-                        m = re.search(r'ver=(\d+\.\d+[\.\d]*)', text)
-                        if m:
-                            version = m.group(1)
+                        m = re.search(r"ver=([\d.]+)", r.text)
+                        version = m.group(1) if m else None
                     return {"detected": cms, "version": version}
         except Exception:
             pass
@@ -629,95 +1365,219 @@ class WebsiteSecurityChecker:
         if not https:
             score -= 40; issues.append("HTTPS not enforced — HTTP does not redirect to HTTPS")
         if not cookies.get("secure", True):
-            score -= 20; issues.append("Cookies missing Secure flag — transmitted over HTTP")
+            score -= 20; issues.append("Cookies missing Secure flag")
         if not cookies.get("httponly", True):
             score -= 15; issues.append("Cookies missing HttpOnly flag — XSS risk")
         if mixed:
-            score -= 25; issues.append("Mixed content detected — HTTP resources loaded over HTTPS")
+            score -= 25; issues.append("Mixed content detected")
         return max(0, score), issues
 
 
 # ---------------------------------------------------------------------------
-# 7. Risk Scoring Engine
+# 19. Payment Security
+# ---------------------------------------------------------------------------
+
+class PaymentSecurityChecker:
+    PAYMENT_PROVIDERS = {
+        "Stripe": ["js.stripe.com", "stripe.com/v3"],
+        "PayPal": ["paypalobjects.com", "paypal.com/sdk"],
+        "PayFast": ["payfast.co.za"],
+        "PayGate": ["paygate.co.za"],
+        "Peach Payments": ["peachpayments.com"],
+        "Ozow": ["ozow.com"],
+        "Square": ["squareup.com", "squarecdnjs.net"],
+        "Braintree": ["braintreepayments.com", "braintree-api.com"],
+        "Adyen": ["adyen.com"],
+    }
+    PAYMENT_PATHS = ["/cart", "/checkout", "/payment", "/pay", "/order",
+                     "/shop/cart", "/basket", "/buy", "/purchase"]
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "has_payment_page": False,
+            "payment_provider": None,
+            "self_hosted_payment_form": False,
+            "payment_page_https": False,
+            "issues": [],
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"; return result
+
+        payment_page_found = None
+        for path in self.PAYMENT_PATHS:
+            try:
+                r = requests.get(f"https://{domain}{path}", timeout=4,
+                                 allow_redirects=True, headers={"User-Agent": USER_AGENT})
+                if r.status_code == 200:
+                    body = r.text[:50000].lower()
+                    # Check if this looks like a payment page
+                    payment_keywords = ["credit card", "card number", "checkout", "payment",
+                                        "billing", "cvv", "expiry", "pay now", "place order"]
+                    if any(kw in body for kw in payment_keywords):
+                        payment_page_found = (path, r.url, r.text[:50000])
+                        break
+            except Exception:
+                pass
+
+        if payment_page_found:
+            path, final_url, body = payment_page_found
+            result["has_payment_page"] = True
+            result["payment_page_https"] = final_url.startswith("https://")
+
+            # Check for third-party payment providers
+            for provider, scripts in self.PAYMENT_PROVIDERS.items():
+                if any(s in body.lower() for s in scripts):
+                    result["payment_provider"] = provider
+                    break
+
+            # Detect self-hosted card form (high risk)
+            if not result["payment_provider"]:
+                if re.search(r'<input[^>]+(?:card.?number|cardnumber|cc.?num)', body, re.I):
+                    result["self_hosted_payment_form"] = True
+                    result["issues"].append(
+                        "Self-hosted payment card form detected — PCI DSS compliance risk. "
+                        "Card data may be processed directly on your servers."
+                    )
+
+            if not result["payment_page_https"]:
+                result["issues"].append("Payment page not served over HTTPS — critical security risk")
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 20. Risk Scoring Engine
 # ---------------------------------------------------------------------------
 
 class RiskScorer:
-    """Aggregates category results into a weighted 0-1000 risk score."""
-
+    """
+    Weighted 0-1000 risk score.
+    All weights must sum to 100 when WAF bonus excluded.
+    """
     WEIGHTS = {
-        "ssl": 0.25,
-        "email": 0.20,
-        "breaches": 0.20,
-        "ports": 0.15,
-        "headers": 0.10,
-        "website": 0.10,
+        "ssl":                  0.15,
+        "email_security":       0.08,
+        "email_hardening":      0.04,
+        "breaches":             0.12,
+        "http_headers":         0.06,
+        "website_security":     0.05,
+        "exposed_admin":        0.13,
+        "high_risk_protocols":  0.10,
+        "dnsbl":                0.08,
+        "tech_stack":           0.07,
+        "payment_security":     0.04,
+        "vpn_remote":           0.04,
+        "subdomains":           0.04,
     }
 
     RECOMMENDATIONS = {
-        "SSL certificate has EXPIRED": "Renew your SSL certificate immediately — an expired cert will cause browser warnings and erodes user trust.",
-        "TLS 1.0 supported — deprecated and insecure": "Disable TLS 1.0 on your web server. Configure minimum TLS version to 1.2.",
-        "TLS 1.1 supported — deprecated": "Disable TLS 1.1 on your web server. Modern clients support TLS 1.2+.",
-        "No SPF record — spoofing risk": "Add an SPF record (e.g. 'v=spf1 include:_spf.google.com ~all') to prevent email spoofing.",
-        "No DMARC record — phishing risk": "Add a DMARC record starting with 'v=DMARC1; p=quarantine' and monitor reports.",
-        "DMARC policy is 'none' — monitoring only, no enforcement": "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to block spoofed emails.",
-        "No DKIM selectors found for common selector names": "Configure DKIM signing for outbound email and publish the public key in DNS.",
-        "HTTPS not enforced — HTTP does not redirect to HTTPS": "Configure your web server to redirect all HTTP traffic to HTTPS (301 redirect).",
-        "HSTS header missing": "Add Strict-Transport-Security header: 'max-age=31536000; includeSubDomains'.",
-        "Missing security header: Content-Security-Policy": "Implement a Content Security Policy to mitigate XSS and data injection attacks.",
-        "Missing security header: X-Frame-Options": "Add 'X-Frame-Options: DENY' or 'SAMEORIGIN' to prevent clickjacking.",
-        "Missing security header: X-Content-Type-Options": "Add 'X-Content-Type-Options: nosniff' to prevent MIME-type sniffing.",
-        "Cookies missing Secure flag — transmitted over HTTP": "Set the Secure flag on all session cookies to prevent transmission over HTTP.",
-        "Cookies missing HttpOnly flag — XSS risk": "Set the HttpOnly flag on all session cookies to prevent JavaScript access.",
-        "Mixed content detected — HTTP resources loaded over HTTPS": "Update all embedded resource URLs to use HTTPS.",
+        "SSL certificate has EXPIRED": "Renew your SSL certificate immediately — an expired cert causes browser warnings and erodes user trust.",
+        "TLS 1.0 supported — deprecated and insecure": "Disable TLS 1.0 on your web server. Set minimum TLS version to 1.2.",
+        "TLS 1.1 supported — deprecated": "Disable TLS 1.1. Modern clients support TLS 1.2+.",
+        "No SPF record — spoofing risk": "Add an SPF record (e.g. 'v=spf1 include:_spf.google.com -all') to prevent email spoofing.",
+        "SPF uses '+all'": "Change SPF to use '-all' (hard fail) or '~all' (soft fail) — '+all' is extremely dangerous.",
+        "No DMARC record — phishing risk": "Add a DMARC record: 'v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com'.",
+        "DMARC policy is 'none'": "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to enforce email authentication.",
+        "No DKIM selectors found": "Configure DKIM signing for outbound email and publish the public key in DNS.",
+        "No MTA-STS policy": "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.",
+        "HTTPS not enforced": "Configure your web server to redirect all HTTP traffic to HTTPS (301 redirect).",
+        "HSTS header missing": "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'.",
+        "Missing security header: Content-Security-Policy": "Implement a Content Security Policy to mitigate XSS attacks.",
+        "Missing security header: X-Frame-Options": "Add 'X-Frame-Options: DENY' to prevent clickjacking.",
+        "Missing security header: X-Content-Type-Options": "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing.",
+        "No WAF detected": "Deploy a Web Application Firewall (e.g. Cloudflare, AWS WAF, Imperva) to filter malicious traffic.",
+        "RDP (port 3389) is exposed": "Block RDP from public internet immediately. Use VPN or Zero Trust access for remote desktop.",
+        "No VPN/remote access gateway detected": "Implement a VPN or Zero Trust Network Access (ZTNA) solution for remote workers.",
+        "No security.txt found": "Create a security.txt file at /.well-known/security.txt to establish a vulnerability disclosure policy.",
+        "CRITICAL: Sensitive file exposed": "Immediately restrict access to sensitive files. Audit your web server configuration and .htaccess rules.",
+        "CRITICAL:": "Immediately investigate and remediate the critically exposed service.",
+        "EOL software detected": "Update all end-of-life software immediately — unpatched software is a leading cause of breaches.",
+        "Domain/IP listed on": "Investigate blacklist listings — likely indicates past spam, malware distribution, or compromise.",
+        "Self-hosted payment card form": "Migrate to a PCI-compliant payment provider (Stripe, PayFast, Peach Payments) to avoid storing card data.",
+        "No known breaches found": "",
     }
 
     def calculate(self, results: dict) -> tuple:
-        """Returns (risk_score 0-1000, risk_level, recommendations)."""
-        def normalise_risk(raw_score, max_raw):
-            """Convert a raw score (higher=worse) to 0-100 risk scale."""
-            return min(100, (raw_score / max_raw) * 100) if max_raw else 0
+        def inv(score_0_100):
+            return 100 - score_0_100
 
-        # SSL: score is 0-100 quality → invert
-        ssl_risk = 100 - results.get("ssl", {}).get("score", 50)
+        # Per-category risk (0-100 scale, higher = more risky)
+        ssl_risk = inv(results.get("ssl", {}).get("score", 50))
+        email_risk = inv((results.get("email_security", {}).get("score", 5) / 10) * 100)
+        email_hard_risk = inv((results.get("email_hardening", {}).get("score", 0) / 10) * 100)
 
-        # Email: score is 0-10 → invert to risk
-        email_score = results.get("email_security", {}).get("score", 5)
-        email_risk = (1 - email_score / 10) * 100
-
-        # Breaches: scale by count
         breach_count = results.get("breaches", {}).get("breach_count", 0)
-        breach_risk = min(100, breach_count * 20)
+        breach_risk = min(100, breach_count * 15)
 
-        # Ports: raw risk score capped at 150
-        port_risk = normalise_risk(results.get("dns_infrastructure", {}).get("risk_score", 0), 150)
+        header_risk = inv(results.get("http_headers", {}).get("score", 50))
+        website_risk = inv(results.get("website_security", {}).get("score", 50))
 
-        # Headers: 0-100 quality → invert
-        header_risk = 100 - results.get("http_headers", {}).get("score", 50)
+        # Exposed admin panels
+        crit = results.get("exposed_admin", {}).get("critical_count", 0)
+        high = results.get("exposed_admin", {}).get("high_count", 0)
+        admin_risk = min(100, crit * 50 + high * 20)
 
-        # Website: 0-100 quality → invert
-        website_risk = 100 - results.get("website_security", {}).get("score", 50)
+        # High-risk protocols (database/service exposure)
+        hrisky = results.get("high_risk_protocols", {}).get("critical_count", 0)
+        hrisk = min(100, hrisky * 35)
+
+        # DNSBL
+        listed = len(results.get("dnsbl", {}).get("ip_listings", [])) + \
+                 len(results.get("dnsbl", {}).get("domain_listings", []))
+        dnsbl_risk = min(100, listed * 50)
+
+        # Tech stack (EOL)
+        tech_risk = inv(results.get("tech_stack", {}).get("score", 100))
+
+        # Payment
+        pay = results.get("payment_security", {})
+        pay_risk = 0
+        if pay.get("self_hosted_payment_form"):
+            pay_risk = 80
+        elif pay.get("has_payment_page") and not pay.get("payment_page_https"):
+            pay_risk = 60
+
+        # VPN/remote
+        vpn = results.get("vpn_remote", {})
+        vpn_risk = 40 if vpn.get("rdp_exposed") else (20 if not vpn.get("vpn_detected") else 0)
+
+        # Subdomains
+        risky_subs = len(results.get("subdomains", {}).get("risky_subdomains", []))
+        sub_risk = min(100, risky_subs * 15)
 
         weighted = (
-            ssl_risk * self.WEIGHTS["ssl"] +
-            email_risk * self.WEIGHTS["email"] +
-            breach_risk * self.WEIGHTS["breaches"] +
-            port_risk * self.WEIGHTS["ports"] +
-            header_risk * self.WEIGHTS["headers"] +
-            website_risk * self.WEIGHTS["website"]
+            ssl_risk         * self.WEIGHTS["ssl"] +
+            email_risk       * self.WEIGHTS["email_security"] +
+            email_hard_risk  * self.WEIGHTS["email_hardening"] +
+            breach_risk      * self.WEIGHTS["breaches"] +
+            header_risk      * self.WEIGHTS["http_headers"] +
+            website_risk     * self.WEIGHTS["website_security"] +
+            admin_risk       * self.WEIGHTS["exposed_admin"] +
+            hrisk            * self.WEIGHTS["high_risk_protocols"] +
+            dnsbl_risk       * self.WEIGHTS["dnsbl"] +
+            tech_risk        * self.WEIGHTS["tech_stack"] +
+            pay_risk         * self.WEIGHTS["payment_security"] +
+            vpn_risk         * self.WEIGHTS["vpn_remote"] +
+            sub_risk         * self.WEIGHTS["subdomains"]
         )
 
-        risk_score = round(weighted * 10)  # Scale to 0-1000
+        risk_score = round(weighted * 10)
 
-        if risk_score >= 600:
-            risk_level = "Critical"
-        elif risk_score >= 400:
-            risk_level = "High"
-        elif risk_score >= 200:
-            risk_level = "Medium"
-        else:
-            risk_level = "Low"
+        # WAF bonus — reduce score by up to 50 points
+        if results.get("waf", {}).get("detected"):
+            risk_score = max(0, risk_score - 50)
 
-        # Gather all issues for recommendations
+        risk_score = min(1000, risk_score)
+
+        risk_level = (
+            "Critical" if risk_score >= 600 else
+            "High"     if risk_score >= 400 else
+            "Medium"   if risk_score >= 200 else
+            "Low"
+        )
+
+        # Build recommendations from all issues
         all_issues = []
         for cat in results.values():
             if isinstance(cat, dict):
@@ -727,35 +1587,26 @@ class RiskScorer:
         seen = set()
         for issue in all_issues:
             for key, rec in self.RECOMMENDATIONS.items():
-                if key in issue and key not in seen:
+                if key in issue and key not in seen and rec:
                     recommendations.append(rec)
                     seen.add(key)
 
         if breach_count > 0 and "breach_rec" not in seen:
             recommendations.append(
-                f"Domain found in {breach_count} breach(es). Enforce strong password policies, "
-                "consider credential monitoring, and notify affected users."
+                f"Domain found in {breach_count} breach(es). Enforce strong passwords, "
+                "implement credential monitoring, and review affected user accounts."
             )
 
         return risk_score, risk_level, recommendations
 
 
 # ---------------------------------------------------------------------------
-# Main Scanner
+# Main Scanner Orchestrator
 # ---------------------------------------------------------------------------
 
 class SecurityScanner:
-    """Orchestrates all checks and returns unified results."""
-
     def __init__(self, hibp_api_key: Optional[str] = None):
         self.hibp_api_key = hibp_api_key
-        self.ssl_checker = SSLChecker()
-        self.email_checker = EmailSecurityChecker()
-        self.header_checker = HTTPHeaderChecker()
-        self.dns_checker = DNSInfrastructureChecker()
-        self.breach_checker = BreachChecker()
-        self.website_checker = WebsiteSecurityChecker()
-        self.scorer = RiskScorer()
 
     def scan(self, domain: str) -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
@@ -768,25 +1619,37 @@ class SecurityScanner:
             "recommendations": [],
         }
 
-        checks = {
-            "ssl": (self.ssl_checker.check, domain),
-            "email_security": (self.email_checker.check, domain),
-            "http_headers": (self.header_checker.check, domain),
-            "dns_infrastructure": (self.dns_checker.check, domain),
-            "breaches": (self.breach_checker.check, domain),
-            "website_security": (self.website_checker.check, domain),
+        checkers = {
+            "ssl":                 (SSLChecker().check,               domain),
+            "email_security":      (EmailSecurityChecker().check,      domain),
+            "email_hardening":     (EmailHardeningChecker().check,     domain),
+            "http_headers":        (HTTPHeaderChecker().check,         domain),
+            "waf":                 (WAFChecker().check,                domain),
+            "cloud_cdn":           (CloudCDNChecker().check,           domain),
+            "domain_intel":        (DomainIntelChecker().check,        domain),
+            "subdomains":          (SubdomainChecker().check,          domain),
+            "exposed_admin":       (ExposedAdminChecker().check,       domain),
+            "vpn_remote":          (VPNRemoteAccessChecker().check,    domain),
+            "dns_infrastructure":  (DNSInfrastructureChecker().check,  domain),
+            "high_risk_protocols": (HighRiskProtocolChecker().check,   domain),
+            "security_policy":     (SecurityPolicyChecker().check,     domain),
+            "dnsbl":               (DNSBLChecker().check,              domain),
+            "tech_stack":          (TechStackChecker().check,          domain),
+            "breaches":            (BreachChecker().check,             domain),
+            "website_security":    (WebsiteSecurityChecker().check,    domain),
+            "payment_security":    (PaymentSecurityChecker().check,    domain),
         }
 
         cat_results = {}
-        with ThreadPoolExecutor(max_workers=6) as ex:
+        with ThreadPoolExecutor(max_workers=10) as ex:
             futures = {}
-            for name, (fn, arg) in checks.items():
+            for name, (fn, arg) in checkers.items():
                 if name == "breaches":
                     futures[ex.submit(fn, arg, self.hibp_api_key)] = name
                 else:
                     futures[ex.submit(fn, arg)] = name
 
-            for future in as_completed(futures, timeout=120):
+            for future in as_completed(futures, timeout=180):
                 name = futures[future]
                 try:
                     cat_results[name] = future.result(timeout=DEFAULT_TIMEOUT * 2)
@@ -794,7 +1657,8 @@ class SecurityScanner:
                     cat_results[name] = {"status": "error", "error": str(e), "issues": []}
 
         results["categories"] = cat_results
-        risk_score, risk_level, recommendations = self.scorer.calculate(cat_results)
+        scorer = RiskScorer()
+        risk_score, risk_level, recommendations = scorer.calculate(cat_results)
         results["overall_risk_score"] = risk_score
         results["risk_level"] = risk_level
         results["recommendations"] = recommendations
