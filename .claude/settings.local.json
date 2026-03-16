@@ -8,7 +8,8 @@
       "Bash(winget install:*)",
       "Bash(powershell -Command \"gh repo create PSQ --public --source=. --remote=origin --push\")",
       "Bash(powershell -Command \"& ''C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe'' repo create PSQ --public --source=. --remote=origin --push\")",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
