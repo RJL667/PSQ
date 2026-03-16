@@ -372,6 +372,26 @@ def cat_dns(d, S):
         ("X-Powered-By",  dns.get("server_info", {}).get("X-Powered-By", "—")),
         ("Reverse DNS",   dns.get("reverse_dns") or "—"),
     ]
+    # Add exploit intelligence per risky port
+    risky = [p for p in ports if p.get("risk") in ("high", "medium")]
+    for p in risky:
+        rows.append(("", ""))  # spacer row
+        sev = p.get("typical_severity", "").upper() or p.get("risk", "").upper()
+        rows.append((f"Port {p['port']}/{p['service']}", f"{sev} RISK"))
+        if p.get("exploits"):
+            rows.append(("  Typical exploits", p["exploits"][:120]))
+        cvss = p.get("typical_cvss")
+        epss = p.get("typical_epss")
+        if cvss or epss:
+            detail = []
+            if cvss: detail.append(f"CVSS {cvss}")
+            if epss: detail.append(f"EPSS {int(epss*100)}%")
+            if p.get("in_kev"): detail.append("CISA KEV")
+            rows.append(("  Vuln metrics", " | ".join(detail)))
+        if p.get("typical_cves"):
+            rows.append(("  Notable CVEs", ", ".join(p["typical_cves"][:3])))
+        if p.get("insurance_risk"):
+            rows.append(("  Insurance risk", p["insurance_risk"][:120]))
     return build_cat_card("DNS & Open Ports", col, f"{len(ports)} open port(s)", rows, dns.get("issues", []), S)
 
 
@@ -379,7 +399,27 @@ def cat_hrp(d, S):
     hrp  = d.get("high_risk_protocols", {})
     svcs = hrp.get("exposed_services", [])
     col  = C_CRITICAL if svcs else C_GREEN
-    rows = [(s["service"], f"Port {s['port']} — EXPOSED") for s in svcs] or [("Status", "No critical services exposed")]
+    rows = []
+    if not svcs:
+        rows.append(("Status", "No critical services exposed"))
+    for s in svcs:
+        rows.append((s["service"], f"Port {s['port']} — EXPOSED"))
+        if s.get("exploits"):
+            rows.append(("  Known exploits", s["exploits"][:120]))
+        cvss = s.get("typical_cvss")
+        epss = s.get("typical_epss")
+        if cvss or epss:
+            detail = []
+            if cvss: detail.append(f"CVSS {cvss}")
+            if epss: detail.append(f"EPSS {int(epss*100)}%")
+            if s.get("in_kev"): detail.append("CISA KEV")
+            rows.append(("  Vuln metrics", " | ".join(detail)))
+        if s.get("typical_cves"):
+            rows.append(("  Notable CVEs", ", ".join(s["typical_cves"][:3])))
+        if s.get("insurance_risk"):
+            rows.append(("  Insurance risk", s["insurance_risk"][:120]))
+        if s.get("underwriting_impact"):
+            rows.append(("  Underwriting impact", s["underwriting_impact"][:120]))
     return build_cat_card("Database & Service Exposure", col,
                           f"{len(svcs)} critical exposure(s)", rows, hrp.get("issues", []), S)
 
@@ -597,7 +637,9 @@ def cat_external_ips(d, S):
         country = ip_entry.get("country", "")
         vuln = ip_entry.get("shodan") or {}
         cve_count = vuln.get("cve_count", 0)
-        label_parts = []
+        risk_score = vuln.get("risk_score", 100)
+        risk_label = vuln.get("risk_label", "Low")
+        label_parts = [f"Score: {risk_score}/100 ({risk_label})"]
         if org:
             label_parts.append(org)
         if country:
@@ -611,7 +653,11 @@ def cat_external_ips(d, S):
         if vuln.get("kev_count", 0) > 0:
             label_parts.append("KEV: EXPLOITED")
         sources = ", ".join(ip_entry.get("sources", []))[:50]
-        rows.append((f"{ip} ({sources})", "  |  ".join(label_parts) if label_parts else "No data"))
+        rows.append((f"{ip} ({sources})", "  |  ".join(label_parts)))
+        # Add remediation row if there are issues
+        remediation = vuln.get("remediation", "")
+        if remediation and risk_score < 80:
+            rows.append(("  → Remediation", remediation))
 
     return build_cat_card("External IP Discovery", col, summary, rows, ext.get("issues", []), S)
 

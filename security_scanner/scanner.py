@@ -820,6 +820,160 @@ class DNSInfrastructureChecker:
     INFO_PORTS = {80: "HTTP", 443: "HTTPS", 993: "IMAPS", 995: "POP3S", 8080: "HTTP-Alt", 8443: "HTTPS-Alt"}
     ALL_PORTS = {**HIGH_RISK_PORTS, **MEDIUM_RISK_PORTS, **INFO_PORTS}
 
+    # Maps each port to exploit context relevant for cyber insurance underwriting
+    PORT_EXPLOIT_MAP = {
+        21: {
+            "service": "FTP",
+            "exploits": "Anonymous login, credential brute-force, cleartext credential theft (CVE-2015-3306, CVE-2019-12815)",
+            "typical_cves": ["CVE-2015-3306", "CVE-2019-12815", "CVE-2010-4221"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.85, "in_kev": True,
+            "insurance_risk": "Data exfiltration via unencrypted file transfer; ransomware initial access vector",
+            "severity": "high",
+            "underwriting_impact": "Increases likelihood of data breach claim; cleartext credentials enable lateral movement",
+        },
+        23: {
+            "service": "Telnet",
+            "exploits": "Cleartext session hijacking, credential sniffing, brute-force attacks (Mirai botnet family)",
+            "typical_cves": ["CVE-2018-10561", "CVE-2019-7256"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.95, "in_kev": True,
+            "insurance_risk": "Full remote command execution with stolen credentials; botnet recruitment",
+            "severity": "critical",
+            "underwriting_impact": "Critical indicator of poor security hygiene; highly exploitable for ransomware deployment",
+        },
+        22: {
+            "service": "SSH",
+            "exploits": "Brute-force attacks, key-based auth bypass (CVE-2024-6387 regreSSHion, CVE-2023-48795 Terrapin)",
+            "typical_cves": ["CVE-2024-6387", "CVE-2023-48795", "CVE-2016-20012"],
+            "typical_cvss": 8.1, "typical_severity": "high",
+            "typical_epss": 0.35, "in_kev": False,
+            "insurance_risk": "Remote command execution if compromised; privilege escalation",
+            "severity": "medium",
+            "underwriting_impact": "Common but manageable with key-based auth; outdated versions significantly increase risk",
+        },
+        25: {
+            "service": "SMTP",
+            "exploits": "Open relay abuse, email spoofing, buffer overflow (CVE-2019-15846 Exim, CVE-2021-21315)",
+            "typical_cves": ["CVE-2019-15846", "CVE-2021-21315", "CVE-2020-28017"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.60, "in_kev": True,
+            "insurance_risk": "Email-based fraud, phishing campaigns from compromised mail server, BEC attacks",
+            "severity": "medium",
+            "underwriting_impact": "Exposed SMTP increases business email compromise claim probability",
+        },
+        110: {
+            "service": "POP3",
+            "exploits": "Cleartext credential theft, brute-force, buffer overflow attacks",
+            "typical_cves": ["CVE-2011-1720"],
+            "typical_cvss": 7.5, "typical_severity": "high",
+            "typical_epss": 0.15, "in_kev": False,
+            "insurance_risk": "Email account takeover via credential interception",
+            "severity": "medium",
+            "underwriting_impact": "Unencrypted email retrieval exposes credentials; migrate to POP3S (995)",
+        },
+        143: {
+            "service": "IMAP",
+            "exploits": "Cleartext credential interception, brute-force, injection attacks",
+            "typical_cves": ["CVE-2021-33515", "CVE-2019-11500"],
+            "typical_cvss": 7.5, "typical_severity": "high",
+            "typical_epss": 0.12, "in_kev": False,
+            "insurance_risk": "Email account compromise leading to BEC or data theft",
+            "severity": "medium",
+            "underwriting_impact": "Unencrypted IMAP exposes email credentials in transit; upgrade to IMAPS (993)",
+        },
+        80: {
+            "service": "HTTP",
+            "exploits": "XSS, SQL injection, CSRF, directory traversal, unencrypted data exposure",
+            "typical_cves": [],
+            "typical_cvss": 0.0, "typical_severity": "info",
+            "typical_epss": 0.0, "in_kev": False,
+            "insurance_risk": "Web application attacks; data exposure if sensitive content served over HTTP",
+            "severity": "info",
+            "underwriting_impact": "Standard web port; risk depends on whether HTTPS redirect is enforced",
+        },
+        443: {
+            "service": "HTTPS",
+            "exploits": "TLS downgrade attacks, certificate vulnerabilities, web app exploits (OWASP Top 10)",
+            "typical_cves": [],
+            "typical_cvss": 0.0, "typical_severity": "info",
+            "typical_epss": 0.0, "in_kev": False,
+            "insurance_risk": "Primary attack surface for web applications",
+            "severity": "info",
+            "underwriting_impact": "Expected to be open; risk depends on TLS configuration and web app security",
+        },
+        3306: {
+            "service": "MySQL",
+            "exploits": "Authentication bypass (CVE-2012-2122), SQL injection, credential brute-force, data dumping",
+            "typical_cves": ["CVE-2012-2122", "CVE-2016-6662", "CVE-2020-14812"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.92, "in_kev": True,
+            "insurance_risk": "Direct database access enables mass data theft; ransomware encryption of data",
+            "severity": "critical",
+            "underwriting_impact": "Publicly exposed database is a critical underwriting red flag; high probability of data breach claim",
+        },
+        3389: {
+            "service": "RDP",
+            "exploits": "BlueKeep (CVE-2019-0708), credential brute-force, NLA bypass, DejaBlue (CVE-2019-1181)",
+            "typical_cves": ["CVE-2019-0708", "CVE-2019-1181", "CVE-2019-1182"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.97, "in_kev": True,
+            "insurance_risk": "Primary ransomware entry point; #1 initial access vector in insurance claims",
+            "severity": "critical",
+            "underwriting_impact": "Exposed RDP is the single highest risk factor in cyber insurance; dramatically increases ransomware claim probability",
+        },
+        5900: {
+            "service": "VNC",
+            "exploits": "Authentication bypass, password brute-force, unencrypted sessions (CVE-2019-15678, CVE-2006-2369)",
+            "typical_cves": ["CVE-2019-15678", "CVE-2006-2369", "CVE-2019-15679"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.70, "in_kev": False,
+            "insurance_risk": "Full graphical remote control; often used with weak or no authentication",
+            "severity": "critical",
+            "underwriting_impact": "Remote desktop without encryption; high-risk indicator for unauthorised access claims",
+        },
+        8080: {
+            "service": "HTTP-Alt",
+            "exploits": "Same as HTTP; often hosts dev/staging/admin interfaces with weaker security",
+            "typical_cves": [],
+            "typical_cvss": 5.0, "typical_severity": "medium",
+            "typical_epss": 0.05, "in_kev": False,
+            "insurance_risk": "Alternative HTTP port often exposes admin panels, APIs, or development environments",
+            "severity": "medium",
+            "underwriting_impact": "May indicate exposed management interfaces; review what service is running",
+        },
+        8443: {
+            "service": "HTTPS-Alt",
+            "exploits": "Same as HTTPS; commonly used for management consoles (VMware, network devices)",
+            "typical_cves": [],
+            "typical_cvss": 0.0, "typical_severity": "info",
+            "typical_epss": 0.0, "in_kev": False,
+            "insurance_risk": "Often hosts administrative interfaces for infrastructure management",
+            "severity": "info",
+            "underwriting_impact": "Low risk if properly secured; verify it's not an exposed admin console",
+        },
+        993: {
+            "service": "IMAPS",
+            "exploits": "TLS-protected email retrieval; significantly lower risk than plaintext IMAP",
+            "typical_cves": [],
+            "typical_cvss": 0.0, "typical_severity": "info",
+            "typical_epss": 0.0, "in_kev": False,
+            "insurance_risk": "Encrypted email access; standard configuration",
+            "severity": "info",
+            "underwriting_impact": "Good practice — encrypted email retrieval",
+        },
+        995: {
+            "service": "POP3S",
+            "exploits": "TLS-protected email retrieval; significantly lower risk than plaintext POP3",
+            "typical_cves": [],
+            "typical_cvss": 0.0, "typical_severity": "info",
+            "typical_epss": 0.0, "in_kev": False,
+            "insurance_risk": "Encrypted email access; standard configuration",
+            "severity": "info",
+            "underwriting_impact": "Good practice — encrypted email retrieval",
+        },
+    }
+
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed", "dns_records": {}, "reverse_dns": None,
@@ -869,7 +1023,18 @@ class DNSInfrastructureChecker:
                 s.settimeout(3)
                 if s.connect_ex((ip, port)) == 0:
                     risk = "high" if port in self.HIGH_RISK_PORTS else "medium" if port in self.MEDIUM_RISK_PORTS else "info"
-                    return {"port": port, "service": self.ALL_PORTS.get(port, "Unknown"), "risk": risk}
+                    entry = {"port": port, "service": self.ALL_PORTS.get(port, "Unknown"), "risk": risk}
+                    exploit_info = self.PORT_EXPLOIT_MAP.get(port)
+                    if exploit_info:
+                        entry["exploits"] = exploit_info["exploits"]
+                        entry["insurance_risk"] = exploit_info["insurance_risk"]
+                        entry["underwriting_impact"] = exploit_info["underwriting_impact"]
+                        entry["typical_cves"] = exploit_info.get("typical_cves", [])
+                        entry["typical_cvss"] = exploit_info.get("typical_cvss", 0.0)
+                        entry["typical_severity"] = exploit_info.get("typical_severity", "info")
+                        entry["typical_epss"] = exploit_info.get("typical_epss", 0.0)
+                        entry["in_kev"] = exploit_info.get("in_kev", False)
+                    return entry
             except Exception:
                 pass
             finally:
@@ -905,10 +1070,15 @@ class DNSInfrastructureChecker:
     def _assess_risk(self, open_ports: list) -> tuple:
         issues, score = [], 0
         for p in open_ports:
+            exploit_ctx = p.get("insurance_risk", "")
             if p["risk"] == "high":
-                score += 40; issues.append(f"High-risk port open: {p['port']} ({p['service']})")
+                score += 40
+                issues.append(f"High-risk port open: {p['port']} ({p['service']}) — {exploit_ctx}" if exploit_ctx
+                              else f"High-risk port open: {p['port']} ({p['service']})")
             elif p["risk"] == "medium":
-                score += 15; issues.append(f"Medium-risk port open: {p['port']} ({p['service']})")
+                score += 15
+                issues.append(f"Medium-risk port open: {p['port']} ({p['service']}) — {exploit_ctx}" if exploit_ctx
+                              else f"Medium-risk port open: {p['port']} ({p['service']})")
         return min(score, 150), issues
 
 
@@ -936,6 +1106,138 @@ class HighRiskProtocolChecker:
         8069: "Odoo ERP",
     }
 
+    # Exploit and insurance underwriting context for each critical service
+    SERVICE_EXPLOIT_MAP = {
+        445: {
+            "exploits": "EternalBlue (CVE-2017-0144), WannaCry, NotPetya, SMBGhost (CVE-2020-0796)",
+            "typical_cves": ["CVE-2017-0144", "CVE-2020-0796", "CVE-2017-0145"],
+            "typical_cvss": 10.0, "typical_severity": "critical",
+            "typical_epss": 0.97, "in_kev": True,
+            "insurance_risk": "Primary ransomware propagation vector; enables network-wide encryption within minutes",
+            "underwriting_impact": "Exposed SMB is a critical deal-breaker for cyber insurance; associated with the largest ransomware claims globally",
+        },
+        161: {
+            "exploits": "Community string brute-force, SNMP reflection DDoS, information disclosure (CVE-2017-6742)",
+            "typical_cves": ["CVE-2017-6742", "CVE-2017-6744", "CVE-2018-0161"],
+            "typical_cvss": 8.8, "typical_severity": "high",
+            "typical_epss": 0.45, "in_kev": True,
+            "insurance_risk": "Network reconnaissance and configuration theft; DDoS amplification",
+            "underwriting_impact": "Enables attackers to map entire internal network; significant pre-attack intelligence gathering",
+        },
+        27017: {
+            "exploits": "Default no-auth access, Meow ransomware, data theft bots, CVE-2019-2386",
+            "typical_cves": ["CVE-2019-2386", "CVE-2015-7882", "CVE-2013-1892"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.88, "in_kev": False,
+            "insurance_risk": "Mass data exfiltration; databases often ransomed directly without deploying malware",
+            "underwriting_impact": "Publicly exposed MongoDB frequently results in immediate data breach notification requirements",
+        },
+        6379: {
+            "exploits": "No-auth RCE via SLAVEOF/MODULE, credential-less data dump, cryptomining (CVE-2022-0543)",
+            "typical_cves": ["CVE-2022-0543", "CVE-2015-4335", "CVE-2015-8080"],
+            "typical_cvss": 10.0, "typical_severity": "critical",
+            "typical_epss": 0.90, "in_kev": False,
+            "insurance_risk": "Remote code execution without authentication; data theft and server compromise",
+            "underwriting_impact": "Redis exposed without auth is near-guaranteed compromise; major breach claim indicator",
+        },
+        9200: {
+            "exploits": "Unauthenticated data access, Groovy script RCE (CVE-2015-1427), Log4Shell via logging",
+            "typical_cves": ["CVE-2015-1427", "CVE-2014-3120", "CVE-2021-44228"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.95, "in_kev": True,
+            "insurance_risk": "Full database content exposure; often contains PII, logs, and business data",
+            "underwriting_impact": "Elasticsearch exposure frequently triggers data breach notification obligations",
+        },
+        5432: {
+            "exploits": "Credential brute-force, privilege escalation (CVE-2023-5868), SQL injection chaining",
+            "typical_cves": ["CVE-2023-5868", "CVE-2019-9193", "CVE-2023-39417"],
+            "typical_cvss": 8.8, "typical_severity": "high",
+            "typical_epss": 0.40, "in_kev": False,
+            "insurance_risk": "Direct access to structured business data; credential reuse attacks",
+            "underwriting_impact": "Exposed PostgreSQL significantly increases data breach claim probability",
+        },
+        1433: {
+            "exploits": "SA account brute-force, xp_cmdshell RCE, CVE-2020-0618, lateral movement via linked servers",
+            "typical_cves": ["CVE-2020-0618", "CVE-2019-1068", "CVE-2020-1350"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.80, "in_kev": True,
+            "insurance_risk": "Full OS command execution via database; often used for ransomware deployment",
+            "underwriting_impact": "MSSQL exposure is a top-tier risk; enables both data theft and ransomware in single attack chain",
+        },
+        5984: {
+            "exploits": "Default admin access, Futon admin panel, RCE via replication (CVE-2017-12635/12636)",
+            "typical_cves": ["CVE-2017-12635", "CVE-2017-12636", "CVE-2022-24706"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.92, "in_kev": True,
+            "insurance_risk": "Full database access and remote code execution without authentication",
+            "underwriting_impact": "CouchDB often runs unauthenticated; high probability of data compromise",
+        },
+        7001: {
+            "exploits": "Deserialization RCE (CVE-2020-14882, CVE-2023-21839), T3 protocol attacks",
+            "typical_cves": ["CVE-2020-14882", "CVE-2023-21839", "CVE-2020-14883"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.97, "in_kev": True,
+            "insurance_risk": "Remote code execution on application server; gateway to internal network",
+            "underwriting_impact": "WebLogic has extensive CVE history; exposed instances are actively targeted",
+        },
+        8888: {
+            "exploits": "Unauthenticated code execution, token brute-force, arbitrary file access",
+            "typical_cves": ["CVE-2019-9644"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.50, "in_kev": False,
+            "insurance_risk": "Direct server-side code execution; full system compromise",
+            "underwriting_impact": "Jupyter Notebook allows arbitrary code execution; critical exposure if public-facing",
+        },
+        11211: {
+            "exploits": "DDoS amplification (51,000x factor), data cache theft, no authentication",
+            "typical_cves": ["CVE-2019-11596", "CVE-2019-15026"],
+            "typical_cvss": 7.5, "typical_severity": "high",
+            "typical_epss": 0.65, "in_kev": False,
+            "insurance_risk": "Massive DDoS amplification; cached data exposure including session tokens",
+            "underwriting_impact": "Memcached is the largest known DDoS amplification vector; targeted for reflection attacks",
+        },
+        2375: {
+            "exploits": "Unauthenticated container escape, host filesystem access, cryptomining deployment",
+            "typical_cves": ["CVE-2019-5736", "CVE-2020-15257"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.85, "in_kev": True,
+            "insurance_risk": "Full host system compromise via container escape; cryptomining and data theft",
+            "underwriting_impact": "Unencrypted Docker API is equivalent to root shell access; critical finding",
+        },
+        2376: {
+            "exploits": "Certificate-based auth bypass, container escape if misconfigured",
+            "typical_cves": ["CVE-2019-5736"],
+            "typical_cvss": 8.6, "typical_severity": "high",
+            "typical_epss": 0.40, "in_kev": True,
+            "insurance_risk": "Container orchestration compromise; potential host takeover",
+            "underwriting_impact": "Encrypted Docker API still poses risk if certificates are weak or leaked",
+        },
+        9092: {
+            "exploits": "Unauthenticated message consumption, data injection, CVE-2023-25194",
+            "typical_cves": ["CVE-2023-25194", "CVE-2024-31141"],
+            "typical_cvss": 8.8, "typical_severity": "high",
+            "typical_epss": 0.30, "in_kev": False,
+            "insurance_risk": "Access to real-time data streams; message injection for data manipulation",
+            "underwriting_impact": "Kafka often carries sensitive business data streams; exposure enables data theft",
+        },
+        4848: {
+            "exploits": "Default credentials, admin console RCE (CVE-2011-4358), deployment of malicious apps",
+            "typical_cves": ["CVE-2011-4358", "CVE-2017-1000028"],
+            "typical_cvss": 9.8, "typical_severity": "critical",
+            "typical_epss": 0.65, "in_kev": False,
+            "insurance_risk": "Full application server control via admin console",
+            "underwriting_impact": "GlassFish admin consoles frequently use default credentials; easy target",
+        },
+        8069: {
+            "exploits": "Default admin access, CVE-2023-1434, business logic manipulation",
+            "typical_cves": ["CVE-2023-1434", "CVE-2017-10803"],
+            "typical_cvss": 8.8, "typical_severity": "high",
+            "typical_epss": 0.35, "in_kev": False,
+            "insurance_risk": "Full ERP system compromise; financial data theft, invoice fraud",
+            "underwriting_impact": "ERP exposure enables financial fraud and business data theft at scale",
+        },
+    }
+
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed",
@@ -955,7 +1257,18 @@ class HighRiskProtocolChecker:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(3)
                 if s.connect_ex((ip, port)) == 0:
-                    return {"port": port, "service": service}
+                    entry = {"port": port, "service": service}
+                    exploit_info = self.SERVICE_EXPLOIT_MAP.get(port)
+                    if exploit_info:
+                        entry["exploits"] = exploit_info["exploits"]
+                        entry["insurance_risk"] = exploit_info["insurance_risk"]
+                        entry["underwriting_impact"] = exploit_info["underwriting_impact"]
+                        entry["typical_cves"] = exploit_info.get("typical_cves", [])
+                        entry["typical_cvss"] = exploit_info.get("typical_cvss", 0.0)
+                        entry["typical_severity"] = exploit_info.get("typical_severity", "critical")
+                        entry["typical_epss"] = exploit_info.get("typical_epss", 0.0)
+                        entry["in_kev"] = exploit_info.get("in_kev", False)
+                    return entry
             except Exception:
                 pass
             finally:
@@ -977,9 +1290,9 @@ class HighRiskProtocolChecker:
         result["critical_count"] = len(exposed)
 
         for e in exposed:
+            insurance_ctx = e.get("insurance_risk", "database/service should never be publicly accessible")
             result["issues"].append(
-                f"CRITICAL: {e['service']} (port {e['port']}) exposed to internet — "
-                f"database/service should never be publicly accessible"
+                f"CRITICAL: {e['service']} (port {e['port']}) exposed to internet — {insurance_ctx}"
             )
 
         return result
@@ -1905,12 +2218,56 @@ class ExternalIPDiscoveryChecker:
         except Exception:
             return {}
 
+    def _build_ip_remediation(self, vuln: dict) -> str:
+        """Generate remediation text for a single IP based on its vulnerability profile."""
+        parts = []
+        if vuln.get("kev_count", 0) > 0:
+            parts.append(f"URGENT: {vuln['kev_count']} CVE(s) confirmed exploited in the wild (CISA KEV) — patch within 48 hours.")
+        if vuln.get("critical_count", 0) > 0:
+            parts.append(f"Patch {vuln['critical_count']} critical CVE(s) immediately.")
+        if vuln.get("high_count", 0) > 0:
+            parts.append(f"Review and patch {vuln['high_count']} high-severity CVE(s) within 30 days.")
+        if vuln.get("medium_count", 0) > 0:
+            parts.append(f"Schedule patching of {vuln['medium_count']} medium-severity CVE(s).")
+        high_epss = sum(1 for c in vuln.get("cves", []) if (c.get("epss_score") or 0) >= 0.1)
+        if high_epss > 0:
+            parts.append(f"Prioritise {high_epss} CVE(s) with EPSS ≥ 10% — high exploitation probability.")
+        # Check for risky open ports
+        risky_ports = {21: "FTP", 23: "Telnet", 3306: "MySQL", 3389: "RDP",
+                       5900: "VNC", 27017: "MongoDB", 6379: "Redis"}
+        exposed = [f"{risky_ports[p]} ({p})" for p in vuln.get("open_ports", []) if p in risky_ports]
+        if exposed:
+            parts.append(f"Restrict access to exposed services: {', '.join(exposed)}.")
+        if not parts and vuln.get("cve_count", 0) == 0:
+            return "No known vulnerabilities detected. Continue monitoring."
+        if not parts:
+            return "Low-severity issues only. Schedule routine review."
+        return " ".join(parts)
+
+    def _calculate_ip_risk_score(self, vuln: dict) -> int:
+        """Calculate 0-100 risk score for a single IP (100=clean, 0=critical)."""
+        penalty = 0
+        penalty += vuln.get("critical_count", 0) * 30
+        penalty += vuln.get("high_count", 0) * 15
+        penalty += vuln.get("medium_count", 0) * 5
+        penalty += vuln.get("kev_count", 0) * 25
+        high_epss = sum(1 for c in vuln.get("cves", []) if (c.get("epss_score") or 0) >= 0.1)
+        penalty += high_epss * 10
+        return max(0, 100 - min(100, penalty))
+
+    def _ip_risk_label(self, score: int) -> str:
+        if score >= 80: return "Low"
+        if score >= 50: return "Medium"
+        if score >= 20: return "High"
+        return "Critical"
+
     def _scan_ip_vulns(self, ip: str, kev_data: dict) -> dict:
         """Query Shodan InternetDB for a single IP and enrich CVEs."""
         vuln_result = {
             "open_ports": [], "cve_count": 0, "cves": [],
             "critical_count": 0, "high_count": 0, "medium_count": 0, "low_count": 0,
             "max_cvss": 0.0, "max_epss": 0.0, "kev_count": 0,
+            "risk_score": 100, "risk_label": "Low", "remediation": "",
         }
         try:
             r = requests.get(self.INTERNETDB_URL.format(ip=ip),
@@ -1971,6 +2328,11 @@ class ExternalIPDiscoveryChecker:
             vuln_result["max_cvss"] = round(max(cvss_scores), 1) if cvss_scores else 0.0
             vuln_result["max_epss"] = round(max(epss_scores), 4) if epss_scores else 0.0
             vuln_result["kev_count"] = sum(1 for c in enriched if c.get("kev_exploited"))
+
+            # Per-IP risk score and remediation
+            vuln_result["risk_score"] = self._calculate_ip_risk_score(vuln_result)
+            vuln_result["risk_label"] = self._ip_risk_label(vuln_result["risk_score"])
+            vuln_result["remediation"] = self._build_ip_remediation(vuln_result)
 
         except Exception:
             pass
