@@ -164,7 +164,27 @@ class SSLChecker:
 # ---------------------------------------------------------------------------
 
 class EmailSecurityChecker:
-    DKIM_SELECTORS = ["default", "google", "selector1", "selector2", "mail", "dkim", "k1", "smtp"]
+    DKIM_SELECTORS = [
+        # Microsoft / Office 365
+        "selector1", "selector2",
+        # Google Workspace
+        "google", "google2",
+        # Common defaults
+        "default", "dkim", "mail", "smtp", "k1", "k2",
+        # Transactional / marketing ESPs
+        "sendgrid", "sg", "mandrill", "mailchimp", "mc",
+        "postmark", "pm", "ses", "amazonses",
+        "mailgun", "mg", "sparkpost",
+        # SA-relevant providers
+        "everlytickey1", "everlytickey2", "everlytic",
+        # Security / enterprise gateways
+        "mimecast", "proofpoint", "pphosted", "barracuda",
+        "cisco", "ironport",
+        # Hosted email / other
+        "protonmail", "zendesk", "zd", "hubspot", "hs1", "hs2",
+        "freshdesk", "cm", "campaignmonitor",
+        "brevo", "sendinblue", "mailjet",
+    ]
 
     def check(self, domain: str) -> dict:
         result = {
@@ -194,12 +214,40 @@ class EmailSecurityChecker:
             for rdata in answers:
                 txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
                 if txt.startswith("v=spf1"):
-                    valid = "all" in txt
-                    return {"present": True, "valid": valid, "record": txt,
-                            "dangerous": "+all" in txt}
+                    # SPF is valid if it has an 'all' mechanism OR a 'redirect='
+                    valid = "all" in txt or "redirect=" in txt
+                    dangerous = "+all" in txt
+                    # Count DNS lookup mechanisms (SPF spec limit = 10)
+                    lookup_mechanisms = re.findall(
+                        r'\b(?:include:|a:|mx:|ptr:|redirect=)', txt, re.IGNORECASE)
+                    dns_lookups = len(lookup_mechanisms)
+                    # Follow include: chains (1 level deep) to count nested lookups
+                    includes = re.findall(r'include:(\S+)', txt)
+                    for inc_domain in includes[:10]:
+                        try:
+                            inc_answers = dns.resolver.resolve(inc_domain, "TXT", lifetime=3)
+                            for inc_rdata in inc_answers:
+                                inc_txt = "".join(
+                                    s.decode() if isinstance(s, bytes) else s
+                                    for s in inc_rdata.strings)
+                                if inc_txt.startswith("v=spf1"):
+                                    nested = re.findall(
+                                        r'\b(?:include:|a:|mx:|ptr:|redirect=)',
+                                        inc_txt, re.IGNORECASE)
+                                    dns_lookups += len(nested)
+                                    break
+                        except Exception:
+                            pass
+                    exceeds_limit = dns_lookups > 10
+                    return {
+                        "present": True, "valid": valid, "record": txt,
+                        "dangerous": dangerous, "dns_lookups": dns_lookups,
+                        "exceeds_lookup_limit": exceeds_limit,
+                    }
         except Exception:
             pass
-        return {"present": False, "valid": False, "record": None, "dangerous": False}
+        return {"present": False, "valid": False, "record": None,
+                "dangerous": False, "dns_lookups": 0, "exceeds_lookup_limit": False}
 
     def _check_dmarc(self, domain: str) -> dict:
         try:
@@ -209,19 +257,38 @@ class EmailSecurityChecker:
                 if "v=DMARC1" in txt:
                     match = re.search(r"p=(\w+)", txt)
                     policy = match.group(1) if match else "none"
-                    return {"present": True, "policy": policy, "record": txt}
+                    # Extract pct (percentage enforcement, default 100)
+                    pct_match = re.search(r"pct=(\d+)", txt)
+                    pct = int(pct_match.group(1)) if pct_match else 100
+                    # Extract subdomain policy
+                    sp_match = re.search(r"sp=(\w+)", txt)
+                    sp = sp_match.group(1) if sp_match else None
+                    # Extract rua (aggregate reporting)
+                    rua_match = re.search(r"rua=([^;\s]+)", txt)
+                    rua = rua_match.group(1) if rua_match else None
+                    return {
+                        "present": True, "policy": policy, "record": txt,
+                        "pct": pct, "subdomain_policy": sp,
+                        "has_reporting": rua is not None,
+                    }
         except Exception:
             pass
-        return {"present": False, "policy": None, "record": None}
+        return {"present": False, "policy": None, "record": None,
+                "pct": 100, "subdomain_policy": None, "has_reporting": False}
 
     def _check_dkim(self, domain: str) -> dict:
         found = []
-        for selector in self.DKIM_SELECTORS:
+
+        def _probe(selector):
             try:
-                dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=5)
-                found.append(selector)
+                dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=3)
+                return selector
             except Exception:
-                pass
+                return None
+
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            results = ex.map(_probe, self.DKIM_SELECTORS)
+            found = [s for s in results if s]
         return {"selectors_found": found}
 
     def _check_mx(self, domain: str) -> dict:
@@ -236,18 +303,27 @@ class EmailSecurityChecker:
 
     def _calculate_score(self, spf, dmarc, dkim) -> tuple:
         score, issues = 10, []
+        # SPF scoring
         if not spf["present"]:
             score -= 3; issues.append("No SPF record — spoofing risk")
         elif spf.get("dangerous"):
             score -= 3; issues.append("SPF uses '+all' — allows any server to send on your behalf")
         elif not spf["valid"]:
             score -= 1; issues.append("SPF record may be invalid")
+        if spf.get("exceeds_lookup_limit"):
+            score -= 1; issues.append(f"SPF exceeds 10 DNS lookup limit ({spf.get('dns_lookups', 0)} lookups) — may cause authentication failures")
+        # DMARC scoring
         if not dmarc["present"]:
             score -= 4; issues.append("No DMARC record — phishing risk")
         elif dmarc["policy"] == "none":
             score -= 2; issues.append("DMARC policy is 'none' — no enforcement")
         elif dmarc["policy"] == "quarantine":
             score -= 1; issues.append("DMARC policy is 'quarantine' — consider upgrading to 'reject'")
+        if dmarc["present"] and dmarc.get("pct", 100) < 100:
+            score -= 1; issues.append(f"DMARC only enforced on {dmarc['pct']}% of messages (pct={dmarc['pct']})")
+        if dmarc["present"] and not dmarc.get("has_reporting"):
+            issues.append("DMARC has no aggregate reporting (rua) — add rua=mailto: to monitor abuse")
+        # DKIM scoring
         if not dkim["selectors_found"]:
             score -= 2; issues.append("No DKIM selectors found for common selector names")
         return max(0, score), issues
