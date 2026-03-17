@@ -456,6 +456,30 @@ def start_scan():
     scan_id = str(uuid.uuid4())
     save_scan(scan_id, domain, industry, annual_revenue, country)
 
+    # Auto-create CRM lead if no client exists for this domain
+    client_id = None
+    try:
+        with get_db() as conn:
+            existing = conn.execute("SELECT id FROM clients WHERE domain=? LIMIT 1", (domain,)).fetchone()
+            if existing:
+                client_id = existing['id']
+            else:
+                client_id = str(uuid.uuid4())
+                now = _now()
+                conn.execute(
+                    """INSERT INTO clients (id, company_name, domain, industry, annual_revenue,
+                       country, pipeline_stage, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (client_id, domain, domain, industry, annual_revenue,
+                     country or 'ZA', 'lead', now, now)
+                )
+                conn.commit()
+            # Pre-link scan to client
+            conn.execute("UPDATE scans SET client_id=? WHERE id=?", (client_id, scan_id))
+            conn.commit()
+    except Exception:
+        pass  # Don't fail the scan if CRM creation fails
+
     t = threading.Thread(
         target=run_scan,
         args=(scan_id, domain, industry, annual_revenue, annual_revenue_zar, country,
