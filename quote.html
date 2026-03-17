@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Phishield Cyber Cover – Interactive Quote</title>
+  <meta name="description" content="Get an instant cyber insurance quote from ASI Bestsure Phishield. Interactive estimator with industry risk insights."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="quote.css"/>
+</head>
+<body>
+
+  <!-- ===== HEADER ===== -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo-area">
+        <div class="shield-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div>
+          <h1>ASI Bestsure – <span class="brand-accent">Phishield</span></h1>
+          <p class="header-tagline">Cyber Insurance Quote Estimator</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== PROGRESS BAR ===== -->
+  <div class="main-container">
+    <div class="progress-wrapper">
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-steps">
+        <button class="progress-step active" id="pStep1" data-step="1">
+          <span class="ps-dot"><span class="ps-num">1</span></span>
+          <span class="ps-label">Industry</span>
+        </button>
+        <button class="progress-step" id="pStep2" data-step="2">
+          <span class="ps-dot"><span class="ps-num">2</span></span>
+          <span class="ps-label">Coverage</span>
+        </button>
+        <button class="progress-step" id="pStep3" data-step="3">
+          <span class="ps-dot"><span class="ps-num">3</span></span>
+          <span class="ps-label">Security</span>
+        </button>
+        <button class="progress-step" id="pStep4" data-step="4">
+          <span class="ps-dot"><span class="ps-num">4</span></span>
+          <span class="ps-label">Details</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== FLOATING QUOTE TICKER ===== -->
+    <div class="quote-ticker" id="quoteTicker">
+      <div class="ticker-label">Estimated Monthly</div>
+      <div class="ticker-amount" id="tickerAmount">--</div>
+    </div>
+
+    <!-- ===== STEP 1: INDUSTRY ===== -->
+    <section class="step-panel active" id="step1">
+      <div class="glass-card">
+        <div class="step-header">
+          <h2>Select Your Industry</h2>
+          <p>Your industry affects your cyber risk profile and premium calculation.</p>
+        </div>
+
+        <div class="form-group">
+          <label class="field-label" for="industrySelect">Industry</label>
+          <select class="form-select" id="industrySelect" required>
+            <option value="" disabled selected>Select your industry</option>
+            <option value="Agriculture" data-risk="low">Agriculture</option>
+            <option value="Construction" data-risk="low">Construction</option>
+            <option value="Finance, Insurance and Real Estate" data-risk="high">Finance, Insurance and Real Estate</option>
+            <option value="Healthcare" data-risk="critical">Healthcare</option>
+            <option value="Manufacturing" data-risk="medium">Manufacturing</option>
+            <option value="Mining" data-risk="medium">Mining</option>
+            <option value="Public Administration" data-risk="critical">Public Administration</option>
+            <option value="Retail" data-risk="medium">Retail</option>
+            <option value="Services" data-risk="low">Services</option>
+            <option value="Software and Technology" data-risk="high">Software and Technology</option>
+            <option value="Transportation" data-risk="medium">Transportation</option>
+            <option value="Wholesale" data-risk="low">Wholesale</option>
+            <option value="Other" data-risk="medium">Other</option>
+          </select>
+        </div>
+
+        <!-- Risk Insight Panel (appears after selection) -->
+        <div class="risk-insight" id="riskInsight">
+          <div class="ri-gauge-wrap">
+            <svg class="ri-gauge" viewBox="0 0 120 70">
+              <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8" stroke-linecap="round"/>
+              <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="url(#gaugeGrad)" stroke-width="8" stroke-linecap="round" id="gaugeArc" stroke-dasharray="0 157"/>
+              <defs>
+                <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#2ec4b6"/>
+                  <stop offset="50%" stop-color="#ffb703"/>
+                  <stop offset="100%" stop-color="#e63946"/>
+                </linearGradient>
+              </defs>
+              <text x="60" y="55" text-anchor="middle" fill="white" font-size="16" font-weight="800" id="gaugeLabel">--</text>
+              <text x="60" y="68" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="7" font-weight="600">RISK LEVEL</text>
+            </svg>
+          </div>
+          <div class="ri-details">
+            <h4 id="riIndustry">--</h4>
+            <div class="ri-stats">
+              <div class="ri-stat">
+                <span class="ri-stat-value" id="riBreachCost">--</span>
+                <span class="ri-stat-label">Avg Breach Cost (SA)</span>
+              </div>
+              <div class="ri-stat">
+                <span class="ri-stat-value" id="riCostPerRecord">--</span>
+                <span class="ri-stat-label">Cost per Record</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="industry-disclaimer" id="industryDisclaimer"></div>
+
+        <div class="btn-row">
+          <div></div>
+          <button type="button" class="btn btn-primary" id="nextBtn1" disabled>
+            Continue to Coverage
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== STEP 2: COVERAGE ===== -->
+    <section class="step-panel" id="step2">
+      <div class="glass-card">
+        <div class="step-header">
+          <h2>Choose Your Coverage</h2>
+          <p>Select your revenue band and desired cover limit to see instant pricing.</p>
+        </div>
+
+        <!-- Revenue Band Cards -->
+        <div class="coverage-section">
+          <label class="field-label">Company Annual Revenue</label>
+          <div class="card-selector" id="revenueCards">
+            <button type="button" class="sel-card active" data-index="0">
+              <span class="sc-value">R0 – R10M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="1">
+              <span class="sc-value">R10M – R25M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="2">
+              <span class="sc-value">R25M – R50M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="3">
+              <span class="sc-value">R50M – R75M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="4">
+              <span class="sc-value">R75M – R100M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="5">
+              <span class="sc-value">R100M – R150M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="6">
+              <span class="sc-value">R150M – R200M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="7">
+              <span class="sc-value">Over R200M</span>
+            </button>
+          </div>
+          <div id="customTurnoverGroup" class="custom-input-group" style="display:none;">
+            <label class="field-label">Specify your turnover</label>
+            <input class="form-input" id="customTurnover" type="text" placeholder="e.g. R250,000,000"/>
+          </div>
+        </div>
+
+        <!-- Cover Limit Cards -->
+        <div class="coverage-section">
+          <label class="field-label">Cover Limit</label>
+          <div class="card-selector" id="coverCards">
+            <button type="button" class="sel-card active" data-index="0">
+              <span class="sc-value">R1M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="1">
+              <span class="sc-value">R2.5M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="2">
+              <span class="sc-value">R5M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="3">
+              <span class="sc-value">R7.5M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="4">
+              <span class="sc-value">R10M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="5">
+              <span class="sc-value">R15M</span>
+            </button>
+            <button type="button" class="sel-card" data-index="6">
+              <span class="sc-value">Over R15M</span>
+            </button>
+          </div>
+          <div id="customCoverGroup" class="custom-input-group" style="display:none;">
+            <label class="field-label">Specify your desired cover</label>
+            <input class="form-input" id="customCover" type="text" placeholder="e.g. R20,000,000"/>
+          </div>
+        </div>
+
+        <!-- Live Pricing Box -->
+        <div class="pricing-display" id="pricingDisplay">
+          <div class="pd-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="pd-icon"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M8 10h8M8 14h8"/></svg>
+            <span>Your Estimated Premium</span>
+          </div>
+          <div class="pd-amounts">
+            <div class="pd-amount-item">
+              <div class="pd-label">Annual</div>
+              <div class="pd-value" id="pdAnnual">
+                <span class="pd-currency">R</span><span class="pd-number" id="pdAnnualNum">6,264</span>
+              </div>
+              <div class="pd-sub">/year</div>
+            </div>
+            <div class="pd-divider"></div>
+            <div class="pd-amount-item">
+              <div class="pd-label">Monthly</div>
+              <div class="pd-value" id="pdMonthly">
+                <span class="pd-currency">R</span><span class="pd-number" id="pdMonthlyNum">522</span>
+              </div>
+              <div class="pd-sub">/month</div>
+            </div>
+          </div>
+          <div class="pd-contact" id="pdContact" style="display:none;">
+            <div class="pd-contact-inner">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"/></svg>
+              <span>Contact Us for a Custom Quote</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- What's Covered -->
+        <div class="coverage-breakdown">
+          <h3>What's Covered</h3>
+          <div class="cb-grid">
+            <div class="cb-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <div>
+                <strong>Data Breach Response</strong>
+                <span>Forensic investigation, notification & PR costs</span>
+              </div>
+            </div>
+            <div class="cb-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+              <div>
+                <strong>Ransomware &amp; Extortion</strong>
+                <span>Ransom payments, negotiation & recovery</span>
+              </div>
+            </div>
+            <div class="cb-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+              <div>
+                <strong>Business Interruption</strong>
+                <span>Lost income during system downtime</span>
+              </div>
+            </div>
+            <div class="cb-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+              <div>
+                <strong>Legal &amp; Regulatory</strong>
+                <span>Defence costs, fines & POPIA compliance</span>
+              </div>
+            </div>
+            <div class="cb-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              <div>
+                <strong>Third-Party Liability</strong>
+                <span>Claims from affected clients & partners</span>
+              </div>
+            </div>
+            <div class="cb-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              <div>
+                <strong>Social Engineering</strong>
+                <span>Phishing, BEC fraud & impersonation losses</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn btn-ghost" id="backBtn2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-arrow flip"><polyline points="9 18 15 12 9 6"/></svg>
+            Back
+          </button>
+          <button type="button" class="btn btn-primary" id="nextBtn2">
+            Continue to Security
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== STEP 3: SECURITY POSTURE ===== -->
+    <section class="step-panel" id="step3">
+      <div class="glass-card">
+        <div class="step-header">
+          <h2>Your Security Posture</h2>
+          <p>Sophos MDR customers receive significant premium discounts based on their deployment status.</p>
+        </div>
+
+        <!-- MDR Question -->
+        <div class="mdr-section">
+          <label class="field-label">Do you have or plan to purchase Sophos MDR?</label>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn active" id="mdrNo" data-value="no">No</button>
+            <button type="button" class="toggle-btn" id="mdrYes" data-value="yes">Yes</button>
+          </div>
+        </div>
+
+        <!-- MDR Sub-Options (animated reveal) -->
+        <div class="mdr-products" id="mdrProducts">
+          <label class="field-label" style="margin-bottom: 12px;">Select your MDR product</label>
+          <div class="mdr-card-grid">
+            <button type="button" class="mdr-card" data-discount="0.10" data-type="Essentials + endpoints not deployed">
+              <div class="mdr-card-badge">10% off</div>
+              <strong>Essentials</strong>
+              <span>Endpoints not deployed</span>
+            </button>
+            <button type="button" class="mdr-card" data-discount="0.15" data-type="Essentials + endpoints deployed">
+              <div class="mdr-card-badge">15% off</div>
+              <strong>Essentials</strong>
+              <span>Endpoints deployed</span>
+            </button>
+            <button type="button" class="mdr-card active" data-discount="0.20" data-type="Complete + endpoints not deployed">
+              <div class="mdr-card-badge">20% off</div>
+              <strong>Complete</strong>
+              <span>Endpoints not deployed</span>
+            </button>
+            <button type="button" class="mdr-card" data-discount="0.30" data-type="Complete + endpoints deployed">
+              <div class="mdr-card-badge best">30% off</div>
+              <strong>Complete</strong>
+              <span>Endpoints deployed</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Savings Visualizer -->
+        <div class="savings-viz" id="savingsViz">
+          <h3>Your MDR Savings</h3>
+          <div class="sv-bars">
+            <div class="sv-bar-group">
+              <div class="sv-bar-label">Without MDR</div>
+              <div class="sv-bar-track">
+                <div class="sv-bar sv-bar-base" id="svBarBase"></div>
+              </div>
+              <div class="sv-bar-amount" id="svBaseAmount">--</div>
+            </div>
+            <div class="sv-bar-group">
+              <div class="sv-bar-label">With MDR</div>
+              <div class="sv-bar-track">
+                <div class="sv-bar sv-bar-discount" id="svBarDiscount"></div>
+              </div>
+              <div class="sv-bar-amount accent" id="svDiscountAmount">--</div>
+            </div>
+          </div>
+          <div class="sv-savings-badge" id="svSavingsBadge">
+            You save <strong id="svSavingsAmount">--</strong> per year
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn btn-ghost" id="backBtn3">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-arrow flip"><polyline points="9 18 15 12 9 6"/></svg>
+            Back
+          </button>
+          <button type="button" class="btn btn-primary" id="nextBtn3">
+            Continue to Details
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-arrow"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== STEP 4: CONTACT DETAILS ===== -->
+    <section class="step-panel" id="step4">
+      <div class="glass-card">
+        <div class="step-header">
+          <h2>Your Details</h2>
+          <p>Almost done! Tell us about your company so we can finalize your quote.</p>
+        </div>
+
+        <!-- Final Quote Summary -->
+        <div class="final-summary" id="finalSummary">
+          <div class="fs-row">
+            <div class="fs-item">
+              <div class="fs-label">Industry</div>
+              <div class="fs-value" id="fsIndustry">--</div>
+            </div>
+            <div class="fs-item">
+              <div class="fs-label">Revenue Band</div>
+              <div class="fs-value" id="fsRevenue">--</div>
+            </div>
+            <div class="fs-item">
+              <div class="fs-label">Cover Limit</div>
+              <div class="fs-value" id="fsCover">--</div>
+            </div>
+          </div>
+          <div class="fs-pricing">
+            <div class="fs-price-item">
+              <div class="fs-price-label">Annual Premium</div>
+              <div class="fs-price-value" id="fsAnnual">--</div>
+            </div>
+            <div class="fs-price-item">
+              <div class="fs-price-label">Monthly Premium</div>
+              <div class="fs-price-value" id="fsMonthly">--</div>
+            </div>
+          </div>
+          <div class="fs-mdr" id="fsMdr"></div>
+        </div>
+
+        <form id="leadForm" novalidate autocomplete="on" method="POST" action="https://formsubmit.co/a5f019155bd599087b1f4de23d1703c3">
+          <!-- FormSubmit config -->
+          <input type="hidden" name="_subject" id="fs_subject" value="Phishield Cyber Cover Lead"/>
+          <input type="hidden" name="_captcha" value="false"/>
+          <input type="hidden" name="_next" value="https://qoutes.phishield.com/?submitted=true"/>
+          <input type="text" name="_honey" style="display:none" tabindex="-1" autocomplete="off"/>
+          <!-- Hidden quote data -->
+          <input type="hidden" name="Revenue Band" id="h_revenueBand"/>
+          <input type="hidden" name="Cover Limit" id="h_coverLimit"/>
+          <input type="hidden" name="Annual Premium" id="h_annualPremium"/>
+          <input type="hidden" name="Monthly Premium" id="h_monthlyPremium"/>
+          <input type="hidden" name="MDR Selection" id="h_mdrQualified"/>
+          <input type="hidden" name="Industry" id="h_industry"/>
+          <input type="hidden" name="Custom Turnover" id="h_customTurnover"/>
+          <input type="hidden" name="Custom Cover" id="h_customCover"/>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="field-label" for="companyName">Company Name *</label>
+              <input class="form-input" id="companyName" name="Company Name" type="text" placeholder="e.g. Acme (Pty) Ltd" required/>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="tradingAs">Trading As *</label>
+              <input class="form-input" id="tradingAs" name="Trading As" type="text" placeholder="e.g. Acme Corp" required/>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="resellerField">Reseller *</label>
+              <select class="form-select" id="resellerField" name="Reseller" required>
+                <option value="" disabled selected>Select reseller</option>
+                <option>DataGr8</option>
+                <option>FT-KZN</option>
+                <option>CyberInsight</option>
+                <option>IT Zeus</option>
+                <option>BDNS</option>
+                <option>French KZN</option>
+                <option>VOX Telecom</option>
+                <option>Netelligent</option>
+                <option>ASI-Bestsure</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="contactPerson">Contact Person *</label>
+              <input class="form-input" id="contactPerson" name="Contact Person" type="text" placeholder="Full name" required/>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="contactNumber">Contact Number *</label>
+              <input class="form-input" id="contactNumber" name="Contact Number" type="tel" placeholder="e.g. 082 123 4567" required/>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="emailField">Email Address *</label>
+              <input class="form-input" id="emailField" name="Email" type="email" placeholder="you@company.co.za" required/>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="employeesField">Number of Employees *</label>
+              <input class="form-input" id="employeesField" name="Number of Employees" type="number" min="1" placeholder="e.g. 50" required/>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost" id="backBtn4">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-arrow flip"><polyline points="9 18 15 12 9 6"/></svg>
+              Back
+            </button>
+            <button type="submit" class="btn btn-primary btn-submit" id="submitBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Submit Quote Request
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ===== SUCCESS ===== -->
+    <section class="step-panel" id="successPanel">
+      <div class="glass-card">
+        <div class="success-panel">
+          <div class="success-icon-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <h2>Quote Request Submitted!</h2>
+          <p>Your details and estimated quote have been sent to our team. A Phishield representative will be in touch within 24 hours.</p>
+          <button type="button" class="btn btn-primary" onclick="location.reload();" style="margin-top:24px;max-width:280px;">Start New Quote</button>
+        </div>
+      </div>
+    </section>
+
+    <p class="footer-note">ASI Bestsure – Phishield Cyber Cover &copy; 2026. All premiums are estimates and subject to underwriting.</p>
+  </div>
+
+  <script src="quote.js"></script>
+</body>
+</html>
