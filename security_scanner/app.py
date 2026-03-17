@@ -107,7 +107,8 @@ def fetch_scan(scan_id: str):
 # Background scan worker
 # ---------------------------------------------------------------------------
 
-def run_scan(scan_id: str, domain: str):
+def run_scan(scan_id: str, domain: str, industry: str = "Other",
+             annual_revenue_zar: int = 0):
     with _semaphore:
         try:
             scanner = SecurityScanner(
@@ -115,7 +116,8 @@ def run_scan(scan_id: str, domain: str):
                 dehashed_email=DEHASHED_EMAIL,
                 dehashed_api_key=DEHASHED_API_KEY,
             )
-            results = scanner.scan(domain)
+            results = scanner.scan(domain, industry=industry,
+                                   annual_revenue_zar=annual_revenue_zar)
             update_scan(scan_id, results)
         except Exception as e:
             mark_failed(scan_id, str(e))
@@ -146,10 +148,18 @@ def start_scan():
     if not domain or not valid_domain(domain):
         return jsonify({"error": "Invalid or missing domain"}), 400
 
+    industry = str(data.get("industry", "Other")).strip()
+    try:
+        annual_revenue_zar = int(data.get("annual_revenue_zar", 0))
+    except (ValueError, TypeError):
+        annual_revenue_zar = 0
+
     scan_id = str(uuid.uuid4())
     save_scan(scan_id, domain)
 
-    t = threading.Thread(target=run_scan, args=(scan_id, domain), daemon=True)
+    t = threading.Thread(target=run_scan,
+                         args=(scan_id, domain, industry, annual_revenue_zar),
+                         daemon=True)
     t.start()
 
     return jsonify({

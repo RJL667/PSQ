@@ -2617,7 +2617,597 @@ class DehashedChecker:
 
 
 # ---------------------------------------------------------------------------
-# 22. Risk Scoring Engine
+# 22. Fraudulent Domain Detection (Typosquat / Lookalike)
+# ---------------------------------------------------------------------------
+
+class FraudulentDomainChecker:
+    """Detects typosquat and lookalike domains via crt.sh certificate transparency."""
+
+    HOMOGLYPHS = {'a': ['@', 'à', 'á', 'â', 'ã', 'ä'], 'e': ['è', 'é', 'ê', 'ë', '3'],
+                  'i': ['í', 'ì', 'î', 'ï', '1', 'l'], 'o': ['ò', 'ó', 'ô', 'õ', 'ö', '0'],
+                  'l': ['1', 'i', '|'], 's': ['$', '5'], 't': ['7'], 'g': ['9', 'q']}
+    TLD_SWAPS = ['.net', '.org', '.co', '.io', '.co.za', '.info', '.biz', '.xyz', '.online']
+
+    def _generate_variants(self, domain: str) -> list:
+        parts = domain.rsplit('.', 1)
+        if len(parts) != 2:
+            return []
+        name, tld = parts[0], '.' + parts[1]
+        variants = set()
+
+        # Character omission
+        for i in range(len(name)):
+            v = name[:i] + name[i+1:]
+            if v:
+                variants.add(v + tld)
+
+        # Adjacent character swap
+        for i in range(len(name) - 1):
+            v = list(name)
+            v[i], v[i+1] = v[i+1], v[i]
+            variants.add(''.join(v) + tld)
+
+        # Character substitution (common typos)
+        QWERTY_NEIGHBOURS = {
+            'q': 'wa', 'w': 'qeas', 'e': 'wrds', 'r': 'etfs', 't': 'rygs',
+            'y': 'tuhs', 'u': 'yijs', 'i': 'uoks', 'o': 'ipls', 'p': 'ol',
+            'a': 'qwsz', 's': 'awedxz', 'd': 'serfcx', 'f': 'drtgvc',
+            'g': 'ftyhbv', 'h': 'gyujnb', 'j': 'huiknm', 'k': 'jiolm',
+            'l': 'kop', 'z': 'asx', 'x': 'zsdc', 'c': 'xdfv', 'v': 'cfgb',
+            'b': 'vghn', 'n': 'bhjm', 'm': 'njk',
+        }
+        for i in range(len(name)):
+            for neighbour in QWERTY_NEIGHBOURS.get(name[i].lower(), ''):
+                v = name[:i] + neighbour + name[i+1:]
+                variants.add(v + tld)
+
+        # Homoglyph substitution
+        for i in range(len(name)):
+            for h in self.HOMOGLYPHS.get(name[i].lower(), []):
+                variants.add(name[:i] + h + name[i+1:] + tld)
+
+        # Character doubling
+        for i in range(len(name)):
+            variants.add(name[:i+1] + name[i] + name[i+1:] + tld)
+
+        # TLD swap
+        for alt_tld in self.TLD_SWAPS:
+            if alt_tld != tld:
+                variants.add(name + alt_tld)
+
+        # Prefix/suffix
+        for affix in ['my-', 'login-', 'secure-', 'mail-', '-login', '-secure', '-mail']:
+            if affix.startswith('-'):
+                variants.add(name + affix + tld)
+            else:
+                variants.add(affix + name + tld)
+
+        # Remove the original domain
+        variants.discard(domain)
+        return list(variants)[:20]
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "variants_checked": 0,
+            "fraudulent_domains_found": 0,
+            "domains": [],
+            "issues": [],
+            "score": 100,
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"
+            return result
+
+        variants = self._generate_variants(domain)
+        result["variants_checked"] = len(variants)
+        found = []
+
+        for variant in variants:
+            try:
+                r = requests.get(
+                    f"https://crt.sh/?q={variant}&output=json",
+                    timeout=10, headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200:
+                    entries = r.json()
+                    if entries:
+                        issuer = entries[0].get("issuer_name", "Unknown")
+                        first_seen = entries[0].get("not_before", "")[:10]
+                        # Determine variant type
+                        vtype = "lookalike"
+                        name_v = variant.rsplit('.', 1)[0] if '.' in variant else variant
+                        name_o = domain.rsplit('.', 1)[0] if '.' in domain else domain
+                        tld_v = '.' + variant.rsplit('.', 1)[1] if '.' in variant else ''
+                        tld_o = '.' + domain.rsplit('.', 1)[1] if '.' in domain else ''
+                        if tld_v != tld_o and name_v == name_o:
+                            vtype = "TLD swap"
+                        elif len(name_v) == len(name_o) - 1:
+                            vtype = "character omission"
+                        elif len(name_v) == len(name_o) + 1:
+                            vtype = "character doubling"
+                        elif len(name_v) == len(name_o):
+                            vtype = "character swap/substitution"
+                        elif '-' in name_v:
+                            vtype = "prefix/suffix"
+
+                        found.append({
+                            "domain": variant,
+                            "type": vtype,
+                            "has_certificate": True,
+                            "cert_issuer": issuer[:60],
+                            "first_seen": first_seen,
+                            "risk": "high",
+                        })
+                time.sleep(0.3)
+            except Exception:
+                continue
+
+        result["domains"] = found
+        result["fraudulent_domains_found"] = len(found)
+
+        if found:
+            result["issues"].append(
+                f"{len(found)} lookalike domain(s) with active certificates detected"
+            )
+        result["score"] = max(0, 100 - len(found) * 15)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 23. Web Ranking (Tranco List)
+# ---------------------------------------------------------------------------
+
+class WebRankingChecker:
+    """Checks domain popularity via the Tranco top-1M list."""
+
+    TRANCO_API = "https://tranco-list.eu/api/ranks/domain/{domain}"
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "ranked": False,
+            "rank": None,
+            "rank_label": "Unranked",
+            "popularity": "Unranked",
+            "issues": [],
+            "score": 40,
+        }
+        if not REQUESTS_AVAILABLE:
+            result["status"] = "error"
+            return result
+
+        # Try the exact domain first, then apex
+        domains_to_try = [domain]
+        parts = domain.split('.')
+        if len(parts) > 2:
+            apex = '.'.join(parts[-2:])
+            domains_to_try.append(apex)
+
+        for d in domains_to_try:
+            try:
+                r = requests.get(
+                    self.TRANCO_API.format(domain=d),
+                    timeout=10, headers={"User-Agent": USER_AGENT}
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    ranks = data.get("ranks", [])
+                    if ranks:
+                        rank = ranks[0].get("rank", 0)
+                        if rank > 0:
+                            result["ranked"] = True
+                            result["rank"] = rank
+                            if rank <= 1000:
+                                result["rank_label"] = "Top 1K"
+                                result["popularity"] = "Very High"
+                                result["score"] = 100
+                            elif rank <= 10000:
+                                result["rank_label"] = "Top 10K"
+                                result["popularity"] = "High"
+                                result["score"] = 95
+                            elif rank <= 50000:
+                                result["rank_label"] = "Top 50K"
+                                result["popularity"] = "Moderate"
+                                result["score"] = 85
+                            elif rank <= 100000:
+                                result["rank_label"] = "Top 100K"
+                                result["popularity"] = "Moderate"
+                                result["score"] = 75
+                            elif rank <= 500000:
+                                result["rank_label"] = "Top 500K"
+                                result["popularity"] = "Low"
+                                result["score"] = 65
+                            else:
+                                result["rank_label"] = "Top 1M"
+                                result["popularity"] = "Low"
+                                result["score"] = 55
+                            break
+            except Exception:
+                continue
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 24. Ransomware Susceptibility Index (RSI) — Post-scan aggregator
+# ---------------------------------------------------------------------------
+
+# South African industry breach cost data (IBM 2025, translated to ZAR)
+# Easily updatable when actual SA data becomes available.
+SA_INDUSTRY_COSTS = {
+    "Public Sector":              {"breach_cost_zar": 76_730_000, "cost_per_record": 3273, "multiplier": 1.74},
+    "Healthcare":                 {"breach_cost_zar": 73_650_000, "cost_per_record": 3141, "multiplier": 1.67},
+    "Financial Services":         {"breach_cost_zar": 70_120_000, "cost_per_record": 2992, "multiplier": 1.59},
+    "Hospitality":                {"breach_cost_zar": 57_330_000, "cost_per_record": 2445, "multiplier": 1.30},
+    "Services":                   {"breach_cost_zar": 56_890_000, "cost_per_record": 2426, "multiplier": 1.29},
+    "Industrial / Manufacturing": {"breach_cost_zar": 49_390_000, "cost_per_record": 2107, "multiplier": 1.12},
+    "Energy":                     {"breach_cost_zar": 48_070_000, "cost_per_record": 2051, "multiplier": 1.09},
+    "Technology":                 {"breach_cost_zar": 47_630_000, "cost_per_record": 2032, "multiplier": 1.08},
+    "Pharmaceuticals":            {"breach_cost_zar": 45_860_000, "cost_per_record": 1956, "multiplier": 1.04},
+    "Entertainment":              {"breach_cost_zar": 44_100_000, "cost_per_record": 1881, "multiplier": 1.00},
+    "Media":                      {"breach_cost_zar": 41_900_000, "cost_per_record": 1787, "multiplier": 0.95},
+    "Transportation":             {"breach_cost_zar": 39_690_000, "cost_per_record": 1693, "multiplier": 0.90},
+    "Education":                  {"breach_cost_zar": 37_490_000, "cost_per_record": 1599, "multiplier": 0.85},
+    "Research":                   {"breach_cost_zar": 37_490_000, "cost_per_record": 1599, "multiplier": 0.85},
+    "Communications":             {"breach_cost_zar": 37_040_000, "cost_per_record": 1580, "multiplier": 0.84},
+    "Consumer":                   {"breach_cost_zar": 37_040_000, "cost_per_record": 1580, "multiplier": 0.84},
+    "Retail":                     {"breach_cost_zar": 35_280_000, "cost_per_record": 1505, "multiplier": 0.80},
+    "Agriculture":                {"breach_cost_zar": 28_670_000, "cost_per_record": 1223, "multiplier": 0.65},
+    "Other":                      {"breach_cost_zar": 44_100_000, "cost_per_record": 1881, "multiplier": 1.00},
+}
+
+
+class RansomwareRiskChecker:
+    """Computes RSI (0.0–1.0) from existing scan results + industry/revenue context."""
+
+    def calculate(self, results: dict, industry: str = "Other", annual_revenue_zar: int = 0) -> dict:
+        rsi = 0.0
+        factors = []
+
+        # RDP exposed → +0.35
+        vpn = results.get("vpn_remote", {})
+        if vpn.get("rdp_exposed"):
+            rsi += 0.35
+            factors.append({"factor": "RDP exposed to internet", "impact": 0.35})
+
+        # High-risk protocol exposure → +0.15 each, cap 0.30
+        hrp = results.get("high_risk_protocols", {})
+        exposed_count = hrp.get("critical_count", 0)
+        hrp_impact = min(0.30, exposed_count * 0.15)
+        if hrp_impact > 0:
+            rsi += hrp_impact
+            factors.append({"factor": f"{exposed_count} exposed high-risk service(s)", "impact": round(hrp_impact, 2)})
+
+        # CISA KEV CVEs → +0.10 each, cap 0.25
+        ext_agg = results.get("external_ips", {}).get("aggregate_vulns", {})
+        kev_count = ext_agg.get("kev_count", 0) + results.get("shodan_vulns", {}).get("kev_count", 0)
+        kev_impact = min(0.25, kev_count * 0.10)
+        if kev_impact > 0:
+            rsi += kev_impact
+            factors.append({"factor": f"{kev_count} CISA KEV vulnerabilit{'y' if kev_count == 1 else 'ies'}", "impact": round(kev_impact, 2)})
+
+        # High EPSS (≥0.5) → +0.05 each, cap 0.15
+        shodan = results.get("shodan_vulns", {})
+        high_epss = sum(1 for c in shodan.get("cves", []) if (c.get("epss_score") or 0) >= 0.5)
+        epss_impact = min(0.15, high_epss * 0.05)
+        if epss_impact > 0:
+            rsi += epss_impact
+            factors.append({"factor": f"{high_epss} CVE(s) with EPSS ≥ 50%", "impact": round(epss_impact, 2)})
+
+        # Breach + leaked passwords → +0.10
+        breaches = results.get("breaches", {})
+        dehashed = results.get("dehashed", {})
+        if breaches.get("breach_count", 0) > 0 and dehashed.get("has_passwords"):
+            rsi += 0.10
+            factors.append({"factor": "Breached credentials with leaked passwords", "impact": 0.10})
+
+        # Weak email security → +0.05
+        email_sec = results.get("email_security", {})
+        if email_sec.get("score", 10) < 5:
+            rsi += 0.05
+            factors.append({"factor": "Weak email security (DMARC/SPF)", "impact": 0.05})
+
+        # No WAF → +0.05
+        waf = results.get("waf", {})
+        if not waf.get("detected"):
+            rsi += 0.05
+            factors.append({"factor": "No WAF detected", "impact": 0.05})
+
+        # Poor SSL → +0.05
+        ssl_grade = results.get("ssl", {}).get("grade", "")
+        if ssl_grade in ("F", "D", "T"):
+            rsi += 0.05
+            factors.append({"factor": f"SSL grade {ssl_grade}", "impact": 0.05})
+
+        # Apply industry multiplier
+        industry_data = SA_INDUSTRY_COSTS.get(industry, SA_INDUSTRY_COSTS["Other"])
+        industry_mult = industry_data["multiplier"]
+        rsi *= industry_mult
+
+        # Apply revenue multiplier
+        if annual_revenue_zar > 0:
+            if annual_revenue_zar < 50_000_000:
+                rev_mult = 1.2
+            elif annual_revenue_zar <= 500_000_000:
+                rev_mult = 1.0
+            else:
+                rev_mult = 0.9
+            rsi *= rev_mult
+
+        # Cap at 1.0
+        rsi = min(1.0, round(rsi, 2))
+
+        # Label
+        if rsi >= 0.8:
+            label = "Critical"
+        elif rsi >= 0.5:
+            label = "High"
+        elif rsi >= 0.25:
+            label = "Medium"
+        else:
+            label = "Low"
+
+        return {
+            "status": "completed",
+            "rsi_score": rsi,
+            "rsi_label": label,
+            "contributing_factors": sorted(factors, key=lambda x: x["impact"], reverse=True),
+            "industry": industry,
+            "annual_revenue_zar": annual_revenue_zar,
+            "issues": [f"Ransomware susceptibility: {label} ({rsi})"] if rsi >= 0.5 else [],
+            "score": max(0, round(100 - rsi * 100)),
+        }
+
+
+# ---------------------------------------------------------------------------
+# 25. Data Breach Index (DBI) — Post-scan aggregator
+# ---------------------------------------------------------------------------
+
+class DataBreachIndexChecker:
+    """Computes DBI (0–100) from breach history and credential leak data."""
+
+    def calculate(self, results: dict) -> dict:
+        breaches = results.get("breaches", {})
+        dehashed = results.get("dehashed", {})
+
+        dbi = 0
+        breach_count = breaches.get("breach_count", 0)
+        most_recent = breaches.get("most_recent_breach")
+        data_classes = breaches.get("data_classes", [])
+        credential_leaks = dehashed.get("total_entries", 0)
+
+        # Breach count component (0–30)
+        if breach_count == 0:
+            dbi += 30
+        elif breach_count <= 3:
+            dbi += 15
+        # else: 0
+
+        # Recency component (0–20)
+        if most_recent:
+            try:
+                breach_date = datetime.strptime(most_recent[:10], "%Y-%m-%d")
+                years_ago = (datetime.now() - breach_date).days / 365.25
+                if years_ago > 3:
+                    dbi += 20
+                elif years_ago > 1:
+                    dbi += 10
+                # else: <1yr = 0
+            except (ValueError, TypeError):
+                dbi += 10  # Unknown date, assume moderate
+        else:
+            dbi += 20  # No breach date = no known breach
+
+        # Data classes severity (0–15)
+        sensitive_classes = {"Passwords", "Credit cards", "Bank account numbers",
+                           "Social security numbers", "Financial data", "Payment histories"}
+        has_sensitive = bool(sensitive_classes & set(data_classes))
+        if not has_sensitive:
+            dbi += 15
+
+        # Credential leak volume (0–20)
+        if credential_leaks == 0 or dehashed.get("status") in ("no_api_key", "auth_failed"):
+            dbi += 20
+        elif credential_leaks <= 100:
+            dbi += 10
+        # else: 0
+
+        # Breach trend (0–10) — improving if no recent breaches
+        if breach_count > 0 and most_recent:
+            try:
+                breach_date = datetime.strptime(most_recent[:10], "%Y-%m-%d")
+                if (datetime.now() - breach_date).days > 730:  # >2 years since last
+                    dbi += 10
+            except (ValueError, TypeError):
+                pass
+        elif breach_count == 0:
+            dbi += 10
+
+        dbi = min(100, max(0, dbi))
+
+        if dbi >= 75:
+            label = "Low"
+        elif dbi >= 50:
+            label = "Medium"
+        elif dbi >= 25:
+            label = "High Risk"
+        else:
+            label = "Critical"
+
+        issues = []
+        if breach_count > 0:
+            issue_parts = [f"{breach_count} historical breach(es)"]
+            if has_sensitive:
+                issue_parts.append("with sensitive data exposure")
+            if credential_leaks > 0:
+                issue_parts.append(f"and {credential_leaks} credential leaks")
+            issues.append(" ".join(issue_parts))
+
+        return {
+            "status": "completed",
+            "dbi_score": dbi,
+            "dbi_label": label,
+            "breach_count": breach_count,
+            "most_recent_breach": most_recent,
+            "has_sensitive_data": has_sensitive,
+            "credential_leaks": credential_leaks,
+            "issues": issues,
+            "score": dbi,
+        }
+
+
+# ---------------------------------------------------------------------------
+# 26. Financial Impact Calculator (FAIR-inspired) — Post-scan aggregator
+# ---------------------------------------------------------------------------
+
+class FinancialImpactCalculator:
+    """
+    Estimates monetary loss in ZAR across three scenarios:
+    data breach, ransomware, business interruption.
+    """
+
+    def calculate(self, results: dict, rsi_result: dict, dbi_result: dict,
+                  overall_score: int, industry: str = "Other",
+                  annual_revenue_zar: int = 0) -> dict:
+
+        if annual_revenue_zar <= 0:
+            return {
+                "status": "skipped",
+                "reason": "Annual revenue not provided",
+                "issues": [],
+                "score": 50,
+            }
+
+        industry_data = SA_INDUSTRY_COSTS.get(industry, SA_INDUSTRY_COSTS["Other"])
+        rsi_score = rsi_result.get("rsi_score", 0)
+
+        # --- Scenario 1: Data Breach ---
+        p_breach = ((100 - overall_score / 10) / 100) * industry_data["multiplier"] * 0.3
+        p_breach = min(1.0, max(0.0, p_breach))
+        estimated_records = max(100, annual_revenue_zar // 50_000)
+        cost_per_record = industry_data["cost_per_record"]
+        regulatory_fine = annual_revenue_zar * 0.02  # POPIA max ~2%
+        data_breach_loss = p_breach * (estimated_records * cost_per_record + regulatory_fine)
+
+        # --- Scenario 2: Ransomware ---
+        avg_downtime_days = 22
+        daily_revenue = annual_revenue_zar / 365
+        # Ransom estimate scaled by revenue
+        if annual_revenue_zar < 50_000_000:
+            ransom_estimate = 500_000
+            ir_cost = 500_000
+        elif annual_revenue_zar < 200_000_000:
+            ransom_estimate = 2_500_000
+            ir_cost = 1_500_000
+        elif annual_revenue_zar < 500_000_000:
+            ransom_estimate = 10_000_000
+            ir_cost = 3_000_000
+        else:
+            ransom_estimate = 50_000_000
+            ir_cost = 5_000_000
+        ransomware_loss = rsi_score * (avg_downtime_days * daily_revenue * 0.5 + ransom_estimate + ir_cost)
+
+        # --- Scenario 3: Business Interruption ---
+        waf_detected = results.get("waf", {}).get("detected", False)
+        cdn_detected = results.get("cloud_cdn", {}).get("cdn_detected", False)
+        dns_info = results.get("dns_infrastructure", {})
+        single_asn = results.get("external_ips", {}).get("unique_asns", 1) <= 1
+
+        p_interruption = 0.05
+        if not waf_detected:
+            p_interruption += 0.05
+        if not cdn_detected:
+            p_interruption += 0.05
+        if single_asn:
+            p_interruption += 0.05
+        p_interruption = min(0.5, p_interruption)
+
+        impact_factor = 0.3
+        if not waf_detected:
+            impact_factor += 0.15
+        if not cdn_detected:
+            impact_factor += 0.15
+        if single_asn:
+            impact_factor += 0.1
+        impact_factor = min(0.8, impact_factor)
+
+        bi_downtime_days = 5
+        bi_loss = p_interruption * (bi_downtime_days * daily_revenue * impact_factor)
+
+        # --- Aggregate ---
+        most_likely = round(data_breach_loss + ransomware_loss + bi_loss)
+        minimum = round(most_likely * 0.15)
+        maximum = round(most_likely * 3.5)
+
+        # Insurance recommendation
+        recommended_cover = round(maximum * 1.2, -5)  # 20% above max, rounded to nearest R100K
+        minimum_cover = round(most_likely, -5)
+
+        if rsi_score >= 0.7 or overall_score >= 500:
+            premium_tier = "Very High"
+        elif rsi_score >= 0.5 or overall_score >= 350:
+            premium_tier = "High"
+        elif rsi_score >= 0.25 or overall_score >= 200:
+            premium_tier = "Medium"
+        else:
+            premium_tier = "Low"
+
+        # Score (0–100, higher = better / lower financial risk)
+        # Based on most_likely loss as % of revenue
+        loss_pct = most_likely / annual_revenue_zar if annual_revenue_zar > 0 else 0
+        if loss_pct >= 0.10:
+            score = 10
+        elif loss_pct >= 0.05:
+            score = 30
+        elif loss_pct >= 0.02:
+            score = 50
+        elif loss_pct >= 0.01:
+            score = 70
+        else:
+            score = 90
+
+        return {
+            "status": "completed",
+            "currency": "ZAR",
+            "industry": industry,
+            "annual_revenue_zar": annual_revenue_zar,
+            "estimated_annual_loss": {
+                "minimum": minimum,
+                "most_likely": most_likely,
+                "maximum": maximum,
+            },
+            "scenarios": {
+                "data_breach": {
+                    "probability": round(p_breach, 3),
+                    "estimated_loss": round(data_breach_loss),
+                    "cost_per_record": cost_per_record,
+                    "estimated_records": estimated_records,
+                    "regulatory_fine": round(regulatory_fine),
+                },
+                "ransomware": {
+                    "rsi_score": rsi_score,
+                    "estimated_loss": round(ransomware_loss),
+                    "avg_downtime_days": avg_downtime_days,
+                    "ransom_estimate": ransom_estimate,
+                },
+                "business_interruption": {
+                    "probability": round(p_interruption, 3),
+                    "estimated_loss": round(bi_loss),
+                },
+            },
+            "insurance_recommendation": {
+                "minimum_cover_zar": max(500_000, minimum_cover),
+                "recommended_cover_zar": max(1_000_000, recommended_cover),
+                "premium_risk_tier": premium_tier,
+            },
+            "issues": [],
+            "score": score,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Risk Scoring Engine
 # ---------------------------------------------------------------------------
 
 class RiskScorer:
@@ -2626,22 +3216,27 @@ class RiskScorer:
     All weights must sum to 100 when WAF bonus excluded.
     """
     WEIGHTS = {
-        "ssl":                  0.11,
-        "email_security":       0.06,
-        "email_hardening":      0.04,
-        "breaches":             0.10,
-        "http_headers":         0.05,
-        "website_security":     0.05,
-        "exposed_admin":        0.10,
-        "high_risk_protocols":  0.10,
-        "dnsbl":                0.07,
-        "tech_stack":           0.07,
-        "payment_security":     0.04,
+        "ssl":                  0.09,
+        "email_security":       0.05,
+        "email_hardening":      0.03,
+        "breaches":             0.08,
+        "http_headers":         0.04,
+        "website_security":     0.04,
+        "exposed_admin":        0.08,
+        "high_risk_protocols":  0.08,
+        "dnsbl":                0.05,
+        "tech_stack":           0.05,
+        "payment_security":     0.03,
         "vpn_remote":           0.04,
-        "subdomains":           0.04,
-        "shodan_vulns":         0.08,
+        "subdomains":           0.03,
+        "shodan_vulns":         0.06,
         "dehashed":             0.02,
         "external_ips":         0.03,
+        "fraudulent_domains":   0.03,
+        "web_ranking":          0.02,
+        "ransomware_risk":      0.06,
+        "data_breach_index":    0.03,
+        "financial_impact":     0.02,
     }
 
     RECOMMENDATIONS = {
@@ -2684,6 +3279,10 @@ class RiskScorer:
         "Residential (non-hosting) IP detected": "Investigate residential IPs in your infrastructure — may indicate shadow IT, misconfigured services, or compromised devices.",
         "IP(s) without reverse DNS": "Configure reverse DNS (PTR records) for all external IPs — improves email deliverability and security posture.",
         "Large external IP footprint": "Review and consolidate your external IP footprint — a large attack surface increases exposure to threats.",
+        "lookalike domain(s) with active certificates": "Investigate and report fraudulent lookalike domains — consider domain monitoring and takedown services.",
+        "Ransomware susceptibility: Critical": "URGENT: Critical ransomware risk — immediately remediate RDP exposure, patch KEV vulnerabilities, and enforce MFA.",
+        "Ransomware susceptibility: High": "High ransomware risk — prioritise patching known exploited vulnerabilities and reducing attack surface exposure.",
+        "historical breach(es)": "Review historical breach exposure — notify affected users, enforce credential rotation, and enhance monitoring.",
     }
 
     def calculate(self, results: dict) -> tuple:
@@ -2746,6 +3345,21 @@ class RiskScorer:
         # External IP discovery risk
         ext_ip_risk = inv(results.get("external_ips", {}).get("score", 100))
 
+        # Fraudulent domains
+        fraud_risk = inv(results.get("fraudulent_domains", {}).get("score", 100))
+
+        # Web ranking
+        rank_risk = inv(results.get("web_ranking", {}).get("score", 50))
+
+        # RSI (already 0–100 inverted via score field)
+        rsi_risk = inv(results.get("ransomware_risk", {}).get("score", 100))
+
+        # DBI
+        dbi_risk = inv(results.get("data_breach_index", {}).get("score", 100))
+
+        # Financial impact
+        fin_risk = inv(results.get("financial_impact", {}).get("score", 50))
+
         weighted = (
             ssl_risk         * self.WEIGHTS["ssl"] +
             email_risk       * self.WEIGHTS["email_security"] +
@@ -2762,7 +3376,12 @@ class RiskScorer:
             sub_risk         * self.WEIGHTS["subdomains"] +
             shodan_risk      * self.WEIGHTS["shodan_vulns"] +
             dehashed_risk    * self.WEIGHTS["dehashed"] +
-            ext_ip_risk      * self.WEIGHTS["external_ips"]
+            ext_ip_risk      * self.WEIGHTS["external_ips"] +
+            fraud_risk       * self.WEIGHTS["fraudulent_domains"] +
+            rank_risk        * self.WEIGHTS["web_ranking"] +
+            rsi_risk         * self.WEIGHTS["ransomware_risk"] +
+            dbi_risk         * self.WEIGHTS["data_breach_index"] +
+            fin_risk         * self.WEIGHTS["financial_impact"]
         )
 
         risk_score = round(weighted * 10)
@@ -2815,11 +3434,14 @@ class SecurityScanner:
         self.dehashed_email    = dehashed_email
         self.dehashed_api_key  = dehashed_api_key
 
-    def scan(self, domain: str) -> dict:
+    def scan(self, domain: str, industry: str = "Other",
+             annual_revenue_zar: int = 0) -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
         results = {
             "domain_scanned": domain,
             "scan_timestamp": datetime.now(timezone.utc).isoformat(),
+            "industry": industry,
+            "annual_revenue_zar": annual_revenue_zar,
             "overall_risk_score": 0,
             "risk_level": "Unknown",
             "categories": {},
@@ -2848,6 +3470,8 @@ class SecurityScanner:
             "shodan_vulns":        (ShodanVulnChecker().check,         domain),
             "external_ips":        (ExternalIPDiscoveryChecker().check, domain),
             "dehashed":            (DehashedChecker().check,           domain),
+            "fraudulent_domains":  (FraudulentDomainChecker().check,   domain),
+            "web_ranking":         (WebRankingChecker().check,         domain),
         }
 
         cat_results = {}
@@ -2861,15 +3485,48 @@ class SecurityScanner:
                 else:
                     futures[ex.submit(fn, arg)] = name
 
-            for future in as_completed(futures, timeout=180):
-                name = futures[future]
-                try:
-                    cat_results[name] = future.result(timeout=DEFAULT_TIMEOUT * 2)
-                except Exception as e:
-                    cat_results[name] = {"status": "error", "error": str(e), "issues": []}
+            try:
+                for future in as_completed(futures, timeout=300):
+                    name = futures[future]
+                    try:
+                        cat_results[name] = future.result(timeout=DEFAULT_TIMEOUT * 2)
+                    except Exception as e:
+                        cat_results[name] = {"status": "error", "error": str(e), "issues": []}
+            except TimeoutError:
+                # Some checkers didn't finish — record them as timed out
+                for future, name in futures.items():
+                    if name not in cat_results:
+                        cat_results[name] = {"status": "error", "error": "timeout", "issues": []}
 
-        results["categories"] = cat_results
+        # --- Post-scan aggregators (depend on live checker results) ---
+
+        # 1. Data Breach Index
+        dbi_checker = DataBreachIndexChecker()
+        cat_results["data_breach_index"] = dbi_checker.calculate(cat_results)
+
+        # 2. Ransomware Susceptibility Index
+        rsi_checker = RansomwareRiskChecker()
+        cat_results["ransomware_risk"] = rsi_checker.calculate(
+            cat_results, industry=industry, annual_revenue_zar=annual_revenue_zar
+        )
+
+        # 3. Financial Impact (needs RSI + DBI + preliminary score)
+        # Compute a preliminary technical score for the financial model
         scorer = RiskScorer()
+        prelim_score, _, _ = scorer.calculate(cat_results)
+
+        fin_calc = FinancialImpactCalculator()
+        cat_results["financial_impact"] = fin_calc.calculate(
+            cat_results,
+            rsi_result=cat_results["ransomware_risk"],
+            dbi_result=cat_results["data_breach_index"],
+            overall_score=prelim_score,
+            industry=industry,
+            annual_revenue_zar=annual_revenue_zar,
+        )
+
+        # --- Final scoring (includes all categories) ---
+        results["categories"] = cat_results
         risk_score, risk_level, recommendations = scorer.calculate(cat_results)
         results["overall_risk_score"] = risk_score
         results["risk_level"] = risk_level

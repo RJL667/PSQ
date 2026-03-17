@@ -629,6 +629,126 @@
 
   </div>
 
+  <!-- =================== RISK QUANTIFICATION =================== -->
+  <div class="section-label">&#127919; Risk Quantification</div>
+  <div class="categories">
+
+    <!-- Ransomware Susceptibility Index -->
+    {% set rsi = results.categories.get('ransomware_risk', {}) %}
+    {% set rsi_tl = 'tl-crimson' if rsi.rsi_score >= 0.8 else ('tl-red' if rsi.rsi_score >= 0.5 else ('tl-amber' if rsi.rsi_score >= 0.25 else 'tl-green')) %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ rsi_tl }}"></div><div class="cat-title">Ransomware Susceptibility (RSI)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade" style="color:{% if rsi.rsi_score >= 0.5 %}var(--critical){% elif rsi.rsi_score >= 0.25 %}var(--medium){% else %}var(--low){% endif %}">{{ rsi.rsi_score | default(0) }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>RSI Score</td><td><strong>{{ rsi.rsi_score | default(0) }}</strong> / 1.0</td></tr>
+          <tr><td>Risk Level</td><td><span class="badge {% if rsi.rsi_label == 'Critical' %}badge-red{% elif rsi.rsi_label == 'High' %}badge-red{% elif rsi.rsi_label == 'Medium' %}badge-amber{% else %}badge-green{% endif %}">{{ rsi.rsi_label | default('N/A') }}</span></td></tr>
+          <tr><td>Industry</td><td>{{ rsi.industry | default('Not specified') }}</td></tr>
+          {% if rsi.annual_revenue_zar %}<tr><td>Annual Revenue</td><td>R {{ '{:,.0f}'.format(rsi.annual_revenue_zar) }}</td></tr>{% endif %}
+        </table>
+        {% if rsi.contributing_factors %}
+        <div style="margin-top:10px;font-size:.82rem;font-weight:600;color:var(--muted);">Contributing Factors</div>
+        <div style="margin-top:4px;">
+          {% for f in rsi.contributing_factors %}
+          <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <span>{{ f.factor }}</span>
+            <span style="color:var(--critical);font-weight:600;">+{{ f.impact }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Data Breach Index -->
+    {% set dbi = results.categories.get('data_breach_index', {}) %}
+    {% set dbi_tl = 'tl-crimson' if dbi.dbi_score < 25 else ('tl-red' if dbi.dbi_score < 50 else ('tl-amber' if dbi.dbi_score < 75 else 'tl-green')) %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ dbi_tl }}"></div><div class="cat-title">Data Breach Index (DBI)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade" style="color:{% if dbi.dbi_score < 50 %}var(--critical){% elif dbi.dbi_score < 75 %}var(--medium){% else %}var(--low){% endif %}">{{ dbi.dbi_score | default(0) }}<span style="font-size:.8rem">/100</span></span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>DBI Score</td><td><strong>{{ dbi.dbi_score | default(0) }}</strong> / 100 <span class="badge {% if dbi.dbi_label == 'Critical' %}badge-red{% elif dbi.dbi_label == 'High Risk' %}badge-red{% elif dbi.dbi_label == 'Medium' %}badge-amber{% else %}badge-green{% endif %}">{{ dbi.dbi_label | default('N/A') }}</span></td></tr>
+          <tr><td>Breach Count</td><td>{{ dbi.breach_count | default(0) }}</td></tr>
+          <tr><td>Most Recent Breach</td><td>{{ dbi.most_recent_breach | default('None') }}</td></tr>
+          <tr><td>Sensitive Data Exposed</td><td>{% if dbi.has_sensitive_data %}<span class="badge badge-red">Yes</span>{% else %}<span class="badge badge-green">No</span>{% endif %}</td></tr>
+          <tr><td>Credential Leaks</td><td>{{ '{:,}'.format(dbi.credential_leaks | default(0)) }}</td></tr>
+        </table>
+        {% if dbi.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in dbi.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+    </div>
+
+    <!-- Financial Impact -->
+    {% set fin = results.categories.get('financial_impact', {}) %}
+    {% if fin.status == 'completed' %}
+    {% set fin_tl = 'tl-crimson' if fin.score < 30 else ('tl-red' if fin.score < 50 else ('tl-amber' if fin.score < 70 else 'tl-green')) %}
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ fin_tl }}"></div><div class="cat-title">Financial Impact (FAIR Model)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">R {{ '{:,.0f}'.format(fin.estimated_annual_loss.most_likely) }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <!-- Three-gauge summary -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:10px;">
+          <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Minimum</div>
+            <div style="font-size:1.3rem;font-weight:800;color:var(--low);margin-top:4px;">R {{ '{:,.0f}'.format(fin.estimated_annual_loss.minimum) }}</div>
+          </div>
+          <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--blue);">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Most Likely</div>
+            <div style="font-size:1.3rem;font-weight:800;color:var(--medium);margin-top:4px;">R {{ '{:,.0f}'.format(fin.estimated_annual_loss.most_likely) }}</div>
+          </div>
+          <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Maximum</div>
+            <div style="font-size:1.3rem;font-weight:800;color:var(--critical);margin-top:4px;">R {{ '{:,.0f}'.format(fin.estimated_annual_loss.maximum) }}</div>
+          </div>
+        </div>
+
+        <!-- Scenario breakdown -->
+        <div style="margin-top:14px;font-size:.82rem;font-weight:600;color:var(--muted);">Scenario Breakdown</div>
+        <table class="kv-table" style="margin-top:4px;">
+          <tr><td>Data Breach</td><td>R {{ '{:,.0f}'.format(fin.scenarios.data_breach.estimated_loss) }} <span style="color:var(--muted);font-size:.75rem;">(P={{ fin.scenarios.data_breach.probability }}, {{ '{:,}'.format(fin.scenarios.data_breach.estimated_records) }} records @ R{{ '{:,.0f}'.format(fin.scenarios.data_breach.cost_per_record) }}/rec)</span></td></tr>
+          <tr><td>Ransomware</td><td>R {{ '{:,.0f}'.format(fin.scenarios.ransomware.estimated_loss) }} <span style="color:var(--muted);font-size:.75rem;">(RSI={{ fin.scenarios.ransomware.rsi_score }}, {{ fin.scenarios.ransomware.avg_downtime_days }}d downtime)</span></td></tr>
+          <tr><td>Business Interruption</td><td>R {{ '{:,.0f}'.format(fin.scenarios.business_interruption.estimated_loss) }} <span style="color:var(--muted);font-size:.75rem;">(P={{ fin.scenarios.business_interruption.probability }})</span></td></tr>
+        </table>
+
+        <!-- Insurance recommendation -->
+        <div style="margin-top:14px;font-size:.82rem;font-weight:600;color:var(--muted);">Insurance Recommendation</div>
+        <table class="kv-table" style="margin-top:4px;">
+          <tr><td>Minimum Cover</td><td>R {{ '{:,.0f}'.format(fin.insurance_recommendation.minimum_cover_zar) }}</td></tr>
+          <tr><td>Recommended Cover</td><td><strong>R {{ '{:,.0f}'.format(fin.insurance_recommendation.recommended_cover_zar) }}</strong></td></tr>
+          <tr><td>Premium Risk Tier</td><td><span class="badge {% if fin.insurance_recommendation.premium_risk_tier in ['Very High','High'] %}badge-red{% elif fin.insurance_recommendation.premium_risk_tier == 'Medium' %}badge-amber{% else %}badge-green{% endif %}">{{ fin.insurance_recommendation.premium_risk_tier }}</span></td></tr>
+        </table>
+        <div style="margin-top:10px;font-size:.72rem;color:var(--muted);">All amounts in South African Rand (ZAR). Based on IBM 2025 Cost of a Data Breach Report adapted for SA.</div>
+      </div>
+    </div>
+    {% else %}
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Financial Impact (FAIR Model)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade" style="color:var(--muted);">N/A</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="color:var(--muted);font-size:.82rem;margin-top:8px;">Provide <code>industry</code> and <code>annual_revenue_zar</code> in the scan request to enable financial impact modelling.</p>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+
   <!-- =================== EXPOSURE & REPUTATION =================== -->
   <div class="section-label">&#128270; Exposure &amp; Reputation</div>
   <div class="categories">
@@ -757,6 +877,63 @@
         {% endif %}
         {% if dh.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in dh.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
         {% endif %}
+      </div>
+    </div>
+
+    <!-- Fraudulent Domains -->
+    {% set fraud = results.categories.get('fraudulent_domains', {}) %}
+    {% set fraud_tl = 'tl-crimson' if fraud.fraudulent_domains_found > 3 else ('tl-red' if fraud.fraudulent_domains_found > 0 else 'tl-green') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ fraud_tl }}"></div><div class="cat-title">Fraudulent Domains (Typosquat)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">{{ fraud.fraudulent_domains_found | default(0) }} found</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Variants checked</td><td>{{ fraud.variants_checked | default(0) }}</td></tr>
+          <tr><td>Lookalikes with certs</td><td>{% if fraud.fraudulent_domains_found > 0 %}<span class="badge badge-red">{{ fraud.fraudulent_domains_found }}</span>{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
+        </table>
+        {% if fraud.domains %}
+        <div style="margin-top:8px;">
+          {% for d in fraud.domains %}
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <div>
+              <strong>{{ d.domain }}</strong>
+              <span class="badge badge-amber" style="margin-left:4px;">{{ d.type }}</span>
+            </div>
+            <div style="text-align:right;font-size:.75rem;color:var(--muted);">
+              {{ d.cert_issuer }} &middot; {{ d.first_seen }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% elif fraud.fraudulent_domains_found == 0 %}
+        <p style="color:var(--low);font-size:.82rem;margin-top:8px;">&#10003; No lookalike domains with active certificates detected.</p>
+        {% endif %}
+        {% if fraud.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in fraud.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+    </div>
+
+    <!-- Web Ranking -->
+    {% set wr = results.categories.get('web_ranking', {}) %}
+    {% set wr_tl = 'tl-green' if wr.ranked else 'tl-amber' %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ wr_tl }}"></div><div class="cat-title">Web Ranking (Tranco)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">{{ wr.rank_label | default('Unranked') }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Ranked</td><td>{% if wr.ranked %}&#10003; Yes{% else %}&#10007; Not in top 1M{% endif %}</td></tr>
+          {% if wr.rank %}<tr><td>Position</td><td>#{{ '{:,}'.format(wr.rank) }}</td></tr>{% endif %}
+          <tr><td>Popularity</td><td><span class="badge {% if wr.popularity in ['Very High','High'] %}badge-green{% elif wr.popularity in ['Moderate'] %}badge-amber{% else %}badge-grey{% endif %}">{{ wr.popularity | default('Unranked') }}</span></td></tr>
+        </table>
       </div>
     </div>
 
