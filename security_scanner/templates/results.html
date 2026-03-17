@@ -44,11 +44,8 @@
 
     .ip-discovery-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 18px; display: none; }
     .ip-discovery-card.visible { display: block; }
-    .ip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-    .ip-chip { background: var(--surface2); border: 1px solid var(--border); padding: 3px 12px; border-radius: 999px; font-size: .82rem; font-weight: 600; font-family: monospace; }
-
-    .scan-complete-msg { text-align: center; padding: 18px; animation: fadeIn .5s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .ip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .ip-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; font-size: .78rem; font-family: monospace; }
 
     /* Hero */
     .hero { display: grid; grid-template-columns: 240px 1fr; gap: 18px; margin-bottom: 20px; }
@@ -175,31 +172,25 @@
       <h2 style="margin-bottom:6px;">Scanning <strong>{{ domain }}</strong></h2>
       <p style="color:var(--muted);font-size:.82rem;" id="scanSubtitle">Initializing checks…</p>
     </div>
-
     <div class="progress-bar-wrap">
       <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
       <div class="progress-bar-text" id="progressText">0 / 0</div>
     </div>
-
     <div class="ip-discovery-card" id="ipCard">
       <div style="font-size:.82rem;font-weight:600;color:var(--blue);">Discovered IPs</div>
       <div class="ip-list" id="ipList"></div>
     </div>
-
     <div id="scanSections"></div>
   </div>
-
   <script>
   (function() {
     const scanId = "{{ scan_id }}";
     const manifest = {{ manifest_json | safe }};
-    const states = {};      // checker_id -> {status, score}
+    const states = {};
     let totalCheckers = 0;
     let doneCount = 0;
-    let discoveredIps = [];
-    const perIpCheckers = {};  // checker_id -> true (from manifest)
+    const perIpCheckers = {};
 
-    // Build UI from manifest
     const sectionsEl = document.getElementById('scanSections');
     manifest.forEach(section => {
       const div = document.createElement('div');
@@ -208,8 +199,8 @@
       sectionsEl.appendChild(div);
       const ul = div.querySelector('ul');
       section.checkers.forEach(c => {
-        if (c.per_ip) { perIpCheckers[c.id] = c.label; }
-        states[c.id] = {status: 'pending', score: null};
+        if (c.per_ip) perIpCheckers[c.id] = c.label;
+        states[c.id] = {status: 'pending'};
         totalCheckers++;
         const li = document.createElement('li');
         li.className = 'scan-item pending';
@@ -223,75 +214,50 @@
       const pct = totalCheckers > 0 ? Math.round(doneCount / totalCheckers * 100) : 0;
       document.getElementById('progressFill').style.width = pct + '%';
       document.getElementById('progressText').textContent = `${doneCount} / ${totalCheckers}`;
-      const running = Object.entries(states).find(([,v]) => v.status === 'running');
-      if (running) {
-        const label = document.querySelector(`#chk_${running[0].replace(/[:.]/g,'_')} .scan-label`);
-        document.getElementById('scanSubtitle').textContent = label ? label.textContent + '…' : 'Scanning…';
-      }
     }
 
     function setChecker(id, status, score) {
       const safeId = id.replace(/[:.]/g, '_');
       let el = document.getElementById(`chk_${safeId}`);
       if (!el) {
-        // Dynamically added per-IP checker
-        const baseChecker = id.split(':')[0];
+        const base = id.split(':')[0];
         const ip = id.split(':')[1];
-        const parentSection = document.getElementById('sec_NetworkInfrastructure');
+        const parentSection = document.getElementById('sec_NetworkInfrastructure') || sectionsEl.querySelector('ul');
         if (parentSection) {
           el = document.createElement('li');
           el.className = 'scan-item pending';
           el.id = `chk_${safeId}`;
-          const label = (perIpCheckers[baseChecker] || baseChecker) + ` (${ip})`;
-          el.innerHTML = `<span class="scan-icon">&#9675;</span><span class="scan-label">${label}</span><span class="scan-score"></span>`;
-          // Insert after the base checker row
-          const baseEl = document.getElementById(`chk_${baseChecker}`);
-          if (baseEl && baseEl.nextSibling) {
-            parentSection.insertBefore(el, baseEl.nextSibling);
-          } else {
-            parentSection.appendChild(el);
-          }
+          el.innerHTML = `<span class="scan-icon">&#9675;</span><span class="scan-label">${(perIpCheckers[base] || base)} (${ip})</span><span class="scan-score"></span>`;
+          const baseEl = document.getElementById(`chk_${base}`);
+          if (baseEl && baseEl.nextSibling) parentSection.insertBefore(el, baseEl.nextSibling);
+          else parentSection.appendChild(el);
           totalCheckers++;
-          states[id] = {status: 'pending', score: null};
+          states[id] = {status: 'pending'};
         }
       }
       if (!el) return;
-
       const prev = states[id];
       if (status === 'done' && (!prev || prev.status !== 'done')) doneCount++;
       states[id] = {status, score};
-
       el.className = `scan-item ${status}`;
       const icon = el.querySelector('.scan-icon');
       const scoreEl = el.querySelector('.scan-score');
-      if (status === 'running') {
-        icon.innerHTML = '<div class="spinner-sm"></div>';
-      } else if (status === 'done') {
-        icon.innerHTML = '&#10003;';
-        if (score !== null && score !== undefined) scoreEl.textContent = score;
-      }
+      if (status === 'running') { icon.innerHTML = '<div class="spinner-sm"></div>'; }
+      else if (status === 'done') { icon.innerHTML = '&#10003;'; if (score != null) scoreEl.textContent = score; }
       updateProgress();
     }
 
-    // Remove base per-IP checker rows once real IP rows appear
-    function hideBasePerIp(checkerId) {
-      const el = document.getElementById(`chk_${checkerId}`);
-      if (el) { el.style.display = 'none'; totalCheckers--; }
-    }
-
-    // SSE
     const evtSource = new EventSource(`/api/scan/${scanId}/progress`);
     const seenPerIp = {};
 
-    evtSource.onmessage = function(event) {
-      const data = JSON.parse(event.data);
-
+    evtSource.onmessage = function(e) {
+      const data = JSON.parse(e.data);
       if (data.type === 'complete') {
         evtSource.close();
-        document.getElementById('scanSubtitle').textContent = 'All checks complete!';
         document.getElementById('progressFill').style.width = '100%';
         document.getElementById('progressText').textContent = `${totalCheckers} / ${totalCheckers}`;
-        setTimeout(() => { window.location.reload(); }, 1200);
+        document.getElementById('scanSubtitle').textContent = 'All checks complete!';
+        setTimeout(() => window.location.reload(), 1200);
         return;
       }
       if (data.type === 'error') {
@@ -299,46 +265,29 @@
         document.getElementById('scanSubtitle').textContent = 'Scan failed: ' + (data.message || 'unknown error');
         return;
       }
-
       const checker = data.checker;
       const status = data.status;
-
-      // IP discovery special case
-      if (checker === 'ip_discovery' && status === 'done' && data.score && data.score.ips) {
-        // score field carries {ips: [...]} for ip_discovery
+      if (checker === 'ip_discovery' && status === 'done' && data.ips && data.ips.length > 0) {
+        const card = document.getElementById('ipCard');
+        card.classList.add('visible');
+        document.getElementById('ipList').innerHTML = data.ips.map(ip => `<span class="ip-chip">${ip}</span>`).join('');
       }
-      if (checker === 'ip_discovery' && status === 'done') {
-        setChecker('ip_discovery', 'done', null);
-        // Check if the progress event has IPs
-        if (data.ips) discoveredIps = data.ips;
-        if (discoveredIps.length > 0) {
-          const card = document.getElementById('ipCard');
-          card.classList.add('visible');
-          const list = document.getElementById('ipList');
-          list.innerHTML = discoveredIps.map(ip => `<span class="ip-chip">${ip}</span>`).join('');
-        }
-        return;
-      }
-
-      // Per-IP checker (format: "checker_name:ip")
       if (checker.includes(':')) {
         const base = checker.split(':')[0];
         if (!seenPerIp[base]) {
           seenPerIp[base] = true;
-          hideBasePerIp(base);
+          const baseEl = document.getElementById(`chk_${base}`);
+          if (baseEl) { baseEl.style.display = 'none'; totalCheckers--; }
         }
       }
-
+      if (status === 'running') document.getElementById('scanSubtitle').textContent = (data.label || checker) + '…';
       setChecker(checker, status, data.score);
     };
 
     evtSource.onerror = function() {
-      // On error, fall back to polling reload
       evtSource.close();
-      setTimeout(() => { window.location.reload(); }, 3000);
+      setTimeout(() => window.location.reload(), 3000);
     };
-
-    updateProgress();
   })();
   </script>
 
@@ -448,34 +397,91 @@
     <!-- Financial Impact -->
     {% set fin = results.insurance.financial_impact %}
     {% if fin and fin.total %}
-    {% set fin_tl = 'tl-crimson' if fin.total.most_likely > 500000 else ('tl-red' if fin.total.most_likely > 200000 else ('tl-amber' if fin.total.most_likely > 50000 else 'tl-green')) %}
+    {% set is_zar = fin.currency == 'ZAR' %}
+    {% set cur = 'R' if is_zar else '$' %}
+    {% set fin_tl = 'tl-crimson' if fin.total.most_likely > 5000000 else ('tl-red' if fin.total.most_likely > 1000000 else ('tl-amber' if fin.total.most_likely > 200000 else 'tl-green')) %}
     <div class="cat-card">
       <div class="cat-header" onclick="toggle(this)">
         <div class="cat-left"><div class="traffic-light {{ fin_tl }}"></div><div class="cat-title">Financial Impact Analysis (FAIR)</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade">${{ '{:,.0f}'.format(fin.total.most_likely) }} est. annual loss</span>
+          <span class="cat-grade">{{ cur }} {{ '{:,.0f}'.format(fin.total.most_likely) }} est. annual loss</span>
           <span class="chevron">&#9660;</span>
         </div>
       </div>
       <div class="cat-body open">
+        {% if is_zar and fin.annual_revenue_zar %}
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px;">
+          Industry: <strong>{{ fin.industry | title }}</strong> &nbsp;|&nbsp;
+          Annual Revenue: <strong>R {{ '{:,.0f}'.format(fin.annual_revenue_zar) }}</strong>
+          {% if not results.scan_context or not results.scan_context.annual_revenue_zar %}<span style="opacity:.6;"> (default estimate)</span>{% endif %}
+        </div>
+        {% endif %}
+        {% if is_zar %}
+        {# ZAR path: scenarios have estimated_loss + probability (ransomware uses rsi_score) #}
+        <table class="vuln-table">
+          <thead><tr><th>Scenario</th><th>Probability / Driver</th><th>Estimated Loss</th><th>Key Detail</th></tr></thead>
+          <tbody>
+            {% set db = fin.scenarios.data_breach %}
+            <tr>
+              <td>Data Breach</td>
+              <td>P={{ '%.1f'|format((db.probability | default(0)) * 100) }}%</td>
+              <td><strong>{{ cur }} {{ '{:,.0f}'.format(db.estimated_loss | default(0)) }}</strong></td>
+              <td>{{ '{:,}'.format(db.estimated_records | default(0)) }} records @ {{ cur }}{{ '{:,.0f}'.format(db.cost_per_record | default(0)) }}/rec &nbsp;+&nbsp; POPIA {{ cur }} {{ '{:,.0f}'.format(db.regulatory_fine | default(0)) }}</td>
+            </tr>
+            {% set rw = fin.scenarios.ransomware %}
+            <tr>
+              <td>Ransomware</td>
+              <td>RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }}</td>
+              <td><strong>{{ cur }} {{ '{:,.0f}'.format(rw.estimated_loss | default(0)) }}</strong></td>
+              <td>{{ rw.avg_downtime_days | default(22) }} days downtime &nbsp;+&nbsp; {{ cur }} {{ '{:,.0f}'.format(rw.ransom_estimate | default(0)) }} ransom</td>
+            </tr>
+            {% set bi = fin.scenarios.business_interruption %}
+            <tr>
+              <td>Business Interruption</td>
+              <td>P={{ '%.1f'|format((bi.probability | default(0)) * 100) }}%</td>
+              <td><strong>{{ cur }} {{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }}</strong></td>
+              <td>—</td>
+            </tr>
+            <tr style="border-top:2px solid var(--border);font-weight:700;">
+              <td>Total Estimated Loss</td><td></td>
+              <td style="color:var(--critical);">{{ cur }} {{ '{:,.0f}'.format(fin.total.most_likely) }}</td>
+              <td>Min {{ cur }} {{ '{:,.0f}'.format(fin.total.min) }} &nbsp;|&nbsp; Max {{ cur }} {{ '{:,.0f}'.format(fin.total.max) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        {% set ins = fin.insurance_recommendation %}
+        {% if ins %}
+        <div style="margin-top:14px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Insurance Cover Recommendation</div>
+        <table class="kv-table" style="margin-top:6px;">
+          <tr><td>Minimum Cover</td><td>{{ cur }} {{ '{:,.0f}'.format(ins.minimum_cover_zar | default(0)) }}</td></tr>
+          <tr><td>Recommended Cover</td><td><strong>{{ cur }} {{ '{:,.0f}'.format(ins.recommended_cover_zar | default(0)) }}</strong></td></tr>
+          <tr><td>Premium Risk Tier</td><td><strong>{{ ins.premium_risk_tier | default('N/A') }}</strong></td></tr>
+        </table>
+        {% endif %}
+        {% else %}
+        {# USD path #}
         <table class="vuln-table">
           <thead><tr><th>Scenario</th><th>Probability</th><th>Minimum</th><th>Most Likely</th><th>Maximum</th></tr></thead>
           <tbody>
             {% set db = fin.scenarios.data_breach %}
-            <tr><td>Data Breach</td><td>{{ '%.1f'|format(db.probability * 100) }}%</td><td>${{ '{:,.0f}'.format(db.min) }}</td><td><strong>${{ '{:,.0f}'.format(db.most_likely) }}</strong></td><td>${{ '{:,.0f}'.format(db.max) }}</td></tr>
+            <tr><td>Data Breach</td><td>{{ '%.1f'|format((db.probability | default(0)) * 100) }}%</td><td>{{ cur }}{{ '{:,.0f}'.format(db.min | default(0)) }}</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(db.most_likely | default(0)) }}</strong></td><td>{{ cur }}{{ '{:,.0f}'.format(db.max | default(0)) }}</td></tr>
             {% set rw = fin.scenarios.ransomware %}
-            <tr><td>Ransomware</td><td>{{ '%.1f'|format(rw.probability * 100) }}%</td><td>${{ '{:,.0f}'.format(rw.min) }}</td><td><strong>${{ '{:,.0f}'.format(rw.most_likely) }}</strong></td><td>${{ '{:,.0f}'.format(rw.max) }}</td></tr>
+            <tr><td>Ransomware</td><td>{{ '%.1f'|format((rw.probability | default(0)) * 100) }}%</td><td>{{ cur }}{{ '{:,.0f}'.format(rw.min | default(0)) }}</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(rw.most_likely | default(0)) }}</strong></td><td>{{ cur }}{{ '{:,.0f}'.format(rw.max | default(0)) }}</td></tr>
             {% set bi = fin.scenarios.business_interruption %}
-            <tr><td>Business Interruption</td><td>{{ '%.1f'|format(bi.probability * 100) }}%</td><td>${{ '{:,.0f}'.format(bi.min) }}</td><td><strong>${{ '{:,.0f}'.format(bi.most_likely) }}</strong></td><td>${{ '{:,.0f}'.format(bi.max) }}</td></tr>
-            <tr style="border-top:2px solid var(--border);font-weight:700;"><td>Total Estimated Loss</td><td></td><td>${{ '{:,.0f}'.format(fin.total.min) }}</td><td style="color:var(--critical);">${{ '{:,.0f}'.format(fin.total.most_likely) }}</td><td>${{ '{:,.0f}'.format(fin.total.max) }}</td></tr>
+            <tr><td>Business Interruption</td><td>{{ '%.1f'|format((bi.probability | default(0)) * 100) }}%</td><td>{{ cur }}{{ '{:,.0f}'.format(bi.min | default(0)) }}</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(bi.most_likely | default(0)) }}</strong></td><td>{{ cur }}{{ '{:,.0f}'.format(bi.max | default(0)) }}</td></tr>
+            <tr style="border-top:2px solid var(--border);font-weight:700;"><td>Total</td><td></td><td>{{ cur }}{{ '{:,.0f}'.format(fin.total.min) }}</td><td style="color:var(--critical);">{{ cur }}{{ '{:,.0f}'.format(fin.total.most_likely) }}</td><td>{{ cur }}{{ '{:,.0f}'.format(fin.total.max) }}</td></tr>
           </tbody>
         </table>
+        {% set ins = fin.insurance_recommendations %}
+        {% if ins %}
         <div style="margin-top:14px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Insurance Recommendations</div>
         <table class="kv-table" style="margin-top:6px;">
-          <tr><td>Suggested Deductible</td><td>${{ '{:,.0f}'.format(fin.insurance_recommendations.suggested_deductible) }}</td></tr>
-          <tr><td>Expected Annual Loss</td><td><strong>${{ '{:,.0f}'.format(fin.insurance_recommendations.expected_annual_loss) }}</strong></td></tr>
-          <tr><td>Recommended Coverage Limit</td><td>${{ '{:,.0f}'.format(fin.insurance_recommendations.recommended_coverage) }}</td></tr>
+          <tr><td>Suggested Deductible</td><td>{{ cur }}{{ '{:,.0f}'.format(ins.suggested_deductible | default(0)) }}</td></tr>
+          <tr><td>Expected Annual Loss</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(ins.expected_annual_loss | default(0)) }}</strong></td></tr>
+          <tr><td>Recommended Coverage Limit</td><td>{{ cur }}{{ '{:,.0f}'.format(ins.recommended_coverage | default(0)) }}</td></tr>
         </table>
+        {% endif %}
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -513,7 +519,8 @@
       <div class="cat-header" onclick="toggle(this)">
         <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Remediation Roadmap — Before/After Model</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade">{{ rem.step_count }} steps — ${{ '{:,.0f}'.format(rem.total_potential_savings) }} potential savings</span>
+          {% set rem_cur = 'R' if results.insurance.financial_impact and results.insurance.financial_impact.currency == 'ZAR' else '$' %}
+          <span class="cat-grade">{{ rem.step_count }} steps — {{ rem_cur }} {{ '{:,.0f}'.format(rem.total_potential_savings) }} potential savings</span>
           <span class="chevron">&#9660;</span>
         </div>
       </div>
@@ -523,14 +530,14 @@
             <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Current State</div>
             <div style="font-size:1.1rem;font-weight:700;color:var(--critical);">RSI: {{ '%.3f'|format(rem.current_rsi) }}</div>
             {% if rem.current_financial_impact %}
-            <div style="font-size:.88rem;color:var(--muted);margin-top:4px;">Est. Loss: ${{ '{:,.0f}'.format(rem.current_financial_impact.most_likely) }}/yr</div>
+            <div style="font-size:.88rem;color:var(--muted);margin-top:4px;">Est. Loss: {{ rem_cur }} {{ '{:,.0f}'.format(rem.current_financial_impact.most_likely) }}/yr</div>
             {% endif %}
           </div>
           <div style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;">
             <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">After Remediation</div>
             <div style="font-size:1.1rem;font-weight:700;color:var(--low);">RSI: {{ '%.3f'|format(rem.simulated_rsi) }}</div>
             {% if rem.simulated_financial_impact %}
-            <div style="font-size:.88rem;color:var(--muted);margin-top:4px;">Est. Loss: ${{ '{:,.0f}'.format(rem.simulated_financial_impact.most_likely) }}/yr</div>
+            <div style="font-size:.88rem;color:var(--muted);margin-top:4px;">Est. Loss: {{ rem_cur }} {{ '{:,.0f}'.format(rem.simulated_financial_impact.most_likely) }}/yr</div>
             {% endif %}
           </div>
         </div>
@@ -544,7 +551,7 @@
               <td><span class="badge {% if step.priority == 1 %}badge-red{% elif step.priority == 2 %}badge-amber{% else %}badge-green{% endif %}">P{{ step.priority }}</span></td>
               <td>{{ step.estimated_cost }}</td>
               <td style="color:var(--low);">-{{ '%.2f'|format(step.rsi_reduction) }}</td>
-              <td style="color:var(--low);font-weight:600;">${{ '{:,.0f}'.format(step.annual_savings_estimate) }}</td>
+              <td style="color:var(--low);font-weight:600;">{{ rem_cur }} {{ '{:,.0f}'.format(step.annual_savings_estimate) }}</td>
             </tr>
           {% endfor %}
           </tbody>
@@ -719,14 +726,6 @@
 
   <!-- =================== NETWORK & INFRASTRUCTURE =================== -->
   <div class="section-label">&#127760; Network &amp; Infrastructure</div>
-  {% if results.discovered_ips %}
-  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <span style="font-size:.78rem;font-weight:600;color:var(--blue);">Discovered IPs:</span>
-    {% for ip in results.discovered_ips %}
-    <span style="background:var(--surface2);border:1px solid var(--border);padding:2px 10px;border-radius:999px;font-size:.82rem;font-family:monospace;font-weight:600;">{{ ip }}</span>
-    {% endfor %}
-  </div>
-  {% endif %}
   <div class="categories">
 
     <!-- DNS & Infrastructure -->
@@ -745,8 +744,33 @@
           {% if dns.reverse_dns %}<tr><td>Reverse DNS</td><td>{{ dns.reverse_dns }}</td></tr>{% endif %}
         </table>
         {% endif %}
-        {% if dns.open_ports %}<div class="port-list">{% for p in dns.open_ports %}<span class="port-chip port-{{ p.risk }}">{{ p.port }}/{{ p.service }}</span>{% endfor %}</div>{% endif %}
-        {% if dns.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in dns.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+        {% if dns.open_ports %}
+        <div class="port-list" style="margin-bottom:10px;">{% for p in dns.open_ports %}<span class="port-chip port-{{ p.risk }}">{{ p.port }}/{{ p.service }}</span>{% endfor %}</div>
+        {% set risky_ports = dns.open_ports | selectattr('risk', 'ne', 'info') | list %}
+        {% if risky_ports %}
+        <div style="margin-top:8px;">
+          {% for p in risky_ports %}
+          <div style="border:1px solid {% if p.risk == 'high' %}rgba(255,60,60,0.2){% else %}rgba(255,165,0,0.2){% endif %};border-radius:8px;padding:8px 12px;margin-bottom:6px;background:{% if p.risk == 'high' %}rgba(255,60,60,0.03){% else %}rgba(255,165,0,0.03){% endif %};font-size:0.82rem;">
+            <div style="font-weight:700;margin-bottom:4px;">
+              <span class="port-chip port-{{ p.risk }}" style="margin-right:6px;">{{ p.port }}/{{ p.service }}</span>
+              <span style="color:{% if p.risk == 'high' %}#e74c3c{% else %}#e67e22{% endif %};">{{ p.risk | upper }} RISK</span>
+            </div>
+            {% if p.exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Typical exploits:</span> <span style="color:#cbd5e1;">{{ p.exploits }}</span></div>{% endif %}
+            {% if p.typical_cvss is defined and p.typical_cvss > 0 %}
+            <div style="margin-bottom:3px;display:flex;flex-wrap:wrap;gap:10px;">
+              <span><span style="color:#94a3b8;">Typical CVSS:</span> <span style="font-weight:700;color:{% if p.typical_cvss >= 9.0 %}#e74c3c{% elif p.typical_cvss >= 7.0 %}#e67e22{% else %}#f39c12{% endif %};">{{ p.typical_cvss }}</span> <span style="font-size:0.75rem;color:#64748b;">({{ p.typical_severity | upper }})</span></span>
+              <span><span style="color:#94a3b8;">Typical EPSS:</span> <span style="font-weight:600;color:{% if p.typical_epss >= 0.5 %}#e74c3c{% elif p.typical_epss >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.0f" | format(p.typical_epss * 100) }}%</span></span>
+              {% if p.in_kev %}<span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if p.typical_cves is defined and p.typical_cves %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span> <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;">{{ p.typical_cves | join(', ') }}</span></div>{% endif %}
+            {% if p.insurance_risk is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Insurance risk:</span> <span style="color:#fbbf24;">{{ p.insurance_risk }}</span></div>{% endif %}
+            {% if p.underwriting_impact is defined %}<div><span style="color:#94a3b8;">Underwriting impact:</span> <span style="color:#fb923c;">{{ p.underwriting_impact }}</span></div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% endif %}
       </div>
     </div>
 
@@ -760,9 +784,27 @@
       </div>
       <div class="cat-body">
         {% if hrp.exposed_services %}
-        <div class="port-list">{% for s in hrp.exposed_services %}<span class="port-chip port-critical">{{ s.port }}/{{ s.service }}</span>{% endfor %}</div>
+        <div class="port-list" style="margin-bottom:10px;">{% for s in hrp.exposed_services %}<span class="port-chip port-critical">{{ s.port }}/{{ s.service }}</span>{% endfor %}</div>
+        {% for s in hrp.exposed_services %}
+        <div style="border:1px solid rgba(255,60,60,0.25);border-radius:8px;padding:8px 12px;margin-bottom:6px;background:rgba(255,60,60,0.03);font-size:0.82rem;">
+          <div style="font-weight:700;margin-bottom:4px;">
+            <span class="port-chip port-critical" style="margin-right:6px;">{{ s.port }}/{{ s.service }}</span>
+            <span style="color:#e74c3c;">CRITICAL EXPOSURE</span>
+          </div>
+          {% if s.exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Known exploits:</span> <span style="color:#cbd5e1;">{{ s.exploits }}</span></div>{% endif %}
+          {% if s.typical_cvss is defined and s.typical_cvss > 0 %}
+          <div style="margin-bottom:3px;display:flex;flex-wrap:wrap;gap:10px;">
+            <span><span style="color:#94a3b8;">Typical CVSS:</span> <span style="font-weight:700;color:{% if s.typical_cvss >= 9.0 %}#e74c3c{% elif s.typical_cvss >= 7.0 %}#e67e22{% else %}#f39c12{% endif %};">{{ s.typical_cvss }}</span> <span style="font-size:0.75rem;color:#64748b;">({{ s.typical_severity | upper }})</span></span>
+            <span><span style="color:#94a3b8;">Typical EPSS:</span> <span style="font-weight:600;color:{% if s.typical_epss >= 0.5 %}#e74c3c{% elif s.typical_epss >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.0f" | format(s.typical_epss * 100) }}%</span></span>
+            {% if s.in_kev %}<span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span>{% endif %}
+          </div>
+          {% endif %}
+          {% if s.typical_cves is defined and s.typical_cves %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span> <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;">{{ s.typical_cves | join(', ') }}</span></div>{% endif %}
+          {% if s.insurance_risk is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Insurance risk:</span> <span style="color:#fbbf24;">{{ s.insurance_risk }}</span></div>{% endif %}
+          {% if s.underwriting_impact is defined %}<div><span style="color:#94a3b8;">Underwriting impact:</span> <span style="color:#fb923c;">{{ s.underwriting_impact }}</span></div>{% endif %}
+        </div>
+        {% endfor %}
         {% else %}<p style="color:var(--low);font-size:.82rem;margin-top:8px;">&#10003; No critical database or service ports exposed</p>{% endif %}
-        {% if hrp.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in hrp.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
       </div>
     </div>
 
@@ -797,6 +839,143 @@
           <tr><td>VPN detected</td><td>{% if vpn.vpn_detected %}<span class="badge badge-green">{{ vpn.vpn_name }}</span>{% else %}<span class="badge badge-grey">Not detected</span>{% endif %}</td></tr>
         </table>
         {% if vpn.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in vpn.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+    </div>
+
+    <!-- CVE / Known Vulnerabilities -->
+    {% set extip = results.categories.get('external_ips', {}) %}
+    {% set extip_agg = extip.get('aggregate_vulns', {}) if extip else {} %}
+    {% set ea_crit = extip_agg.get('critical_count', 0) if extip_agg else 0 %}
+    {% set ea_kev = extip_agg.get('kev_count', 0) if extip_agg else 0 %}
+    {% set ea_high = extip_agg.get('high_count', 0) if extip_agg else 0 %}
+    {% set ea_total = extip_agg.get('total_cves', 0) if extip_agg else 0 %}
+    {% set ea_ips = extip_agg.get('ips_with_vulns', 0) if extip_agg else 0 %}
+    {% set ea_cvss = extip_agg.get('max_cvss', 0) if extip_agg else 0 %}
+    {% set ea_epss = extip_agg.get('max_epss', 0) if extip_agg else 0 %}
+    {% set extip_tl = 'tl-crimson' if ea_crit > 0 or ea_kev > 0 else ('tl-red' if ea_high > 0 else ('tl-amber' if ea_total > 0 else 'tl-green')) %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ extip_tl }}"></div><div class="cat-title">CVE / Known Vulnerabilities</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">{{ extip.total_unique_ips | default(0) }} IPs found</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <!-- Summary stats -->
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+          <div class="mini-stat"><div class="stat-val">{{ extip.total_unique_ips | default(0) }}</div><div class="stat-lbl">Total IPs</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.ipv4_count | default(0) }}</div><div class="stat-lbl">IPv4</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.ipv6_count | default(0) }}</div><div class="stat-lbl">IPv6</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.unique_asns | default(0) }}</div><div class="stat-lbl">ASNs</div></div>
+          <div class="mini-stat"><div class="stat-val">{{ extip.unique_countries | default(0) }}</div><div class="stat-lbl">Countries</div></div>
+          {% if ea_ips > 0 %}
+          <div class="mini-stat"><div class="stat-val color-red">{{ ea_ips }}</div><div class="stat-lbl">IPs w/ CVEs</div></div>
+          {% endif %}
+          {% if ea_kev > 0 %}
+          <div class="mini-stat"><div class="stat-val color-red">{{ ea_kev }}</div><div class="stat-lbl">CISA KEV</div></div>
+          {% endif %}
+        </div>
+
+        <!-- Aggregate vulnerability summary -->
+        {% if ea_total > 0 %}
+        <div style="background:rgba(255,60,60,0.06);border:1px solid rgba(255,60,60,0.15);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+          <strong style="color:#e74c3c;">&#9888; Vulnerability Summary Across All IPs:</strong>
+          {{ ea_total }} total CVEs
+          {% if ea_crit > 0 %} &bull; <span class="color-red">{{ ea_crit }} Critical</span>{% endif %}
+          {% if ea_high > 0 %} &bull; <span style="color:#e67e22;">{{ ea_high }} High</span>{% endif %}
+          {% if ea_cvss > 0 %} &bull; Max CVSS: {{ ea_cvss }}{% endif %}
+          {% if ea_epss > 0 %} &bull; Max EPSS: {{ "%.1f" | format(ea_epss * 100) }}%{% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Per-IP cards -->
+        {% if extip.ip_addresses %}
+        {% for ip_entry in extip.ip_addresses %}
+          {% set vuln = ip_entry.shodan or {} %}
+          {% set ip_score = vuln.get('risk_score', 100) %}
+          {% set ip_label = vuln.get('risk_label', 'Low') %}
+          {% set score_color = '#e74c3c' if ip_score < 20 else ('#e67e22' if ip_score < 50 else ('#f39c12' if ip_score < 80 else '#27ae60')) %}
+          {% set border_color = 'rgba(255,60,60,0.3)' if ip_score < 50 else 'rgba(30,58,138,0.12)' %}
+          <div style="border:1px solid {{ border_color }};border-radius:10px;margin-bottom:10px;overflow:hidden;{% if ip_score < 20 %}background:rgba(255,60,60,0.03);{% endif %}">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">{{ ip_entry.ip }}</span>
+              {% if ip_entry.is_primary %}<span class="badge badge-blue" style="font-size:0.65rem;">PRIMARY</span>{% endif %}
+              {% if ip_entry.hosting == false %}<span class="badge badge-amber" style="font-size:0.65rem;">RESIDENTIAL</span>{% endif %}
+              {% if vuln.get('kev_count', 0) > 0 %}<span class="badge badge-red" style="font-size:0.65rem;animation:pulse 2s infinite;">CISA KEV</span>{% endif %}
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:{{ score_color }};">{{ ip_score }}</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:{{ score_color }};">{{ ip_label }}</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> {{ ip_entry.sources | join(', ') | truncate(80) }}</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> {{ ip_entry.org | default('—') }}{% if ip_entry.asn %} <span style="color:#64748b;">({{ ip_entry.asn }})</span>{% endif %}</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> {{ ip_entry.country | default('—') }}{% if ip_entry.city %}, {{ ip_entry.city }}{% endif %}</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> {{ ip_entry.reverse_dns | default('—') | truncate(40) }}</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                {% if vuln.get('open_ports') %}{{ vuln.open_ports | join(', ') }}{% else %}None detected{% endif %}
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                {% if vuln.get('cve_count', 0) > 0 %}
+                  <span style="font-weight:600;color:{% if vuln.get('critical_count', 0) > 0 %}#e74c3c{% elif vuln.get('high_count', 0) > 0 %}#e67e22{% else %}#27ae60{% endif %};">{{ vuln.cve_count }}</span>
+                  ({{ vuln.get('critical_count', 0) }}C / {{ vuln.get('high_count', 0) }}H / {{ vuln.get('medium_count', 0) }}M)
+                {% else %}0{% endif %}
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                {% if vuln.get('max_cvss', 0) > 0 %}
+                  <span style="font-weight:700;color:{% if vuln.get('max_cvss', 0) >= 9.0 %}#e74c3c{% elif vuln.get('max_cvss', 0) >= 7.0 %}#e67e22{% elif vuln.get('max_cvss', 0) >= 4.0 %}#f39c12{% else %}#27ae60{% endif %};">{{ vuln.max_cvss }}</span>
+                {% else %}—{% endif %}
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                {% if vuln.get('max_epss', 0) > 0 %}
+                  <span style="font-weight:600;color:{% if vuln.get('max_epss', 0) >= 0.5 %}#e74c3c{% elif vuln.get('max_epss', 0) >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.1f" | format(vuln.max_epss * 100) }}%</span>
+                {% else %}—{% endif %}
+              </div>
+            </div>
+            <!-- Remediation -->
+            {% if vuln.get('remediation') %}
+            <div style="padding:8px 14px;font-size:0.8rem;border-top:1px solid rgba(30,58,138,0.08);background:{% if ip_score < 50 %}rgba(255,60,60,0.04){% else %}rgba(30,58,138,0.02){% endif %};">
+              <span style="font-weight:600;color:{% if ip_score < 50 %}#e74c3c{% else %}#1e3a8a{% endif %};">&#128736; Remediation:</span>
+              <span style="color:#cbd5e1;">{{ vuln.remediation }}</span>
+            </div>
+            {% endif %}
+            <!-- Expandable CVE details -->
+            {% if vuln.get('cves') %}
+            <details style="padding:4px 14px 8px;border-top:1px solid rgba(30,58,138,0.06);">
+              <summary style="cursor:pointer;font-size:0.8rem;color:#60a5fa;font-weight:600;padding:4px 0;">&#9654; Show {{ vuln.get('cves', []) | length }} enriched CVE(s)</summary>
+              <table style="width:100%;font-size:0.78rem;margin-top:6px;border-collapse:collapse;">
+                <tr style="background:rgba(30,58,138,0.04);"><th style="text-align:left;padding:4px;">CVE</th><th style="padding:4px;">CVSS</th><th style="padding:4px;">EPSS</th><th style="padding:4px;">KEV</th><th style="text-align:left;padding:4px;">Description</th></tr>
+                {% for cve in vuln.get('cves', []) %}
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                  <td style="padding:4px;font-family:monospace;white-space:nowrap;">{{ cve.cve_id }}</td>
+                  <td style="padding:4px;text-align:center;">
+                    <span style="font-weight:600;color:{% if cve.cvss_score >= 9.0 %}#e74c3c{% elif cve.cvss_score >= 7.0 %}#e67e22{% elif cve.cvss_score >= 4.0 %}#f39c12{% else %}#27ae60{% endif %};">{{ cve.cvss_score }}</span>
+                    <span style="font-size:0.65rem;color:#64748b;">({{ cve.severity }})</span>
+                  </td>
+                  <td style="padding:4px;text-align:center;">
+                    {% if cve.epss_score is not none %}
+                      <span style="font-weight:600;color:{% if cve.epss_score >= 0.5 %}#e74c3c{% elif cve.epss_score >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.1f" | format(cve.epss_score * 100) }}%</span>
+                    {% else %}—{% endif %}
+                  </td>
+                  <td style="padding:4px;text-align:center;">{% if cve.kev_exploited %}<span class="badge badge-red" style="font-size:0.6rem;">KEV</span>{% else %}—{% endif %}</td>
+                  <td style="padding:4px;font-size:0.73rem;color:#cbd5e1;">{{ cve.description | default('') | truncate(120) }}</td>
+                </tr>
+                {% endfor %}
+              </table>
+            </details>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% else %}
+        <p style="color:#888;font-style:italic;">No external IPs discovered.</p>
+        {% endif %}
+
+        {% if extip.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in extip.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
       </div>
     </div>
 
@@ -901,92 +1080,6 @@
       </div>
     </div>
 
-    <!-- CVE / Known Vulnerabilities (Shodan) -->
-    {% set sv = results.categories.shodan_vulns %}
-    {% set sv_total = sv.critical_count + sv.high_count + sv.medium_count + sv.low_count %}
-    {% set sv_tl = 'tl-crimson' if sv.critical_count > 0 else ('tl-red' if sv.high_count > 0 else ('tl-amber' if sv.medium_count > 0 else 'tl-green')) %}
-    <div class="cat-card" style="grid-column: 1 / -1;">
-      <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light {{ sv_tl }}"></div><div class="cat-title">CVE / Known Vulnerabilities {% if sv.get('data_source') == 'shodan_full_api' %}<span class="badge badge-blue" style="margin-left:6px;">Full API</span>{% endif %}</div></div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade {% if sv.critical_count > 0 %}color-red{% endif %}">
-            {{ sv_total }} found
-          </span>
-          <span class="chevron">&#9660;</span>
-        </div>
-      </div>
-      <div class="cat-body">
-        <!-- Summary row -->
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:.82rem;">
-          <span>IP: <b>{{ sv.ip or '—' }}</b></span>
-          {% if sv.get('data_source') == 'shodan_full_api' %}
-          {% if sv.get('os') %}<span>OS: <b>{{ sv.os }}</b></span>{% endif %}
-          {% if sv.get('org') %}<span>Org: <b>{{ sv.org }}</b></span>{% endif %}
-          {% if sv.get('isp') %}<span>ISP: <b>{{ sv.isp }}</b></span>{% endif %}
-          {% if sv.get('asn') %}<span>ASN: <b>{{ sv.asn }}</b></span>{% endif %}
-          {% endif %}
-          {% if sv.critical_count > 0 %}<span><span class="badge badge-red">Critical {{ sv.critical_count }}</span></span>{% endif %}
-          {% if sv.high_count > 0 %}<span><span class="badge badge-red">High {{ sv.high_count }}</span></span>{% endif %}
-          {% if sv.medium_count > 0 %}<span><span class="badge badge-amber">Medium {{ sv.medium_count }}</span></span>{% endif %}
-          {% if sv.low_count > 0 %}<span><span class="badge badge-green">Low {{ sv.low_count }}</span></span>{% endif %}
-          {% if sv.tags %}<span style="color:var(--muted);">Tags: {{ sv.tags | join(', ') }}</span>{% endif %}
-        </div>
-        {% if sv.get('services') %}
-        <!-- Service banners (Shodan full API) -->
-        <p style="font-size:.78rem;color:var(--muted);margin-bottom:4px;">Detected services:</p>
-        <table class="vuln-table" style="margin-bottom:14px;">
-          <thead><tr><th>Port</th><th>Product</th><th>Version</th><th>Module</th></tr></thead>
-          <tbody>
-            {% for svc in sv.services %}
-            <tr>
-              <td><span class="badge badge-blue">{{ svc.port }}/{{ svc.transport }}</span></td>
-              <td>{{ svc.product or '—' }}</td>
-              <td>{{ svc.version or '—' }}</td>
-              <td style="color:var(--muted);">{{ svc.module or '—' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% endif %}
-        {% if sv.cves %}
-        <!-- Vulnerability table -->
-        <table class="vuln-table">
-          <thead>
-            <tr>
-              <th style="width:32px;">#</th>
-              <th style="width:80px;">Severity</th>
-              <th>Name</th>
-              <th style="width:60px;">CVSS</th>
-              <th style="width:60px;">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for cve in sv.cves %}
-            <tr>
-              <td>{{ loop.index }}</td>
-              <td>
-                <span class="sev-badge sev-{{ cve.severity }}">
-                  {% if cve.severity == 'critical' %}C{% elif cve.severity == 'high' %}H{% elif cve.severity == 'medium' %}M{% else %}L{% endif %}
-                </span>
-                {{ cve.severity | capitalize }}
-              </td>
-              <td>
-                <div style="font-weight:600;">{{ cve.cve_id }}</div>
-                {% if cve.description %}<div style="color:var(--muted);font-size:.74rem;margin-top:2px;">{{ cve.description }}</div>{% endif %}
-              </td>
-              <td><span class="badge {% if cve.cvss_score >= 7.0 %}badge-red{% elif cve.cvss_score >= 4.0 %}badge-amber{% else %}badge-green{% endif %}">{{ cve.cvss_score }}</span></td>
-              <td><span style="color:var(--medium);font-weight:500;">Active</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% elif sv_total == 0 %}
-        <p style="color:var(--green);font-size:.84rem;">No known CVEs detected for this IP.</p>
-        {% endif %}
-        {% if sv.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in sv.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
-      </div>
-    </div>
-
     <!-- Dehashed Credential Leaks -->
     {% set dh = results.categories.dehashed %}
     {% set dh_tl = 'tl-crimson' if dh.total_entries > 50 else ('tl-red' if dh.total_entries > 10 else ('tl-amber' if dh.total_entries > 0 else 'tl-green')) %}
@@ -1019,96 +1112,72 @@
       </div>
     </div>
 
-    <!-- VirusTotal Reputation -->
-    {% set vt = results.categories.get('virustotal', {}) %}
-    {% set vt_mal = vt.get('malicious_count', 0) %}
-    {% set vt_sus = vt.get('suspicious_count', 0) %}
-    {% set vt_tl = 'tl-crimson' if vt_mal > 3 else ('tl-red' if vt_mal > 0 else ('tl-amber' if vt_sus > 0 else 'tl-green')) %}
-    {% if vt.get('status') == 'no_api_key' %}{% set vt_tl = 'tl-blue' %}{% endif %}
+    <!-- Fraudulent Domains -->
+    {% set fraud = results.categories.get('fraudulent_domains', {}) %}
+    {% if fraud and fraud.fraudulent_domains_found is defined %}
+    {% set fraud_tl = 'tl-crimson' if fraud.fraudulent_domains_found > 3 else ('tl-red' if fraud.fraudulent_domains_found > 0 else 'tl-green') %}
     <div class="cat-card">
       <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light {{ vt_tl }}"></div><div class="cat-title">VirusTotal Reputation</div></div>
+        <div class="cat-left"><div class="traffic-light {{ fraud_tl }}"></div><div class="cat-title">Fraudulent Domains (Typosquat)</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade {% if vt_mal > 0 %}color-red{% endif %}">
-            {% if vt.get('status') == 'no_api_key' %}No API key{% elif vt_mal > 0 %}{{ vt_mal }} malicious{% elif vt_sus > 0 %}{{ vt_sus }} suspicious{% else %}Clean{% endif %}
-          </span>
+          <span class="cat-grade">{{ fraud.fraudulent_domains_found | default(0) }} found</span>
           <span class="chevron">&#9660;</span>
         </div>
       </div>
       <div class="cat-body">
-        {% if vt.get('status') == 'no_api_key' %}
-        <p style="font-size:.82rem;color:var(--muted);padding:8px 0;">Set <code>VIRUSTOTAL_API_KEY</code> environment variable to enable VirusTotal domain reputation scanning (free tier: 4 req/min).</p>
-        {% else %}
         <table class="kv-table">
-          <tr><td>Malicious detections</td><td>{% if vt_mal > 0 %}<span class="badge badge-red">{{ vt_mal }}</span>{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
-          <tr><td>Suspicious detections</td><td>{% if vt_sus > 0 %}<span class="badge badge-amber">{{ vt_sus }}</span>{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
-          <tr><td>Harmless</td><td>{{ vt.get('harmless_count', 0) }}</td></tr>
-          <tr><td>Undetected</td><td>{{ vt.get('undetected_count', 0) }}</td></tr>
-          <tr><td>Community reputation</td><td>{{ vt.get('reputation', 0) }}</td></tr>
-          <tr><td>Community votes</td><td>&#128077; {{ vt.get('harmless_votes', 0) }} / &#128078; {{ vt.get('malicious_votes', 0) }}</td></tr>
-          {% if vt.get('popularity_rank') %}<tr><td>Popularity rank</td><td>#{{ '{:,}'.format(vt.popularity_rank) }}</td></tr>{% endif %}
-          {% if vt.get('categories') %}<tr><td>Categories</td><td style="font-size:.78rem;">{{ vt.categories.values() | list | join(', ') }}</td></tr>{% endif %}
+          <tr><td>Variants checked</td><td>{{ fraud.variants_checked | default(0) }}</td></tr>
+          <tr><td>Lookalikes with certs</td><td>{% if fraud.fraudulent_domains_found > 0 %}<span class="badge badge-red">{{ fraud.fraudulent_domains_found }}</span>{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
         </table>
-        {% if vt.get('flagging_engines') %}
-        <p style="font-size:.78rem;color:var(--critical);margin:8px 0 4px 0;">&#9888; Flagging engines:</p>
-        <div style="margin-top:4px;">
-          {% for eng in vt.flagging_engines %}
-          <div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:.78rem;">
-            <span>{{ eng.engine }}</span>
-            <span><span class="badge badge-{% if eng.category == 'malicious' %}red{% else %}amber{% endif %}">{{ eng.category }}</span> {{ eng.result }}</span>
+        {% if fraud.domains %}
+        <div style="margin-top:8px;">
+          {% for d in fraud.domains %}
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <div>
+              <strong>{{ d.domain }}</strong>
+              <span class="badge badge-amber" style="margin-left:4px;">{{ d.type }}</span>
+            </div>
+            <div style="text-align:right;font-size:.75rem;color:var(--muted);">
+              {{ d.cert_issuer }} &middot; {{ d.first_seen }}
+            </div>
           </div>
           {% endfor %}
         </div>
+        {% elif fraud.fraudulent_domains_found == 0 %}
+        <p style="color:var(--low);font-size:.82rem;margin-top:8px;">&#10003; No lookalike domains with active certificates detected.</p>
         {% endif %}
-        {% if vt.get('issues') %}<ul class="issue-list" style="margin-top:8px;">{% for i in vt.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
-        {% endif %}
+        {% if fraud.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in fraud.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
       </div>
     </div>
-
-    <!-- Fraudulent / Lookalike Domains -->
-    {% set fd = results.categories.get('fraudulent_domains', {}) %}
-    {% set fd_count = fd.get('resolved_count', 0) %}
-    {% set fd_tl = 'tl-crimson' if fd_count > 5 else ('tl-red' if fd_count > 2 else ('tl-amber' if fd_count > 0 else 'tl-green')) %}
-    <div class="cat-card" style="grid-column: 1 / -1;">
+    {% else %}
+    <div class="cat-card">
       <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light {{ fd_tl }}"></div><div class="cat-title">Fraudulent / Lookalike Domains</div></div>
+        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Fraudulent Domains (Typosquat)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade" style="color:var(--muted);">Skipped</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="color:var(--muted);font-size:.82rem;margin-top:8px;">Set <code>include_fraudulent_domains: true</code> in the scan request to enable typosquat detection. This check adds ~2 minutes to scan time.</p>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Web Ranking -->
+    {% set wr = results.categories.get('web_ranking', {}) %}
+    {% set wr_tl = 'tl-green' if wr.ranked else 'tl-amber' %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ wr_tl }}"></div><div class="cat-title">Web Ranking (Tranco)</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade {% if fd_count > 5 %}color-red{% elif fd_count > 0 %}color-amber{% endif %}">
-            {{ fd_count }} detected
-          </span>
+          <span class="cat-grade">{{ wr.rank_label | default('Unranked') }}</span>
           <span class="chevron">&#9660;</span>
         </div>
       </div>
       <div class="cat-body">
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:.82rem;">
-          <span>Permutations checked: <b>{{ fd.get('total_permutations', 0) }}</b></span>
-          <span>Resolved (active): <b class="{% if fd_count > 5 %}color-red{% elif fd_count > 0 %}color-amber{% endif %}">{{ fd_count }}</b></span>
-        </div>
-        {% if fd.get('fraudulent_domains') %}
-        <table class="vuln-table">
-          <thead>
-            <tr>
-              <th style="width:32px;">#</th>
-              <th>Domain</th>
-              <th style="width:120px;">Technique</th>
-              <th style="width:80px;">Similarity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for d in fd.fraudulent_domains %}
-            <tr>
-              <td>{{ loop.index }}</td>
-              <td><code style="color:var(--critical);">{{ d.domain }}</code></td>
-              <td><span class="badge badge-amber">{{ d.technique }}</span></td>
-              <td><span class="badge {% if d.similarity >= 85 %}badge-red{% else %}badge-amber{% endif %}">{{ d.similarity }}%</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
+        <table class="kv-table">
+          <tr><td>Ranked</td><td>{% if wr.ranked %}&#10003; Yes{% else %}&#10007; Not in top 1M{% endif %}</td></tr>
+          {% if wr.rank %}<tr><td>Position</td><td>#{{ '{:,}'.format(wr.rank) }}</td></tr>{% endif %}
+          <tr><td>Popularity</td><td><span class="badge {% if wr.popularity in ['Very High','High'] %}badge-green{% elif wr.popularity in ['Moderate'] %}badge-amber{% else %}badge-grey{% endif %}">{{ wr.popularity | default('Unranked') }}</span></td></tr>
         </table>
-        {% elif fd_count == 0 %}
-        <p style="color:var(--low);font-size:.84rem;">No active lookalike domains detected.</p>
-        {% endif %}
-        {% if fd.get('issues') %}<ul class="issue-list" style="margin-top:8px;">{% for i in fd.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
       </div>
     </div>
 
@@ -1161,69 +1230,6 @@
           <tr><td>WHOIS privacy</td><td>{% if di.privacy_protected %}<span class="badge badge-grey">Protected</span>{% else %}Public{% endif %}</td></tr>
         </table>
         {% if di.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in di.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
-      </div>
-    </div>
-
-    <!-- SecurityTrails DNS Intelligence -->
-    {% set st = results.categories.get('securitytrails', {}) %}
-    {% set st_tl = 'tl-amber' if st.get('issues') else 'tl-green' %}
-    {% if st.get('status') == 'no_api_key' %}{% set st_tl = 'tl-blue' %}{% endif %}
-    <div class="cat-card">
-      <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light {{ st_tl }}"></div><div class="cat-title">DNS Intelligence (SecurityTrails)</div></div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade">
-            {% if st.get('status') == 'no_api_key' %}No API key{% elif st.get('associated_count', 0) > 0 %}{{ st.associated_count }} assoc.{% else %}Info{% endif %}
-          </span>
-          <span class="chevron">&#9660;</span>
-        </div>
-      </div>
-      <div class="cat-body">
-        {% if st.get('status') == 'no_api_key' %}
-        <p style="font-size:.82rem;color:var(--muted);padding:8px 0;">Set <code>SECURITYTRAILS_API_KEY</code> environment variable to enable SecurityTrails DNS intelligence (free tier: 2,500 queries/month).</p>
-        {% else %}
-        <table class="kv-table">
-          {% if st.get('a_records') %}<tr><td>A records</td><td style="font-size:.78rem;">{{ st.a_records | join(', ') }}</td></tr>{% endif %}
-          {% if st.get('mx_records') %}<tr><td>MX records</td><td style="font-size:.78rem;">{{ st.mx_records | join(', ') }}</td></tr>{% endif %}
-          {% if st.get('ns_records') %}<tr><td>NS records</td><td style="font-size:.78rem;">{{ st.ns_records | join(', ') }}</td></tr>{% endif %}
-          <tr><td>Associated domains</td><td>{% if st.get('associated_count', 0) > 50 %}<span class="badge badge-amber">{{ st.associated_count }}</span>{% else %}{{ st.get('associated_count', 0) }}{% endif %}</td></tr>
-          {% if st.get('alexa_rank') %}<tr><td>Alexa rank</td><td>#{{ '{:,}'.format(st.alexa_rank) }}</td></tr>{% endif %}
-        </table>
-        {% if st.get('associated_domains') %}
-        <p style="font-size:.78rem;color:var(--muted);margin:8px 0 4px 0;">Associated domains:</p>
-        <div class="sub-list">{% for d in st.associated_domains %}<span class="sub-chip sub-normal">{{ d }}</span>{% endfor %}</div>
-        {% endif %}
-        {% if st.get('issues') %}<ul class="issue-list" style="margin-top:8px;">{% for i in st.issues %}<li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
-        {% endif %}
-      </div>
-    </div>
-
-    <!-- Privacy Policy Compliance -->
-    {% set pc = results.categories.get('privacy_compliance', {}) %}
-    {% set pc_pct = pc.get('compliance_pct', 0) %}
-    {% set pc_tl = 'tl-green' if pc_pct >= 80 else ('tl-amber' if pc_pct >= 50 else ('tl-red' if pc.get('policy_found') else 'tl-crimson')) %}
-    <div class="cat-card">
-      <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light {{ pc_tl }}"></div><div class="cat-title">Privacy Policy Compliance</div></div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade {% if pc_pct < 50 %}color-red{% elif pc_pct < 80 %}color-amber{% endif %}">
-            {% if not pc.get('policy_found') %}Not found{% else %}{{ pc_pct }}%{% endif %}
-          </span>
-          <span class="chevron">&#9660;</span>
-        </div>
-      </div>
-      <div class="cat-body">
-        {% if not pc.get('policy_found') %}
-        <p style="color:var(--critical);font-size:.82rem;margin-top:8px;">&#9888; No privacy policy page found — POPIA/GDPR compliance risk.</p>
-        {% else %}
-        <table class="kv-table">
-          <tr><td>Policy URL</td><td style="font-size:.76rem;word-break:break-all;">{{ pc.policy_url }}</td></tr>
-          <tr><td>Compliance score</td><td><span class="badge {% if pc_pct >= 80 %}badge-green{% elif pc_pct >= 50 %}badge-amber{% else %}badge-red{% endif %}">{{ pc_pct }}%</span></td></tr>
-          <tr><td>Sections found</td><td style="font-size:.78rem;">{{ pc.get('sections_found', []) | join(', ') or '—' }}</td></tr>
-          <tr><td>Sections missing</td><td style="font-size:.78rem;color:var(--critical);">{{ pc.get('sections_missing', []) | join(', ') or 'None' }}</td></tr>
-        </table>
-        {% endif %}
-        {% if pc.get('issues') %}<ul class="issue-list" style="margin-top:8px;">{% for i in pc.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
       </div>
     </div>
 

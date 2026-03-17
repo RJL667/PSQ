@@ -1462,7 +1462,7 @@ class ShodanVulnChecker:
     When SHODAN_API_KEY is provided, uses the full Shodan API for richer data
     (service banners, OS detection, ISP/ASN info) and falls back to InternetDB otherwise.
     Enriches top CVEs with CVSS scores from the NVD API (also free, no key),
-    CISA KEV (Known Exploited Vulnerabilities) status, and EPSS scores.
+    CISA KEV (Known Exploited Vulnerabilities) status, EPSS from FIRST.org, and EPSS scores.
     """
     INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
     SHODAN_HOST_URL = "https://api.shodan.io/shodan/host/{ip}"
@@ -2572,7 +2572,11 @@ class RiskScorer:
         "privacy_compliance":   0.02,
         "web_ranking":          0.02,
         "info_disclosure":      0.05,
-    }  # Sum = 0.98 — remaining 0.02 = WAF bonus headroom
+        "external_ips":         0.03,
+        "ransomware_risk":      0.06,
+        "data_breach_index":    0.03,
+        "financial_impact":     0.02,
+    }  # Sum — includes all checkers from both branches
 
     RECOMMENDATIONS = {
         "SSL certificate has EXPIRED": "Renew your SSL certificate immediately — an expired cert causes browser warnings and erodes user trust.",
@@ -2702,28 +2706,48 @@ class RiskScorer:
         id_res = results.get("info_disclosure", {})
         id_risk = inv(id_res.get("score", 100))
 
+        # External IPs risk (feature branch checker)
+        ext_ip = results.get("external_ips", {})
+        ext_ip_risk = inv(ext_ip.get("score", 100)) if ext_ip.get("status") not in ("error", None) else 0
+
+        # Ransomware susceptibility index risk (insurance analytics)
+        rsi_res = results.get("ransomware_risk", {})
+        rsi_risk = min(100, rsi_res.get("rsi_score", 0) * 100) if rsi_res else 0
+
+        # Data breach index risk (insurance analytics)
+        dbi_res = results.get("data_breach_index", {})
+        dbi_risk = inv(dbi_res.get("dbi_score", 50)) if dbi_res else 0
+
+        # Financial impact risk (insurance analytics)
+        fin_res = results.get("financial_impact", {})
+        fin_risk = inv(fin_res.get("score", 50)) if fin_res.get("status") == "completed" else 0
+
         weighted = (
-            ssl_risk         * self.WEIGHTS["ssl"] +
-            email_risk       * self.WEIGHTS["email_security"] +
-            email_hard_risk  * self.WEIGHTS["email_hardening"] +
-            breach_risk      * self.WEIGHTS["breaches"] +
-            header_risk      * self.WEIGHTS["http_headers"] +
-            website_risk     * self.WEIGHTS["website_security"] +
-            admin_risk       * self.WEIGHTS["exposed_admin"] +
-            hrisk            * self.WEIGHTS["high_risk_protocols"] +
-            dnsbl_risk       * self.WEIGHTS["dnsbl"] +
-            tech_risk        * self.WEIGHTS["tech_stack"] +
-            pay_risk         * self.WEIGHTS["payment_security"] +
-            vpn_risk         * self.WEIGHTS["vpn_remote"] +
-            sub_risk         * self.WEIGHTS["subdomains"] +
-            shodan_risk      * self.WEIGHTS["shodan_vulns"] +
-            dehashed_risk    * self.WEIGHTS["dehashed"] +
-            vt_risk          * self.WEIGHTS["virustotal"] +
-            st_risk          * self.WEIGHTS["securitytrails"] +
-            fd_risk          * self.WEIGHTS["fraudulent_domains"] +
-            pc_risk          * self.WEIGHTS["privacy_compliance"] +
-            wr_risk          * self.WEIGHTS["web_ranking"] +
-            id_risk          * self.WEIGHTS["info_disclosure"]
+            ssl_risk         * self.WEIGHTS.get("ssl", 0) +
+            email_risk       * self.WEIGHTS.get("email_security", 0) +
+            email_hard_risk  * self.WEIGHTS.get("email_hardening", 0) +
+            breach_risk      * self.WEIGHTS.get("breaches", 0) +
+            header_risk      * self.WEIGHTS.get("http_headers", 0) +
+            website_risk     * self.WEIGHTS.get("website_security", 0) +
+            admin_risk       * self.WEIGHTS.get("exposed_admin", 0) +
+            hrisk            * self.WEIGHTS.get("high_risk_protocols", 0) +
+            dnsbl_risk       * self.WEIGHTS.get("dnsbl", 0) +
+            tech_risk        * self.WEIGHTS.get("tech_stack", 0) +
+            pay_risk         * self.WEIGHTS.get("payment_security", 0) +
+            vpn_risk         * self.WEIGHTS.get("vpn_remote", 0) +
+            sub_risk         * self.WEIGHTS.get("subdomains", 0) +
+            shodan_risk      * self.WEIGHTS.get("shodan_vulns", 0) +
+            dehashed_risk    * self.WEIGHTS.get("dehashed", 0) +
+            vt_risk          * self.WEIGHTS.get("virustotal", 0) +
+            st_risk          * self.WEIGHTS.get("securitytrails", 0) +
+            fd_risk          * self.WEIGHTS.get("fraudulent_domains", 0) +
+            pc_risk          * self.WEIGHTS.get("privacy_compliance", 0) +
+            wr_risk          * self.WEIGHTS.get("web_ranking", 0) +
+            id_risk          * self.WEIGHTS.get("info_disclosure", 0) +
+            ext_ip_risk      * self.WEIGHTS.get("external_ips", 0) +
+            rsi_risk         * self.WEIGHTS.get("ransomware_risk", 0) +
+            dbi_risk         * self.WEIGHTS.get("data_breach_index", 0) +
+            fin_risk         * self.WEIGHTS.get("financial_impact", 0)
         )
 
         risk_score = round(weighted * 10)
@@ -2766,6 +2790,35 @@ class RiskScorer:
 
 # ---------------------------------------------------------------------------
 # 29. Ransomware Susceptibility Index (RSI)
+# ---------------------------------------------------------------------------
+# South African industry breach cost data (IBM 2025, translated to ZAR)
+SA_INDUSTRY_COSTS = {
+    "Public Sector":              {"breach_cost_zar": 76_730_000, "cost_per_record": 3273, "multiplier": 1.74},
+    "Healthcare":                 {"breach_cost_zar": 73_650_000, "cost_per_record": 3141, "multiplier": 1.67},
+    "Financial Services":         {"breach_cost_zar": 70_120_000, "cost_per_record": 2992, "multiplier": 1.59},
+    "Finance":                    {"breach_cost_zar": 70_120_000, "cost_per_record": 2992, "multiplier": 1.59},
+    "Hospitality":                {"breach_cost_zar": 57_330_000, "cost_per_record": 2445, "multiplier": 1.30},
+    "Services":                   {"breach_cost_zar": 56_890_000, "cost_per_record": 2426, "multiplier": 1.29},
+    "Industrial / Manufacturing": {"breach_cost_zar": 49_390_000, "cost_per_record": 2107, "multiplier": 1.12},
+    "Manufacturing":              {"breach_cost_zar": 49_390_000, "cost_per_record": 2107, "multiplier": 1.12},
+    "Energy":                     {"breach_cost_zar": 48_070_000, "cost_per_record": 2051, "multiplier": 1.09},
+    "Technology":                 {"breach_cost_zar": 47_630_000, "cost_per_record": 2032, "multiplier": 1.08},
+    "Tech":                       {"breach_cost_zar": 47_630_000, "cost_per_record": 2032, "multiplier": 1.08},
+    "Pharmaceuticals":            {"breach_cost_zar": 45_860_000, "cost_per_record": 1956, "multiplier": 1.04},
+    "Entertainment":              {"breach_cost_zar": 44_100_000, "cost_per_record": 1881, "multiplier": 1.00},
+    "Media":                      {"breach_cost_zar": 41_900_000, "cost_per_record": 1787, "multiplier": 0.95},
+    "Transportation":             {"breach_cost_zar": 39_690_000, "cost_per_record": 1693, "multiplier": 0.90},
+    "Education":                  {"breach_cost_zar": 37_490_000, "cost_per_record": 1599, "multiplier": 0.85},
+    "Research":                   {"breach_cost_zar": 37_490_000, "cost_per_record": 1599, "multiplier": 0.85},
+    "Communications":             {"breach_cost_zar": 37_040_000, "cost_per_record": 1580, "multiplier": 0.84},
+    "Consumer":                   {"breach_cost_zar": 37_040_000, "cost_per_record": 1580, "multiplier": 0.84},
+    "Retail":                     {"breach_cost_zar": 35_280_000, "cost_per_record": 1505, "multiplier": 0.80},
+    "Agriculture":                {"breach_cost_zar": 28_670_000, "cost_per_record": 1223, "multiplier": 0.65},
+    "Government":                 {"breach_cost_zar": 76_730_000, "cost_per_record": 3273, "multiplier": 1.74},
+    "Legal":                      {"breach_cost_zar": 56_890_000, "cost_per_record": 2426, "multiplier": 1.29},
+    "Other":                      {"breach_cost_zar": 44_100_000, "cost_per_record": 1881, "multiplier": 1.00},
+}
+
 # ---------------------------------------------------------------------------
 
 class RansomwareIndex:
@@ -2923,12 +2976,17 @@ class FinancialImpactCalculator:
     RANSOM_PCT = 0.03  # 3% of annual revenue
 
     def calculate(self, categories: dict, rsi_result: dict,
-                  annual_revenue: float, industry: str = "other") -> dict:
+                  annual_revenue: float, industry: str = "other",
+                  annual_revenue_zar: int = 0) -> dict:
+
+        # Use ZAR path when ZAR revenue is provided (SA-specific model)
+        if annual_revenue_zar > 0:
+            return self._calculate_zar(categories, rsi_result, annual_revenue_zar, industry)
+
         daily_revenue = annual_revenue / 365 if annual_revenue > 0 else 5_000
 
         # --- Scenario 1: Data Breach ---
         breach_count = categories.get("breaches", {}).get("breach_count", 0)
-        # P(breach) based on history + technical posture
         tech_score = categories.get("ssl", {}).get("score", 50)
         if breach_count > 3:
             p_breach = 0.35
@@ -2936,11 +2994,9 @@ class FinancialImpactCalculator:
             p_breach = 0.20
         else:
             p_breach = 0.08
-        # Adjust by technical weakness
         p_breach = min(0.5, p_breach + (100 - tech_score) / 500)
 
         cost_per_record = self.COST_PER_RECORD.get(industry, 165)
-        # Estimate records from revenue proxy
         est_records = max(1000, int(annual_revenue / 50_000)) if annual_revenue > 0 else 5000
         reg_fine = self.REGULATORY_FINE.get(industry, self.REGULATORY_FINE["other"])
 
@@ -2960,7 +3016,7 @@ class FinancialImpactCalculator:
 
         # --- Scenario 2: Ransomware ---
         rsi = rsi_result.get("rsi_score", 0.1)
-        downtime_days = 22  # Industry average
+        downtime_days = 22
         ransom_demand = min(5_000_000, annual_revenue * self.RANSOM_PCT) if annual_revenue > 0 else 50_000
         ir_cost = min(500_000, max(50_000, annual_revenue * 0.005)) if annual_revenue > 0 else 75_000
 
@@ -3036,6 +3092,122 @@ class FinancialImpactCalculator:
             },
             "annual_revenue": annual_revenue,
             "industry": industry,
+            "currency": "USD",
+        }
+
+    def _calculate_zar(self, categories: dict, rsi_result: dict,
+                       annual_revenue_zar: int, industry: str) -> dict:
+        """SA-specific ZAR calculation using IBM 2025 SA breach cost data and POPIA fines."""
+        # Normalise industry key
+        industry_key = industry.title()
+        industry_data = SA_INDUSTRY_COSTS.get(industry_key, SA_INDUSTRY_COSTS["Other"])
+        rsi_score = rsi_result.get("rsi_score", 0.1)
+        daily_revenue = annual_revenue_zar / 365
+
+        # --- Scenario 1: Data Breach (ZAR) ---
+        overall_score = categories.get("_overall_score", 500)  # fallback
+        p_breach = min(1.0, max(0.0, ((100 - overall_score / 10) / 100) * industry_data["multiplier"] * 0.3))
+        estimated_records = max(100, annual_revenue_zar // 50_000)
+        cost_per_record = industry_data["cost_per_record"]
+        regulatory_fine = annual_revenue_zar * 0.02  # POPIA max ~2% of annual turnover
+        data_breach_loss = p_breach * (estimated_records * cost_per_record + regulatory_fine)
+
+        # --- Scenario 2: Ransomware (ZAR) ---
+        avg_downtime_days = 22
+        if annual_revenue_zar < 50_000_000:
+            ransom_estimate = 500_000
+            ir_cost = 500_000
+        elif annual_revenue_zar < 200_000_000:
+            ransom_estimate = 2_500_000
+            ir_cost = 1_500_000
+        elif annual_revenue_zar < 500_000_000:
+            ransom_estimate = 10_000_000
+            ir_cost = 3_000_000
+        else:
+            ransom_estimate = 50_000_000
+            ir_cost = 5_000_000
+        ransomware_loss = rsi_score * (avg_downtime_days * daily_revenue * 0.5 + ransom_estimate + ir_cost)
+
+        # --- Scenario 3: Business Interruption (ZAR) ---
+        waf_detected = categories.get("waf", {}).get("detected", False)
+        cdn_detected = categories.get("cloud_cdn", {}).get("cdn_detected", False)
+        single_asn = categories.get("external_ips", {}).get("unique_asns", 2) <= 1
+        p_interruption = min(0.5, 0.05 + (0.05 if not waf_detected else 0) + (0.05 if not cdn_detected else 0) + (0.05 if single_asn else 0))
+        impact_factor = min(0.8, 0.3 + (0.15 if not waf_detected else 0) + (0.15 if not cdn_detected else 0) + (0.1 if single_asn else 0))
+        bi_loss = p_interruption * (5 * daily_revenue * impact_factor)
+
+        most_likely = round(data_breach_loss + ransomware_loss + bi_loss)
+        minimum = round(most_likely * 0.15)
+        maximum = round(most_likely * 3.5)
+        recommended_cover = max(1_000_000, round(maximum * 1.2, -5))
+        minimum_cover = max(500_000, round(most_likely, -5))
+
+        if rsi_score >= 0.7:
+            premium_tier = "Very High"
+        elif rsi_score >= 0.5:
+            premium_tier = "High"
+        elif rsi_score >= 0.25:
+            premium_tier = "Medium"
+        else:
+            premium_tier = "Low"
+
+        loss_pct = most_likely / annual_revenue_zar if annual_revenue_zar > 0 else 0
+        if loss_pct >= 0.10:
+            fin_score = 10
+        elif loss_pct >= 0.05:
+            fin_score = 30
+        elif loss_pct >= 0.02:
+            fin_score = 50
+        elif loss_pct >= 0.01:
+            fin_score = 70
+        else:
+            fin_score = 90
+
+        return {
+            "currency": "ZAR",
+            "industry": industry,
+            "annual_revenue_zar": annual_revenue_zar,
+            "score": fin_score,
+            "estimated_annual_loss": {
+                "minimum": minimum,
+                "most_likely": most_likely,
+                "maximum": maximum,
+            },
+            "scenarios": {
+                "data_breach": {
+                    "probability": round(p_breach, 3),
+                    "estimated_loss": round(data_breach_loss),
+                    "cost_per_record": cost_per_record,
+                    "estimated_records": estimated_records,
+                    "regulatory_fine": round(regulatory_fine),
+                },
+                "ransomware": {
+                    "rsi_score": rsi_score,
+                    "estimated_loss": round(ransomware_loss),
+                    "avg_downtime_days": avg_downtime_days,
+                    "ransom_estimate": ransom_estimate,
+                },
+                "business_interruption": {
+                    "probability": round(p_interruption, 3),
+                    "estimated_loss": round(bi_loss),
+                },
+            },
+            "insurance_recommendation": {
+                "minimum_cover_zar": minimum_cover,
+                "recommended_cover_zar": recommended_cover,
+                "premium_risk_tier": premium_tier,
+            },
+            # Keep total key for template compatibility
+            "total": {
+                "min": minimum,
+                "most_likely": most_likely,
+                "max": maximum,
+            },
+            "insurance_recommendations": {
+                "suggested_deductible": minimum_cover,
+                "expected_annual_loss": most_likely,
+                "recommended_coverage": recommended_cover,
+            },
         }
 
 
@@ -3323,7 +3495,9 @@ class SecurityScanner:
 
     def scan(self, domain: str, on_progress: callable = None,
              industry: str = "other", annual_revenue: float = 0,
-             country: str = "") -> dict:
+             annual_revenue_zar: int = 0,
+             country: str = "",
+             include_fraudulent_domains: bool = False) -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
         results = {
             "domain_scanned": domain,
@@ -3443,9 +3617,13 @@ class SecurityScanner:
             rsi_result = rsi_calc.calculate(cat_results, industry, annual_revenue)
             results["insurance"]["rsi"] = rsi_result
 
-            # Financial Impact
+            # Financial Impact — default to ZAR (SA product); use 10M estimate if no revenue given
             fin_calc = FinancialImpactCalculator()
-            fin_result = fin_calc.calculate(cat_results, rsi_result, annual_revenue, industry)
+            _zar = annual_revenue_zar if annual_revenue_zar > 0 else 10_000_000
+            fin_result = fin_calc.calculate(
+                cat_results, rsi_result, annual_revenue, industry,
+                annual_revenue_zar=_zar
+            )
             results["insurance"]["financial_impact"] = fin_result
 
             # DBI
@@ -3455,7 +3633,9 @@ class SecurityScanner:
             # Remediation Simulator
             sim = RemediationSimulator()
             results["insurance"]["remediation"] = sim.calculate(
-                cat_results, rsi_result, fin_result, annual_revenue, industry
+                cat_results, rsi_result, fin_result,
+                _zar,
+                industry
             )
         except Exception as e:
             results["insurance"]["error"] = str(e)

@@ -629,24 +629,6 @@ def cat_securitytrails(d, S):
     return build_cat_card("DNS Intelligence (SecurityTrails)", col, summary, rows, st.get("issues", []), S)
 
 
-def cat_fraudulent_domains(d, S):
-    fd      = d.get("fraudulent_domains", {})
-    count   = fd.get("resolved_count", 0)
-    checked = fd.get("total_permutations", 0)
-    col     = C_CRITICAL if count > 5 else (C_RED if count > 2 else (C_AMBER if count > 0 else C_GREEN))
-    summary = f"{count} detected" if count > 0 else "Clean"
-    rows = [
-        ("Permutations checked", checked),
-        ("Resolved (active)",    count),
-    ]
-    for dom in fd.get("fraudulent_domains", [])[:8]:
-        rows.append((
-            dom.get("domain", ""),
-            f"{dom.get('technique', '')}  |  {dom.get('similarity', 0)}% match"
-        ))
-    return build_cat_card("Fraudulent / Lookalike Domains", col, summary, rows, fd.get("issues", []), S)
-
-
 def cat_privacy_compliance(d, S):
     pc    = d.get("privacy_compliance", {})
     pct   = pc.get("compliance_pct", 0)
@@ -683,16 +665,27 @@ def cat_website(d, S):
 def cat_web_ranking(d, S):
     wr = d.get("web_ranking", {})
     rank = wr.get("rank")
-    score = wr.get("score", 30)
-    col = _tl(score >= 70, score >= 40)
-    rows = [
-        ("Tranco Rank", f"#{rank:,}" if rank else "Not in top 1M"),
-        ("In List", "Yes" if wr.get("in_list") else "No"),
-        ("Score", f"{score}/100"),
-    ]
-    return build_cat_card("Web Ranking (Tranco)", col,
-                          f"#{rank:,}" if rank else "Unranked",
-                          rows, wr.get("issues", []), S)
+    # Support both scanner data formats (new format uses "ranked", old uses "in_list"/"score")
+    if wr.get("ranked") is not None:
+        col = C_GREEN if wr.get("ranked") else C_AMBER
+        rows = [
+            ("Ranked",      "Yes" if wr.get("ranked") else "Not in top 1M"),
+            ("Position",    f"#{rank:,}" if rank else "—"),
+            ("Popularity",  wr.get("popularity", "Unranked")),
+            ("Rank Band",   wr.get("rank_label", "Unranked")),
+        ]
+        return build_cat_card("Web Ranking (Tranco)", col, wr.get("rank_label", "Unranked"), rows, wr.get("issues", []), S)
+    else:
+        score = wr.get("score", 30)
+        col = _tl(score >= 70, score >= 40)
+        rows = [
+            ("Tranco Rank", f"#{rank:,}" if rank else "Not in top 1M"),
+            ("In List", "Yes" if wr.get("in_list") else "No"),
+            ("Score", f"{score}/100"),
+        ]
+        return build_cat_card("Web Ranking (Tranco)", col,
+                              f"#{rank:,}" if rank else "Unranked",
+                              rows, wr.get("issues", []), S)
 
 
 def cat_info_disclosure(d, S):
@@ -709,8 +702,21 @@ def cat_info_disclosure(d, S):
                           rows, info.get("issues", []), S)
 
 
+def cat_fraudulent_domains(d, S):
+    fd     = d.get("fraudulent_domains", {})
+    found  = fd.get("fraudulent_domains_found", 0)
+    col    = C_CRITICAL if found > 3 else (C_RED if found > 0 else C_GREEN)
+    rows   = [
+        ("Variants checked",  fd.get("variants_checked", 0)),
+        ("Lookalikes found",  found),
+    ]
+    for dom in fd.get("domains", [])[:5]:
+        rows.append((dom.get("type", "lookalike"), f"{dom.get('domain','')} ({dom.get('cert_issuer','')})"))
+    return build_cat_card("Fraudulent Domains (Typosquat)", col, f"{found} found", rows, fd.get("issues", []), S)
+
+
 def cat_rsi(results, S):
-    """RSI (Ransomware Susceptibility Index) card for PDF."""
+    """RSI (Ransomware Susceptibility Index) card for PDF — insurance analytics."""
     ins = results if "rsi" in results else results.get("insurance", {})
     rsi = ins.get("rsi", {})
     score = rsi.get("rsi_score", 0)
@@ -729,33 +735,8 @@ def cat_rsi(results, S):
                           rows, [], S)
 
 
-def cat_financial_impact(results, S):
-    """Financial Impact Analysis card for PDF."""
-    ins = results if "financial_impact" in results else results.get("insurance", {})
-    fin = ins.get("financial_impact", {})
-    total = fin.get("total", {})
-    likely = total.get("most_likely", 0)
-    col = C_CRITICAL if likely > 500000 else (C_RED if likely > 200000 else (C_AMBER if likely > 50000 else C_GREEN))
-
-    rows = []
-    for name, key in [("Data Breach", "data_breach"), ("Ransomware", "ransomware"), ("Business Interruption", "business_interruption")]:
-        sc = fin.get("scenarios", {}).get(key, {})
-        rows.append((name, f"${sc.get('min',0):,.0f} / ${sc.get('most_likely',0):,.0f} / ${sc.get('max',0):,.0f}"))
-    rows.append(("TOTAL", f"${total.get('min',0):,.0f} / ${total.get('most_likely',0):,.0f} / ${total.get('max',0):,.0f}"))
-
-    rec = fin.get("insurance_recommendations", {})
-    rows.append(("", ""))
-    rows.append(("Suggested Deductible", f"${rec.get('suggested_deductible',0):,.0f}"))
-    rows.append(("Expected Annual Loss", f"${rec.get('expected_annual_loss',0):,.0f}"))
-    rows.append(("Recommended Coverage", f"${rec.get('recommended_coverage',0):,.0f}"))
-
-    return build_cat_card("Financial Impact Analysis (FAIR)", col,
-                          f"${likely:,.0f} est. annual loss",
-                          rows, [], S)
-
-
 def cat_dbi(results, S):
-    """Data Breach Index card for PDF."""
+    """Data Breach Index card for PDF — insurance analytics."""
     ins = results if "dbi" in results else results.get("insurance", {})
     dbi = ins.get("dbi", {})
     score = dbi.get("dbi_score", 50)
@@ -769,7 +750,7 @@ def cat_dbi(results, S):
 
 
 def cat_remediation(results, S):
-    """Remediation Roadmap card for PDF."""
+    """Remediation Roadmap card for PDF — insurance analytics."""
     ins = results if "remediation" in results else results.get("insurance", {})
     rem = ins.get("remediation", {})
     steps = rem.get("steps", [])
@@ -777,18 +758,155 @@ def cat_remediation(results, S):
         return []
     savings = rem.get("total_potential_savings", 0)
     col = C_BLUE
+    cur = "R" if ins.get("financial_impact", {}).get("currency") == "ZAR" else "$"
 
     rows = [
         ("Current RSI", f"{rem.get('current_rsi', 0):.3f}"),
         ("Projected RSI (after fixes)", f"{rem.get('simulated_rsi', 0):.3f}"),
-        ("Total Potential Savings", f"${savings:,.0f}/year"),
+        ("Total Potential Savings", f"{cur} {savings:,.0f}/year"),
         ("", ""),
     ]
     for i, step in enumerate(steps[:10], 1):
-        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves ${step['annual_savings_estimate']:,.0f}/yr"))
+        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves {cur} {step['annual_savings_estimate']:,.0f}/yr"))
     return build_cat_card("Remediation Roadmap — Before/After", col,
-                          f"{len(steps)} steps — ${savings:,.0f} savings",
+                          f"{len(steps)} steps — {cur} {savings:,.0f} savings",
                           rows, [], S)
+
+
+def cat_ransomware_risk(d, S):
+    rsi   = d.get("ransomware_risk", {})
+    score = rsi.get("rsi_score", 0)
+    label = rsi.get("rsi_label", "N/A")
+    col   = (C_CRITICAL if score >= 0.8 else C_RED if score >= 0.5 else
+             C_AMBER if score >= 0.25 else C_GREEN)
+    rows  = [
+        ("RSI Score",       f"{score} / 1.0"),
+        ("Risk Level",      label),
+        ("Industry",        rsi.get("industry", "Other")),
+    ]
+    if rsi.get("annual_revenue_zar"):
+        rows.append(("Annual Revenue", f"R {rsi['annual_revenue_zar']:,.0f}"))
+    for f in rsi.get("contributing_factors", [])[:5]:
+        rows.append((f["factor"], f"+{f['impact']}"))
+    return build_cat_card("Ransomware Susceptibility (RSI)", col, f"{score}", rows, rsi.get("issues", []), S)
+
+
+def cat_data_breach_index(d, S):
+    dbi   = d.get("data_breach_index", {})
+    score = dbi.get("dbi_score", 0)
+    label = dbi.get("dbi_label", "N/A")
+    col   = (C_CRITICAL if score < 25 else C_RED if score < 50 else
+             C_AMBER if score < 75 else C_GREEN)
+    rows  = [
+        ("DBI Score",              f"{score} / 100"),
+        ("Risk Level",             label),
+        ("Breach Count",           dbi.get("breach_count", 0)),
+        ("Most Recent Breach",     dbi.get("most_recent_breach") or "None"),
+        ("Sensitive Data Exposed", "Yes" if dbi.get("has_sensitive_data") else "No"),
+        ("Credential Leaks",       f"{dbi.get('credential_leaks', 0):,}"),
+    ]
+    return build_cat_card("Data Breach Index (DBI)", col, f"{score}/100", rows, dbi.get("issues", []), S)
+
+
+def cat_financial_impact(d, S):
+    fin = d.get("financial_impact", {})
+    # Accept ZAR results (currency key present) or legacy completed status
+    if not fin or (not fin.get("currency") and fin.get("status") != "completed"):
+        return build_cat_card("Financial Impact (FAIR Model)", C_BLUE, "N/A",
+                              [("Status", "Revenue not provided — skipped")], [], S)
+
+    is_zar = fin.get("currency") == "ZAR"
+    cur    = "R" if is_zar else "$"
+    sc     = fin.get("scenarios", {})
+    col    = C_CRITICAL if fin.get("score", 50) < 30 else (C_RED if fin.get("score", 50) < 50 else
+              C_AMBER if fin.get("score", 50) < 70 else C_GREEN)
+
+    if is_zar:
+        eal    = fin.get("estimated_annual_loss", {})
+        ins    = fin.get("insurance_recommendation", {})
+        most_l = eal.get("most_likely", 0)
+        rows = [
+            ("Industry",              fin.get("industry", "Other")),
+            ("Annual Revenue",        f"{cur} {fin.get('annual_revenue_zar', 0):,.0f}"),
+            ("",                      ""),
+            ("Est. Annual Loss (Min)",    f"{cur} {eal.get('minimum', 0):,.0f}"),
+            ("Est. Annual Loss (Likely)", f"{cur} {most_l:,.0f}"),
+            ("Est. Annual Loss (Max)",    f"{cur} {eal.get('maximum', 0):,.0f}"),
+            ("",                      ""),
+            ("Data Breach Loss",      f"{cur} {sc.get('data_breach', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('data_breach', {}).get('probability', 0)})"),
+            ("  Records at risk",     f"{sc.get('data_breach', {}).get('estimated_records', 0):,} @ {cur}{sc.get('data_breach', {}).get('cost_per_record', 0):,.0f}/rec"),
+            ("  POPIA regulatory",    f"{cur} {sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
+            ("Ransomware Loss",       f"{cur} {sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
+            ("  Avg downtime",        f"{sc.get('ransomware', {}).get('avg_downtime_days', 0)} days"),
+            ("  Ransom estimate",     f"{cur} {sc.get('ransomware', {}).get('ransom_estimate', 0):,.0f}"),
+            ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
+            ("",                      ""),
+            ("Min. Insurance Cover",  f"{cur} {ins.get('minimum_cover_zar', 0):,.0f}"),
+            ("Rec. Insurance Cover",  f"{cur} {ins.get('recommended_cover_zar', 0):,.0f}"),
+            ("Premium Risk Tier",     ins.get("premium_risk_tier", "N/A")),
+        ]
+    else:
+        total  = fin.get("total", {})
+        most_l = total.get("most_likely", 0)
+        ins    = fin.get("insurance_recommendations", {})
+        rows = [
+            ("Industry",              fin.get("industry", "Other")),
+            ("",                      ""),
+            ("Est. Annual Loss (Min)",    f"{cur} {total.get('min', 0):,.0f}"),
+            ("Est. Annual Loss (Likely)", f"{cur} {most_l:,.0f}"),
+            ("Est. Annual Loss (Max)",    f"{cur} {total.get('max', 0):,.0f}"),
+            ("",                      ""),
+            ("Data Breach",           f"{cur} {sc.get('data_breach', {}).get('most_likely', 0):,.0f}"),
+            ("Ransomware",            f"{cur} {sc.get('ransomware', {}).get('most_likely', 0):,.0f}"),
+            ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('most_likely', 0):,.0f}"),
+            ("",                      ""),
+            ("Suggested Deductible",  f"{cur} {ins.get('suggested_deductible', 0):,.0f}"),
+            ("Recommended Coverage",  f"{cur} {ins.get('recommended_coverage', 0):,.0f}"),
+        ]
+
+    return build_cat_card("Financial Impact (FAIR Model)", col,
+                          f"{cur} {most_l:,.0f}", rows, fin.get("issues", []), S)
+
+
+def cat_risk_mitigations(d, S):
+    fin = d.get("financial_impact", {})
+    mit = fin.get("risk_mitigations", {})
+    findings = mit.get("findings", [])
+    if fin.get("status") != "completed" or not findings:
+        return []
+
+    total_savings = mit.get("total_potential_savings", 0)
+    current = mit.get("current_annual_loss", 0)
+    mitigated = mit.get("mitigated_annual_loss", 0)
+    summary = mit.get("summary", {})
+
+    rows = [
+        ("Current Annual Loss",  f"R {current:,.0f}"),
+        ("Mitigated Annual Loss", f"R {mitigated:,.0f}"),
+        ("Total Potential Savings", f"R {total_savings:,.0f}"),
+        ("", ""),
+    ]
+
+    # Summary counts
+    for sev in ("critical", "high", "medium"):
+        s = summary.get(sev, {})
+        if s.get("count", 0) > 0:
+            rows.append((f"{sev.title()} Findings", f"{s['count']} — R {s['total_savings_zar']:,.0f} savings"))
+
+    rows.append(("", ""))
+
+    # Individual findings
+    for i, f in enumerate(findings):
+        sev = f.get("severity", "Medium")
+        savings = f.get("estimated_annual_savings_zar", 0)
+        rows.append((f"[{sev}] {f.get('recommendation', '')}",
+                      f"R {savings:,.0f}"))
+
+    rows.append(("", ""))
+    rows.append(("Note", "Savings are modelled projections based on FAIR methodology"))
+
+    return build_cat_card("Risk Mitigation Recommendations", C_GREEN,
+                          f"Save R {total_savings:,.0f}", rows, [], S)
 
 
 # ---------------------------------------------------------------------------
@@ -816,7 +934,7 @@ def build_summary_table(results: dict, S) -> Table:
     # Insurance analytics
     ins       = results.get("insurance", {})
     rsi_score = ins.get("rsi", {}).get("rsi_score")
-    dbi_score = ins.get("dbi", {}).get("score")
+    dbi_score = ins.get("dbi", {}).get("dbi_score")
 
     rows = [
         row("SSL Grade",             ssl_grade,
@@ -847,6 +965,24 @@ def build_summary_table(results: dict, S) -> Table:
         rows.insert(1 if rsi_score is not None else 0,
             row("Data Breach Index", f"{dbi_score}/100",
             _tl(dbi_score >= 70, dbi_score >= 40)))
+
+    # Est. Annual Loss from insurance analytics
+    fin_ins = ins.get("financial_impact", {})
+    fin_ml  = fin_ins.get("estimated_annual_loss", {}).get("most_likely")
+    if fin_ml is not None:
+        cur_sym   = "R" if fin_ins.get("currency") == "ZAR" else "$"
+        fin_score = fin_ins.get("score", 50)
+        rows.append(row("Est. Annual Loss", f"{cur_sym} {fin_ml:,.0f}",
+                         C_CRITICAL if fin_score < 30 else C_AMBER if fin_score < 70 else C_GREEN))
+
+    fd_count = cats.get("fraudulent_domains", {}).get("fraudulent_domains_found", 0)
+    if fd_count:
+        rows.append(row("Fraudulent Domains", f"{fd_count} lookalike(s)",
+                         C_CRITICAL if fd_count > 3 else C_RED if fd_count > 0 else C_GREEN))
+
+    wr_label = cats.get("web_ranking", {}).get("rank_label", "Unranked")
+    rows.append(row("Web Ranking (Tranco)", wr_label,
+                     C_GREEN if cats.get("web_ranking", {}).get("ranked") else C_AMBER))
 
     tbl = Table(rows, colWidths=[14, 70 * mm, INNER_W - 14 - 70 * mm])
     style = [
@@ -944,7 +1080,7 @@ def generate_pdf(results: dict) -> bytes:
         story.append(PageBreak())
         story += section_header("INSURANCE ANALYTICS", S)
         story += cat_rsi(results, S)
-        story += cat_financial_impact(results, S)
+        story += cat_financial_impact(results.get("insurance", {}), S)
         story += cat_dbi(results, S)
         story += cat_remediation(results, S)
 
@@ -1018,4 +1154,169 @@ def generate_pdf(results: dict) -> bytes:
     ))
 
     doc.build(story, onFirstPage=hf, onLaterPages=hf)
+    return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Invoice PDF Generator
+# ---------------------------------------------------------------------------
+
+def generate_invoice_pdf(invoice: dict, line_items: list, client: dict) -> bytes:
+    """Generate a professional invoice PDF in ZAR."""
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=MARGIN, rightMargin=MARGIN,
+        topMargin=25 * mm, bottomMargin=20 * mm,
+    )
+
+    S = {
+        "title": ParagraphStyle("inv_title", fontName="Helvetica-Bold", fontSize=22, textColor=C_NAVY),
+        "heading": ParagraphStyle("inv_heading", fontName="Helvetica-Bold", fontSize=12, textColor=C_NAVY),
+        "normal": ParagraphStyle("inv_normal", fontName="Helvetica", fontSize=10, textColor=C_BLACK, leading=14),
+        "small": ParagraphStyle("inv_small", fontName="Helvetica", fontSize=8, textColor=C_GREY_4, leading=11),
+        "bold": ParagraphStyle("inv_bold", fontName="Helvetica-Bold", fontSize=10, textColor=C_BLACK),
+        "right": ParagraphStyle("inv_right", fontName="Helvetica", fontSize=10, textColor=C_BLACK, alignment=TA_RIGHT),
+        "right_bold": ParagraphStyle("inv_right_bold", fontName="Helvetica-Bold", fontSize=10, textColor=C_BLACK, alignment=TA_RIGHT),
+        "total": ParagraphStyle("inv_total", fontName="Helvetica-Bold", fontSize=13, textColor=C_NAVY, alignment=TA_RIGHT),
+    }
+
+    story = []
+
+    # --- Header ---
+    story.append(Paragraph("PHISHIELD", S["title"]))
+    story.append(Paragraph("Cyber Insurance Brokers — Powered by Bryte Insurance", S["small"]))
+    story.append(Spacer(1, 6 * mm))
+    story.append(HRFlowable(width="100%", thickness=2, color=C_BLUE))
+    story.append(Spacer(1, 6 * mm))
+
+    # --- Invoice meta (2-column) ---
+    inv_num = invoice.get("invoice_number", "")
+    issue_date = invoice.get("issue_date", "")
+    due_date = invoice.get("due_date", "")
+    status = invoice.get("status", "draft").upper()
+
+    meta_left = [
+        Paragraph(f"<b>Invoice:</b> {inv_num}", S["normal"]),
+        Paragraph(f"<b>Date:</b> {issue_date}", S["normal"]),
+        Paragraph(f"<b>Due:</b> {due_date}", S["normal"]),
+        Paragraph(f"<b>Status:</b> {status}", S["normal"]),
+    ]
+    company = client.get("company_name", "—")
+    trading_as = client.get("trading_as", "")
+    domain = client.get("domain", "")
+    meta_right = [
+        Paragraph(f"<b>Bill To:</b>", S["normal"]),
+        Paragraph(company, S["bold"]),
+    ]
+    if trading_as:
+        meta_right.append(Paragraph(f"t/a {trading_as}", S["normal"]))
+    if domain:
+        meta_right.append(Paragraph(domain, S["normal"]))
+
+    # Pad lists to same length
+    max_len = max(len(meta_left), len(meta_right))
+    while len(meta_left) < max_len:
+        meta_left.append(Paragraph("", S["normal"]))
+    while len(meta_right) < max_len:
+        meta_right.append(Paragraph("", S["normal"]))
+
+    meta_data = [[meta_left[i], meta_right[i]] for i in range(max_len)]
+    meta_table = Table(meta_data, colWidths=[INNER_W * 0.5, INNER_W * 0.5])
+    meta_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 8 * mm))
+
+    # --- Line items table ---
+    header = [
+        Paragraph("<b>Description</b>", S["normal"]),
+        Paragraph("<b>Qty</b>", S["right_bold"]),
+        Paragraph("<b>Unit Price</b>", S["right_bold"]),
+        Paragraph("<b>Total</b>", S["right_bold"]),
+    ]
+    rows = [header]
+    for item in line_items:
+        rows.append([
+            Paragraph(item.get("description", ""), S["normal"]),
+            Paragraph(f"{item.get('quantity', 1):.0f}", S["right"]),
+            Paragraph(f"R {item.get('unit_price', 0):,.2f}", S["right"]),
+            Paragraph(f"R {item.get('line_total', 0):,.2f}", S["right"]),
+        ])
+
+    col_widths = [INNER_W * 0.50, INNER_W * 0.12, INNER_W * 0.19, INNER_W * 0.19]
+    items_table = Table(rows, colWidths=col_widths)
+    items_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), C_NAVY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ("TOPPADDING", (0, 0), (-1, 0), 8),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+        ("TOPPADDING", (0, 1), (-1, -1), 6),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.5, C_GREY_2),
+        ("LINEBELOW", (0, -1), (-1, -1), 1, C_NAVY),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]
+    # Alternate row colours
+    for i in range(1, len(rows)):
+        if i % 2 == 0:
+            items_style.append(("BACKGROUND", (0, i), (-1, i), C_GREY_1))
+    items_table.setStyle(TableStyle(items_style))
+    story.append(items_table)
+    story.append(Spacer(1, 6 * mm))
+
+    # --- Totals ---
+    subtotal = invoice.get("subtotal", 0)
+    vat_rate = invoice.get("vat_rate", 15)
+    vat_amount = invoice.get("vat_amount", 0)
+    total = invoice.get("total", 0)
+
+    totals_data = [
+        ["", Paragraph("Subtotal", S["right"]), Paragraph(f"R {subtotal:,.2f}", S["right_bold"])],
+        ["", Paragraph(f"VAT ({vat_rate}%)", S["right"]), Paragraph(f"R {vat_amount:,.2f}", S["right_bold"])],
+        ["", Paragraph("<b>TOTAL DUE</b>", S["right_bold"]), Paragraph(f"R {total:,.2f}", S["total"])],
+    ]
+    totals_table = Table(totals_data, colWidths=[INNER_W * 0.50, INNER_W * 0.25, INNER_W * 0.25])
+    totals_table.setStyle(TableStyle([
+        ("LINEABOVE", (1, 2), (-1, 2), 1.5, C_NAVY),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+    ]))
+    story.append(totals_table)
+    story.append(Spacer(1, 10 * mm))
+
+    # --- Bank details ---
+    story.append(HRFlowable(width="100%", thickness=0.5, color=C_GREY_2))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("Payment Details", S["heading"]))
+    story.append(Spacer(1, 2 * mm))
+    bank_info = [
+        "<b>Bank:</b> First National Bank (FNB)",
+        "<b>Account Name:</b> Phishield (Pty) Ltd",
+        "<b>Account Number:</b> Available on request",
+        "<b>Branch Code:</b> 250655",
+        f"<b>Reference:</b> {inv_num}",
+    ]
+    for line in bank_info:
+        story.append(Paragraph(line, S["normal"]))
+    story.append(Spacer(1, 6 * mm))
+
+    # --- Footer disclaimer ---
+    story.append(HRFlowable(width="100%", thickness=0.5, color=C_GREY_2))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph(
+        "Phishield (Pty) Ltd | Authorised Financial Services Provider | "
+        "Underwritten by Bryte Insurance Company Limited (FSP 17703)",
+        S["small"]
+    ))
+
+    doc.build(story)
     return buffer.getvalue()
