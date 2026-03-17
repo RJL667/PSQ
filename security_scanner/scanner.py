@@ -1461,11 +1461,18 @@ class ShodanVulnChecker:
     Queries Shodan's free InternetDB for CVEs associated with the domain's IP.
     When SHODAN_API_KEY is provided, uses the full Shodan API for richer data
     (service banners, OS detection, ISP/ASN info) and falls back to InternetDB otherwise.
-    Enriches top CVEs with CVSS scores from the NVD API (also free, no key).
+    Enriches top CVEs with CVSS scores from the NVD API (also free, no key),
+    CISA KEV (Known Exploited Vulnerabilities) status, and EPSS scores.
     """
     INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
     SHODAN_HOST_URL = "https://api.shodan.io/shodan/host/{ip}"
     NVD_URL        = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    KEV_URL        = "https://www.cisa.gov/sites/default/files/feeds/known-exploited-vulnerabilities.json"
+    EPSS_URL       = "https://api.first.org/data/v1/epss"
+
+    # Module-level KEV cache
+    _kev_cache = None
+    _kev_cache_time = 0
 
     def _cvss_severity(self, score: float) -> str:
         if score >= 9.0: return "critical"
@@ -1561,12 +1568,68 @@ class ShodanVulnChecker:
         raw_cves = data.get("vulns", [])[:20]
         return self._enrich_cves(raw_cves, result)
 
+    def _load_kev(self) -> set:
+        """Load CISA KEV catalog, cached for 24 hours."""
+        now = time.time()
+        if ShodanVulnChecker._kev_cache is not None and (now - ShodanVulnChecker._kev_cache_time) < 86400:
+            return ShodanVulnChecker._kev_cache
+        try:
+            r = requests.get(self.KEV_URL, timeout=15,
+                             headers={"User-Agent": USER_AGENT})
+            if r.status_code == 200:
+                data = r.json()
+                kev_set = {v["cveID"] for v in data.get("vulnerabilities", [])}
+                ShodanVulnChecker._kev_cache = kev_set
+                ShodanVulnChecker._kev_cache_time = now
+                return kev_set
+        except Exception:
+            pass
+        return set()
+
+    def _fetch_epss(self, cve_ids: list) -> dict:
+        """Batch-fetch EPSS scores for up to 30 CVEs."""
+        if not cve_ids:
+            return {}
+        try:
+            r = requests.get(self.EPSS_URL,
+                             params={"cve": ",".join(cve_ids[:30])},
+                             headers={"User-Agent": USER_AGENT}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                return {
+                    item["cve"]: {
+                        "epss_score": float(item.get("epss", 0)),
+                        "epss_percentile": float(item.get("percentile", 0)),
+                    }
+                    for item in data.get("data", [])
+                }
+        except Exception:
+            pass
+        return {}
+
     def _enrich_cves(self, raw_cves: list, result: dict) -> bool:
-        """Enrich CVEs with CVSS data and update result."""
+        """Enrich CVEs with CVSS, KEV, and EPSS data."""
+        # Load KEV catalog and EPSS scores
+        kev_set = self._load_kev()
+        epss_data = self._fetch_epss(raw_cves[:10])
+
         enriched = []
+        kev_count = 0
+        high_epss_count = 0
         for cve_id in raw_cves[:10]:
             info = self._fetch_cvss(cve_id)
             if info:
+                # Add KEV status
+                info["in_kev"] = cve_id in kev_set
+                if info["in_kev"]:
+                    kev_count += 1
+                # Add EPSS score
+                epss = epss_data.get(cve_id, {})
+                info["epss_score"] = epss.get("epss_score", 0.0)
+                info["epss_percentile"] = epss.get("epss_percentile", 0.0)
+                if info["epss_score"] > 0.5:
+                    high_epss_count += 1
+
                 enriched.append(info)
                 sev = info.get("severity", "unknown")
                 if sev == "critical":   result["critical_count"] += 1
@@ -1578,6 +1641,18 @@ class ShodanVulnChecker:
             result["medium_count"] += 1
 
         result["cves"] = enriched
+        result["kev_count"] = kev_count
+        result["high_epss_count"] = high_epss_count
+
+        if kev_count > 0:
+            result["issues"].append(
+                f"{kev_count} CVE(s) in CISA Known Exploited Vulnerabilities catalog — actively exploited in the wild"
+            )
+        if high_epss_count > 0:
+            result["issues"].append(
+                f"{high_epss_count} CVE(s) with high EPSS score (>0.5) — high probability of exploitation"
+            )
+
         return True
 
     def check(self, domain: str, api_key: str = None, ip: str = None) -> dict:
@@ -2296,7 +2371,178 @@ class PrivacyComplianceChecker:
 
 
 # ---------------------------------------------------------------------------
-# 26. Risk Scoring Engine
+# 26. Web Ranking (Tranco)
+# ---------------------------------------------------------------------------
+
+class WebRankingChecker:
+    """
+    Checks domain popularity using the Tranco top-1M list.
+    More popular = more visible target but also more likely to have security resources.
+    """
+    TRANCO_URL = "https://tranco-list.eu/download/X5QNN/1000000"
+
+    _cache = None
+    _cache_time = 0
+
+    def _load_tranco(self):
+        now = time.time()
+        if WebRankingChecker._cache and (now - WebRankingChecker._cache_time) < 86400:
+            return WebRankingChecker._cache
+        try:
+            r = requests.get(self.TRANCO_URL, timeout=30)
+            if r.status_code == 200:
+                ranks = {}
+                for line in r.text.strip().split("\n"):
+                    parts = line.strip().split(",")
+                    if len(parts) == 2:
+                        ranks[parts[1].lower()] = int(parts[0])
+                WebRankingChecker._cache = ranks
+                WebRankingChecker._cache_time = now
+                return ranks
+        except Exception:
+            pass
+        return {}
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed", "rank": None, "in_list": False,
+            "score": 30, "issues": [],
+        }
+        try:
+            ranks = self._load_tranco()
+            if not ranks:
+                result["status"] = "error"
+                result["error"] = "Could not load Tranco list"
+                return result
+
+            rank = ranks.get(domain.lower())
+            if rank:
+                result["rank"] = rank
+                result["in_list"] = True
+                if rank <= 1000:
+                    result["score"] = 100
+                elif rank <= 10000:
+                    result["score"] = 90
+                elif rank <= 100000:
+                    result["score"] = 70
+                else:
+                    result["score"] = 50
+            else:
+                result["score"] = 30
+                result["issues"].append(
+                    "Domain not found in Tranco top-1M list — low visibility but also unranked"
+                )
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 27. Information Disclosure
+# ---------------------------------------------------------------------------
+
+class InformationDisclosureChecker:
+    """
+    Probes for common sensitive files and debug endpoints
+    that should not be publicly accessible.
+    """
+    CRITICAL_PATHS = [
+        ("/.env", "Environment variables / secrets"),
+        ("/.git/HEAD", "Git repository metadata"),
+        ("/.git/config", "Git configuration with potential credentials"),
+        ("/wp-config.php.bak", "WordPress config backup"),
+        ("/.htpasswd", "Apache password file"),
+        ("/backup.sql", "Database backup"),
+        ("/dump.sql", "Database dump"),
+        ("/db.sql", "Database export"),
+    ]
+    MEDIUM_PATHS = [
+        ("/phpinfo.php", "PHP info page"),
+        ("/server-status", "Apache server status"),
+        ("/server-info", "Apache server info"),
+        ("/elmah.axd", ".NET error log"),
+        ("/.DS_Store", "macOS directory metadata"),
+        ("/web.config", "IIS/ASP.NET config"),
+        ("/debug", "Debug endpoint"),
+        ("/actuator", "Spring Boot actuator"),
+        ("/actuator/env", "Spring Boot environment"),
+        ("/.well-known/openid-configuration", "OpenID config"),
+    ]
+
+    def _probe(self, url: str) -> tuple:
+        try:
+            r = requests.get(url, timeout=6, allow_redirects=False,
+                             headers={"User-Agent": USER_AGENT})
+            if r.status_code == 200 and len(r.text) > 10:
+                # Verify it's not a custom 404 page
+                if "not found" not in r.text.lower()[:200] and "404" not in r.text[:50]:
+                    return True, r.status_code, len(r.text)
+            return False, r.status_code, 0
+        except Exception:
+            return False, 0, 0
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed", "exposed_paths": [],
+            "score": 100, "issues": [],
+        }
+        try:
+            base = f"https://{domain}"
+            exposed = []
+
+            # Check critical paths
+            for path, desc in self.CRITICAL_PATHS:
+                found, status, size = self._probe(f"{base}{path}")
+                if found:
+                    exposed.append({
+                        "path": path, "description": desc,
+                        "risk_level": "critical", "size": size,
+                    })
+                    result["score"] = max(0, result["score"] - 20)
+                    result["issues"].append(
+                        f"CRITICAL: Sensitive file exposed: {path} — {desc}"
+                    )
+
+            # Check medium paths
+            for path, desc in self.MEDIUM_PATHS:
+                found, status, size = self._probe(f"{base}{path}")
+                if found:
+                    exposed.append({
+                        "path": path, "description": desc,
+                        "risk_level": "medium", "size": size,
+                    })
+                    result["score"] = max(0, result["score"] - 10)
+                    result["issues"].append(
+                        f"Information disclosure: {path} accessible — {desc}"
+                    )
+
+            # Check directory listing on root
+            try:
+                r = requests.get(f"{base}/", timeout=6,
+                                 headers={"User-Agent": USER_AGENT})
+                if "Index of /" in r.text or "<title>Index of" in r.text:
+                    exposed.append({
+                        "path": "/", "description": "Directory listing enabled",
+                        "risk_level": "medium", "size": 0,
+                    })
+                    result["score"] = max(0, result["score"] - 15)
+                    result["issues"].append(
+                        "Directory listing is enabled on the web root"
+                    )
+            except Exception:
+                pass
+
+            result["exposed_paths"] = exposed
+
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# 28. Risk Scoring Engine
 # ---------------------------------------------------------------------------
 
 class RiskScorer:
@@ -2306,8 +2552,8 @@ class RiskScorer:
     """
     WEIGHTS = {
         "ssl":                  0.09,
-        "email_security":       0.05,
-        "email_hardening":      0.03,
+        "email_security":       0.06,
+        "email_hardening":      0.02,
         "breaches":             0.07,
         "http_headers":         0.05,
         "website_security":     0.04,
@@ -2315,16 +2561,18 @@ class RiskScorer:
         "high_risk_protocols":  0.08,
         "dnsbl":                0.06,
         "tech_stack":           0.05,
-        "payment_security":     0.03,
-        "vpn_remote":           0.03,
-        "subdomains":           0.03,
+        "payment_security":     0.02,
+        "vpn_remote":           0.04,
+        "subdomains":           0.02,
         "shodan_vulns":         0.07,
-        "dehashed":             0.02,
+        "dehashed":             0.03,
         "virustotal":           0.05,
-        "securitytrails":       0.02,
-        "fraudulent_domains":   0.05,
-        "privacy_compliance":   0.03,
-    }
+        "securitytrails":       0.01,
+        "fraudulent_domains":   0.04,
+        "privacy_compliance":   0.02,
+        "web_ranking":          0.02,
+        "info_disclosure":      0.05,
+    }  # Sum = 0.98 — remaining 0.02 = WAF bonus headroom
 
     RECOMMENDATIONS = {
         "SSL certificate has EXPIRED": "Renew your SSL certificate immediately — an expired cert causes browser warnings and erodes user trust.",
@@ -2446,6 +2694,14 @@ class RiskScorer:
         pc = results.get("privacy_compliance", {})
         pc_risk = inv(pc.get("score", 100))
 
+        # Web ranking risk (unranked = slightly risky)
+        wr = results.get("web_ranking", {})
+        wr_risk = inv(wr.get("score", 30))
+
+        # Information disclosure risk
+        id_res = results.get("info_disclosure", {})
+        id_risk = inv(id_res.get("score", 100))
+
         weighted = (
             ssl_risk         * self.WEIGHTS["ssl"] +
             email_risk       * self.WEIGHTS["email_security"] +
@@ -2465,7 +2721,9 @@ class RiskScorer:
             vt_risk          * self.WEIGHTS["virustotal"] +
             st_risk          * self.WEIGHTS["securitytrails"] +
             fd_risk          * self.WEIGHTS["fraudulent_domains"] +
-            pc_risk          * self.WEIGHTS["privacy_compliance"]
+            pc_risk          * self.WEIGHTS["privacy_compliance"] +
+            wr_risk          * self.WEIGHTS["web_ranking"] +
+            id_risk          * self.WEIGHTS["info_disclosure"]
         )
 
         risk_score = round(weighted * 10)
@@ -2504,6 +2762,492 @@ class RiskScorer:
             )
 
         return risk_score, risk_level, recommendations
+
+
+# ---------------------------------------------------------------------------
+# 29. Ransomware Susceptibility Index (RSI)
+# ---------------------------------------------------------------------------
+
+class RansomwareIndex:
+    """
+    Calculates 0.0-1.0 ransomware susceptibility score from scan results.
+    Higher = more susceptible. Uses existing checker outputs + user-provided
+    industry/revenue context for multipliers.
+    """
+    INDUSTRY_MULTIPLIER = {
+        "healthcare": 1.3, "legal": 1.3, "finance": 1.2,
+        "government": 1.2, "manufacturing": 1.1, "retail": 1.1,
+        "education": 1.1, "tech": 1.0, "other": 1.1,
+    }
+
+    def calculate(self, categories: dict, industry: str = "other",
+                  annual_revenue: float = 0) -> dict:
+        base = 0.10
+        factors = []
+
+        # RDP exposed: +0.35 (strongest signal)
+        if categories.get("vpn_remote", {}).get("rdp_exposed"):
+            base += 0.35
+            factors.append({"factor": "RDP (port 3389) exposed to internet", "impact": 0.35, "priority": 1})
+
+        # Exposed database/service ports: +0.15 each, cap 0.30
+        exposed = categories.get("high_risk_protocols", {}).get("exposed_services", [])
+        db_ports = [s for s in exposed if s.get("port") in (27017, 6379, 9200, 5432, 1433, 5984, 3306)]
+        db_impact = min(0.30, len(db_ports) * 0.15)
+        if db_impact > 0:
+            base += db_impact
+            factors.append({"factor": f"{len(db_ports)} exposed database port(s)", "impact": round(db_impact, 2), "priority": 1})
+
+        # KEV CVEs: +0.10 each, cap 0.25
+        cves = categories.get("shodan_vulns", {}).get("cves", [])
+        kev_count = sum(1 for c in cves if c.get("in_kev"))
+        kev_impact = min(0.25, kev_count * 0.10)
+        if kev_impact > 0:
+            base += kev_impact
+            factors.append({"factor": f"{kev_count} CISA KEV CVE(s) — actively exploited", "impact": round(kev_impact, 2), "priority": 1})
+
+        # High EPSS CVEs (>0.5): +0.05 each, cap 0.15
+        high_epss = sum(1 for c in cves if c.get("epss_score", 0) > 0.5)
+        epss_impact = min(0.15, high_epss * 0.05)
+        if epss_impact > 0:
+            base += epss_impact
+            factors.append({"factor": f"{high_epss} high-EPSS CVE(s) (>50% exploit probability)", "impact": round(epss_impact, 2), "priority": 2})
+
+        # Other critical/high CVEs: +0.03 each, cap 0.10
+        other_crit = sum(1 for c in cves if c.get("severity") in ("critical", "high") and not c.get("in_kev"))
+        other_impact = min(0.10, other_crit * 0.03)
+        if other_impact > 0:
+            base += other_impact
+            factors.append({"factor": f"{other_crit} unpatched critical/high CVE(s)", "impact": round(other_impact, 2), "priority": 2})
+
+        # Leaked credentials > 100: +0.10
+        dehashed = categories.get("dehashed", {})
+        if dehashed.get("total_entries", 0) > 100:
+            base += 0.10
+            factors.append({"factor": f"{dehashed['total_entries']} credential leaks (Dehashed)", "impact": 0.10, "priority": 2})
+        elif dehashed.get("total_entries", 0) > 0:
+            base += 0.05
+            factors.append({"factor": f"{dehashed['total_entries']} credential leaks (Dehashed)", "impact": 0.05, "priority": 3})
+
+        # Breach history: +0.05 if recent breach
+        breaches = categories.get("breaches", {})
+        if breaches.get("breach_count", 0) > 3:
+            base += 0.05
+            factors.append({"factor": f"{breaches['breach_count']} historical breaches", "impact": 0.05, "priority": 3})
+
+        # No DMARC: +0.05
+        dmarc = categories.get("email_security", {}).get("dmarc", {})
+        if not dmarc.get("present"):
+            base += 0.05
+            factors.append({"factor": "No DMARC record — phishing/BEC vector", "impact": 0.05, "priority": 3})
+        elif dmarc.get("policy") == "none":
+            base += 0.03
+            factors.append({"factor": "DMARC policy is 'none' — not enforced", "impact": 0.03, "priority": 3})
+
+        # No WAF: +0.05
+        if not categories.get("waf", {}).get("detected"):
+            base += 0.05
+            factors.append({"factor": "No WAF detected", "impact": 0.05, "priority": 3})
+
+        # Weak SSL: +0.05
+        ssl_grade = categories.get("ssl", {}).get("grade", "F")
+        if ssl_grade in ("D", "E", "F"):
+            base += 0.05
+            factors.append({"factor": f"Weak SSL (grade {ssl_grade})", "impact": 0.05, "priority": 3})
+
+        # Blacklisted IPs: +0.05
+        if categories.get("dnsbl", {}).get("blacklisted"):
+            base += 0.05
+            factors.append({"factor": "IP/domain blacklisted", "impact": 0.05, "priority": 2})
+
+        # Information disclosure: +0.03 per critical exposure
+        info = categories.get("info_disclosure", {})
+        crit_exposed = sum(1 for p in info.get("exposed_paths", []) if p.get("risk_level") == "critical")
+        if crit_exposed > 0:
+            info_impact = min(0.10, crit_exposed * 0.03)
+            base += info_impact
+            factors.append({"factor": f"{crit_exposed} critical file(s) exposed", "impact": round(info_impact, 2), "priority": 2})
+
+        # Apply multipliers
+        ind_mult = self.INDUSTRY_MULTIPLIER.get(industry, 1.1)
+        if annual_revenue > 0 and annual_revenue < 20_000_000:
+            size_mult = 1.2
+        elif annual_revenue >= 500_000_000:
+            size_mult = 0.9
+        else:
+            size_mult = 1.0
+
+        rsi = min(1.0, round(base * ind_mult * size_mult, 3))
+
+        label = ("Critical" if rsi >= 0.75 else "High" if rsi >= 0.50
+                 else "Medium" if rsi >= 0.25 else "Low")
+
+        # Sort factors by priority then impact
+        factors.sort(key=lambda f: (f["priority"], -f["impact"]))
+
+        return {
+            "rsi_score": rsi,
+            "risk_label": label,
+            "base_score": round(base, 3),
+            "industry": industry,
+            "industry_multiplier": ind_mult,
+            "annual_revenue": annual_revenue,
+            "size_multiplier": size_mult,
+            "contributing_factors": factors,
+            "factor_count": len(factors),
+        }
+
+
+# ---------------------------------------------------------------------------
+# 30. Financial Impact Calculator (FAIR-Based)
+# ---------------------------------------------------------------------------
+
+class FinancialImpactCalculator:
+    """
+    Estimates probable financial loss using Open FAIR-inspired model.
+    Three scenarios: Data Breach + Ransomware + Business Interruption.
+    Outputs min / most_likely / max range for insurance underwriting.
+    """
+    # Industry cost-per-record (IBM/Ponemon averages)
+    COST_PER_RECORD = {
+        "healthcare": 239, "finance": 219, "tech": 183,
+        "education": 173, "manufacturing": 165, "retail": 157,
+        "legal": 190, "government": 155, "other": 165,
+    }
+    # Regulatory fine estimates (typical ranges)
+    REGULATORY_FINE = {
+        "healthcare": 1_000_000, "finance": 750_000, "legal": 500_000,
+        "government": 250_000, "other": 250_000,
+    }
+    # Average ransom demand as % of revenue (capped)
+    RANSOM_PCT = 0.03  # 3% of annual revenue
+
+    def calculate(self, categories: dict, rsi_result: dict,
+                  annual_revenue: float, industry: str = "other") -> dict:
+        daily_revenue = annual_revenue / 365 if annual_revenue > 0 else 5_000
+
+        # --- Scenario 1: Data Breach ---
+        breach_count = categories.get("breaches", {}).get("breach_count", 0)
+        # P(breach) based on history + technical posture
+        tech_score = categories.get("ssl", {}).get("score", 50)
+        if breach_count > 3:
+            p_breach = 0.35
+        elif breach_count > 0:
+            p_breach = 0.20
+        else:
+            p_breach = 0.08
+        # Adjust by technical weakness
+        p_breach = min(0.5, p_breach + (100 - tech_score) / 500)
+
+        cost_per_record = self.COST_PER_RECORD.get(industry, 165)
+        # Estimate records from revenue proxy
+        est_records = max(1000, int(annual_revenue / 50_000)) if annual_revenue > 0 else 5000
+        reg_fine = self.REGULATORY_FINE.get(industry, self.REGULATORY_FINE["other"])
+
+        breach_most_likely = p_breach * (est_records * cost_per_record + reg_fine)
+        breach_min = breach_most_likely * 0.3
+        breach_max = breach_most_likely * 3.0
+
+        data_breach = {
+            "probability": round(p_breach, 3),
+            "estimated_records": est_records,
+            "cost_per_record": cost_per_record,
+            "regulatory_fine": reg_fine,
+            "min": round(breach_min),
+            "most_likely": round(breach_most_likely),
+            "max": round(breach_max),
+        }
+
+        # --- Scenario 2: Ransomware ---
+        rsi = rsi_result.get("rsi_score", 0.1)
+        downtime_days = 22  # Industry average
+        ransom_demand = min(5_000_000, annual_revenue * self.RANSOM_PCT) if annual_revenue > 0 else 50_000
+        ir_cost = min(500_000, max(50_000, annual_revenue * 0.005)) if annual_revenue > 0 else 75_000
+
+        ransom_most_likely = rsi * (downtime_days * daily_revenue + ransom_demand + ir_cost)
+        ransom_min = ransom_most_likely * 0.4
+        ransom_max = ransom_most_likely * 2.5
+
+        ransomware = {
+            "probability": round(rsi, 3),
+            "downtime_days": downtime_days,
+            "daily_revenue_loss": round(daily_revenue),
+            "ransom_estimate": round(ransom_demand),
+            "ir_cost": round(ir_cost),
+            "min": round(ransom_min),
+            "most_likely": round(ransom_most_likely),
+            "max": round(ransom_max),
+        }
+
+        # --- Scenario 3: Business Interruption ---
+        # P(interruption) from infrastructure signals
+        p_interrupt = 0.05
+        if not categories.get("waf", {}).get("detected"):
+            p_interrupt += 0.05
+        if categories.get("ssl", {}).get("grade", "A") in ("D", "E", "F"):
+            p_interrupt += 0.03
+        exposed_svc = len(categories.get("high_risk_protocols", {}).get("exposed_services", []))
+        p_interrupt += min(0.10, exposed_svc * 0.02)
+        if categories.get("dnsbl", {}).get("blacklisted"):
+            p_interrupt += 0.05
+        p_interrupt = min(0.30, p_interrupt)
+
+        bi_downtime = 5  # Average BI days
+        impact_factor = 0.6  # Proportion of revenue lost during interruption
+
+        bi_most_likely = p_interrupt * (bi_downtime * daily_revenue * impact_factor)
+        bi_min = bi_most_likely * 0.3
+        bi_max = bi_most_likely * 4.0
+
+        business_interruption = {
+            "probability": round(p_interrupt, 3),
+            "downtime_days": bi_downtime,
+            "impact_factor": impact_factor,
+            "min": round(bi_min),
+            "most_likely": round(bi_most_likely),
+            "max": round(bi_max),
+        }
+
+        # --- Totals ---
+        total_min = breach_min + ransom_min + bi_min
+        total_likely = breach_most_likely + ransom_most_likely + bi_most_likely
+        total_max = breach_max + ransom_max + bi_max
+
+        # Insurance recommendations
+        deductible = round(total_min * 0.5, -3)  # Round to nearest $1K
+        expected_annual = round(total_likely, -3)
+        coverage_limit = round(total_max * 1.2, -3)
+
+        return {
+            "scenarios": {
+                "data_breach": data_breach,
+                "ransomware": ransomware,
+                "business_interruption": business_interruption,
+            },
+            "total": {
+                "min": round(total_min),
+                "most_likely": round(total_likely),
+                "max": round(total_max),
+            },
+            "insurance_recommendations": {
+                "suggested_deductible": max(1000, deductible),
+                "expected_annual_loss": max(1000, expected_annual),
+                "recommended_coverage": max(10000, coverage_limit),
+            },
+            "annual_revenue": annual_revenue,
+            "industry": industry,
+        }
+
+
+# ---------------------------------------------------------------------------
+# 31. Data Breach Index (DBI)
+# ---------------------------------------------------------------------------
+
+class DataBreachIndex:
+    """
+    Scores historical breach exposure (0-100, higher = better).
+    Uses HIBP breach data + Dehashed credential leak data.
+    """
+
+    def calculate(self, categories: dict) -> dict:
+        score = 0
+        components = {}
+
+        breaches = categories.get("breaches", {})
+        dehashed = categories.get("dehashed", {})
+        breach_count = breaches.get("breach_count", 0)
+
+        # 1. Breach count (0-30 points)
+        if breach_count == 0:
+            bc_pts = 30
+        elif breach_count <= 3:
+            bc_pts = 15
+        else:
+            bc_pts = 0
+        score += bc_pts
+        components["breach_count"] = {"value": breach_count, "points": bc_pts, "max": 30}
+
+        # 2. Most recent breach recency (0-20 points)
+        recency_pts = 20
+        most_recent = breaches.get("most_recent_breach")
+        if most_recent:
+            try:
+                breach_date = datetime.fromisoformat(most_recent.replace("Z", "+00:00")) \
+                    if "T" in str(most_recent) else datetime.strptime(str(most_recent)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                days_ago = (datetime.now(timezone.utc) - breach_date).days
+                if days_ago < 365:
+                    recency_pts = 0
+                elif days_ago < 1095:  # 3 years
+                    recency_pts = 10
+                else:
+                    recency_pts = 20
+            except Exception:
+                recency_pts = 10
+        score += recency_pts
+        components["recency"] = {"value": str(most_recent or "No breaches"), "points": recency_pts, "max": 20}
+
+        # 3. Data severity (0-15 points)
+        data_classes = breaches.get("data_classes", [])
+        severe_classes = {"Passwords", "Credit cards", "Bank account numbers",
+                          "Social security numbers", "Financial data", "Credit card CVV"}
+        has_severe = bool(set(data_classes) & severe_classes)
+        sev_pts = 0 if has_severe else (15 if not data_classes else 10)
+        score += sev_pts
+        components["data_severity"] = {
+            "value": "Passwords/financials exposed" if has_severe else ("Emails only" if data_classes else "No data exposed"),
+            "points": sev_pts, "max": 15,
+        }
+
+        # 4. Credential leak volume from Dehashed (0-20 points)
+        total_leaks = dehashed.get("total_entries", 0) if dehashed.get("status") not in ("no_api_key", "auth_failed") else -1
+        if total_leaks < 0:
+            leak_pts = 10  # Unknown — middle score
+        elif total_leaks == 0:
+            leak_pts = 20
+        elif total_leaks <= 100:
+            leak_pts = 10
+        else:
+            leak_pts = 0
+        score += leak_pts
+        components["credential_leaks"] = {
+            "value": total_leaks if total_leaks >= 0 else "Unknown (no API key)",
+            "points": leak_pts, "max": 20,
+        }
+
+        # 5. Breach trend (0-15 points)
+        # Improving = no breaches in last 2 years; worsening = recent + multiple
+        breach_list = breaches.get("breaches", [])
+        recent_count = 0
+        for b in breach_list:
+            try:
+                bd = b.get("date", "")[:10]
+                if bd and (datetime.now(timezone.utc) - datetime.strptime(bd, "%Y-%m-%d").replace(tzinfo=timezone.utc)).days < 730:
+                    recent_count += 1
+            except Exception:
+                pass
+        if recent_count == 0:
+            trend_pts = 15
+            trend_label = "Improving"
+        elif recent_count <= 2:
+            trend_pts = 7
+            trend_label = "Stable"
+        else:
+            trend_pts = 0
+            trend_label = "Worsening"
+        score += trend_pts
+        components["trend"] = {"value": trend_label, "points": trend_pts, "max": 15}
+
+        label = ("Excellent" if score >= 80 else "Good" if score >= 60
+                 else "Fair" if score >= 40 else "Poor" if score >= 20 else "Critical")
+
+        return {
+            "dbi_score": score,
+            "label": label,
+            "components": components,
+            "max_score": 100,
+        }
+
+
+# ---------------------------------------------------------------------------
+# 32. Remediation Simulator (Before/After Model)
+# ---------------------------------------------------------------------------
+
+class RemediationSimulator:
+    """
+    Maps scan findings to prioritised remediation steps with projected
+    financial impact reduction. The highest-value feature for insurance —
+    shows 'fix these N items → $X reduction in probable annual loss'.
+    """
+    # Remediation catalog: maps issue patterns to actions
+    REMEDIATION_MAP = [
+        # (checker_key, condition_fn, action, est_cost, rsi_reduction)
+        ("vpn_remote", lambda c: c.get("rdp_exposed"), "Block RDP (port 3389) from public internet — use VPN/ZTNA instead", "$500–$2,000", 0.35),
+        ("high_risk_protocols", lambda c: any(s.get("port") in (27017, 6379, 9200, 5432, 1433) for s in c.get("exposed_services", [])),
+         "Firewall exposed database ports (MongoDB, Redis, PostgreSQL, etc.)", "$500–$2,000", 0.15),
+        ("shodan_vulns", lambda c: c.get("kev_count", 0) > 0,
+         "Patch CISA KEV vulnerabilities — actively exploited in the wild", "$1,000–$5,000", 0.10),
+        ("shodan_vulns", lambda c: c.get("high_epss_count", 0) > 0,
+         "Patch high-EPSS CVEs (>50% exploitation probability)", "$1,000–$5,000", 0.05),
+        ("email_security", lambda c: not c.get("dmarc", {}).get("present"),
+         "Implement DMARC with 'quarantine' or 'reject' policy", "$200–$500", 0.05),
+        ("waf", lambda c: not c.get("detected"),
+         "Deploy a Web Application Firewall (Cloudflare, AWS WAF, etc.)", "$0–$500/mo", 0.05),
+        ("ssl", lambda c: c.get("grade", "A") in ("D", "E", "F"),
+         "Upgrade SSL/TLS configuration — enable TLS 1.2+, strong ciphers", "$0–$200", 0.05),
+        ("info_disclosure", lambda c: any(p.get("risk_level") == "critical" for p in c.get("exposed_paths", [])),
+         "Remove exposed sensitive files (.env, .git, backups) from web root", "$0–$500", 0.03),
+        ("exposed_admin", lambda c: c.get("critical_count", 0) > 0,
+         "Restrict admin panel access — IP whitelist or VPN-only", "$200–$1,000", 0.02),
+        ("dnsbl", lambda c: c.get("blacklisted"),
+         "Investigate and resolve IP/domain blacklisting", "$500–$2,000", 0.05),
+        ("dehashed", lambda c: c.get("total_entries", 0) > 100,
+         "Force password reset for leaked credentials and enable MFA", "$500–$2,000", 0.05),
+        ("breaches", lambda c: c.get("breach_count", 0) > 0,
+         "Implement breach response plan and credential monitoring", "$1,000–$5,000", 0.02),
+        ("fraudulent_domains", lambda c: c.get("lookalike_count", 0) > 5,
+         "Register key lookalike domains defensively and set up monitoring", "$500–$2,000", 0.01),
+        ("privacy_compliance", lambda c: c.get("score", 100) < 50,
+         "Update privacy policy to cover all POPIA/GDPR required sections", "$500–$2,000", 0.01),
+    ]
+
+    def calculate(self, categories: dict, rsi_result: dict,
+                  fin_result: dict, annual_revenue: float,
+                  industry: str = "other") -> dict:
+        steps = []
+        total_rsi_reduction = 0.0
+
+        for checker_key, condition_fn, action, est_cost, rsi_reduction in self.REMEDIATION_MAP:
+            checker_data = categories.get(checker_key, {})
+            try:
+                if condition_fn(checker_data):
+                    # Estimate annual savings proportional to RSI reduction
+                    total_likely = fin_result.get("total", {}).get("most_likely", 0)
+                    current_rsi = rsi_result.get("rsi_score", 0.1)
+                    # Savings = (rsi_reduction / current_rsi) * total_financial_impact
+                    if current_rsi > 0:
+                        savings = round((rsi_reduction / current_rsi) * total_likely * 0.7)
+                    else:
+                        savings = 0
+
+                    steps.append({
+                        "action": action,
+                        "category": checker_key,
+                        "priority": 1 if rsi_reduction >= 0.10 else (2 if rsi_reduction >= 0.05 else 3),
+                        "estimated_cost": est_cost,
+                        "rsi_reduction": rsi_reduction,
+                        "annual_savings_estimate": savings,
+                    })
+                    total_rsi_reduction += rsi_reduction
+            except Exception:
+                continue
+
+        # Sort by priority then savings
+        steps.sort(key=lambda s: (s["priority"], -s["annual_savings_estimate"]))
+
+        # Simulate improved state
+        simulated_rsi = max(0.0, rsi_result.get("rsi_score", 0.1) - total_rsi_reduction)
+        total_savings = sum(s["annual_savings_estimate"] for s in steps)
+
+        # Recalculate financial impact with simulated RSI
+        simulated_fin = {}
+        if fin_result.get("total"):
+            ratio = simulated_rsi / max(0.01, rsi_result.get("rsi_score", 0.1))
+            simulated_fin = {
+                "min": round(fin_result["total"]["min"] * ratio),
+                "most_likely": round(fin_result["total"]["most_likely"] * ratio),
+                "max": round(fin_result["total"]["max"] * ratio),
+            }
+
+        return {
+            "steps": steps,
+            "step_count": len(steps),
+            "current_rsi": rsi_result.get("rsi_score", 0),
+            "simulated_rsi": round(simulated_rsi, 3),
+            "rsi_improvement": round(total_rsi_reduction, 3),
+            "current_financial_impact": fin_result.get("total", {}),
+            "simulated_financial_impact": simulated_fin,
+            "total_potential_savings": total_savings,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -2577,7 +3321,9 @@ class SecurityScanner:
         agg["per_ip"] = per_ip
         return agg
 
-    def scan(self, domain: str, on_progress: callable = None) -> dict:
+    def scan(self, domain: str, on_progress: callable = None,
+             industry: str = "other", annual_revenue: float = 0,
+             country: str = "") -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
         results = {
             "domain_scanned": domain,
@@ -2585,8 +3331,14 @@ class SecurityScanner:
             "overall_risk_score": 0,
             "risk_level": "Unknown",
             "discovered_ips": [],
+            "scan_context": {
+                "industry": industry,
+                "annual_revenue": annual_revenue,
+                "country": country,
+            },
             "categories": {},
             "recommendations": [],
+            "insurance": {},
         }
 
         # --- Phase 1: IP Discovery ---
@@ -2617,6 +3369,8 @@ class SecurityScanner:
             "securitytrails":      (SecurityTrailsChecker().check,     [domain, self.securitytrails_api_key]),
             "fraudulent_domains":  (FraudulentDomainChecker().check,   [domain]),
             "privacy_compliance":  (PrivacyComplianceChecker().check,  [domain]),
+            "web_ranking":         (WebRankingChecker().check,          [domain]),
+            "info_disclosure":     (InformationDisclosureChecker().check, [domain]),
         }
 
         # --- Phase 3: IP-level checkers (per-IP) ---
@@ -2680,6 +3434,34 @@ class SecurityScanner:
         results["overall_risk_score"] = risk_score
         results["risk_level"] = risk_level
         results["recommendations"] = recommendations
+
+        # --- Phase 6: Insurance Analytics ---
+        self._notify(on_progress, "insurance_analytics", "running")
+        try:
+            # RSI
+            rsi_calc = RansomwareIndex()
+            rsi_result = rsi_calc.calculate(cat_results, industry, annual_revenue)
+            results["insurance"]["rsi"] = rsi_result
+
+            # Financial Impact
+            fin_calc = FinancialImpactCalculator()
+            fin_result = fin_calc.calculate(cat_results, rsi_result, annual_revenue, industry)
+            results["insurance"]["financial_impact"] = fin_result
+
+            # DBI
+            dbi_calc = DataBreachIndex()
+            results["insurance"]["dbi"] = dbi_calc.calculate(cat_results)
+
+            # Remediation Simulator
+            sim = RemediationSimulator()
+            results["insurance"]["remediation"] = sim.calculate(
+                cat_results, rsi_result, fin_result, annual_revenue, industry
+            )
+        except Exception as e:
+            results["insurance"]["error"] = str(e)
+
+        self._notify(on_progress, "insurance_analytics", "done")
+
         return results
 
 

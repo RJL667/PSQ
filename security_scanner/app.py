@@ -1,7 +1,7 @@
 """
 Cyber Insurance Security Scanner — Flask API
 Endpoints:
-  POST /api/scan           {"domain": "example.co.za"}   → {scan_id, status}
+  POST /api/scan           {"domain": "example.co.za", "industry": "finance", "annual_revenue": 5000000}
   GET  /api/scan/<id>      → JSON results or {"status": "pending"}
   GET  /api/scan/<id>/pdf  → download PDF report
   GET  /results/<id>       → HTML visual report
@@ -39,6 +39,11 @@ SHODAN_API_KEY         = os.environ.get("SHODAN_API_KEY")          # Optional �
 DB_PATH = os.environ.get("DB_PATH", "scans.db")
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SCANS", "5"))
 
+VALID_INDUSTRIES = [
+    "healthcare", "legal", "finance", "tech", "manufacturing",
+    "retail", "education", "government", "other",
+]
+
 _semaphore = threading.Semaphore(MAX_CONCURRENT)
 
 # In-memory SSE progress tracking: scan_id -> queue.Queue()
@@ -47,12 +52,16 @@ _scan_progress = {}
 CHECKER_MANIFEST = [
     {"section": "Discovery", "checkers": [
         {"id": "ip_discovery", "label": "IP Discovery"},
+        {"id": "web_ranking", "label": "Web Ranking"},
     ]},
     {"section": "Core Security", "checkers": [
         {"id": "ssl", "label": "SSL / TLS Certificate"},
         {"id": "http_headers", "label": "HTTP Security Headers"},
         {"id": "website_security", "label": "Website Security"},
         {"id": "waf", "label": "WAF / DDoS Protection"},
+    ]},
+    {"section": "Information Security", "checkers": [
+        {"id": "info_disclosure", "label": "Information Disclosure"},
     ]},
     {"section": "Email Security", "checkers": [
         {"id": "email_security", "label": "Email Authentication"},
@@ -82,6 +91,9 @@ CHECKER_MANIFEST = [
         {"id": "payment_security", "label": "Payment Security"},
         {"id": "privacy_compliance", "label": "Privacy Compliance"},
     ]},
+    {"section": "Insurance Analytics", "checkers": [
+        {"id": "insurance_analytics", "label": "RSI / Financial Impact / DBI"},
+    ]},
 ]
 
 
@@ -105,19 +117,34 @@ def init_db():
                 results     TEXT,
                 risk_score  INTEGER,
                 risk_level  TEXT,
+                industry    TEXT DEFAULT 'other',
+                annual_revenue REAL DEFAULT 0,
+                country     TEXT DEFAULT '',
                 created_at  TEXT NOT NULL,
                 completed_at TEXT
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_domain ON scans(domain)")
+        # Migration: add new columns to existing tables
+        for col, coltype, default in [
+            ("industry", "TEXT", "'other'"),
+            ("annual_revenue", "REAL", "0"),
+            ("country", "TEXT", "''"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE scans ADD COLUMN {col} {coltype} DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
         conn.commit()
 
 
-def save_scan(scan_id: str, domain: str):
+def save_scan(scan_id: str, domain: str, industry: str = "other",
+              annual_revenue: float = 0, country: str = ""):
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO scans (id, domain, status, created_at) VALUES (?,?,?,?)",
-            (scan_id, domain, "pending", datetime.now(timezone.utc).isoformat())
+            "INSERT INTO scans (id, domain, status, industry, annual_revenue, country, created_at) VALUES (?,?,?,?,?,?,?)",
+            (scan_id, domain, "pending", industry, annual_revenue, country,
+             datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
 
@@ -158,7 +185,8 @@ def fetch_scan(scan_id: str):
 # Background scan worker
 # ---------------------------------------------------------------------------
 
-def run_scan(scan_id: str, domain: str):
+def run_scan(scan_id: str, domain: str, industry: str = "other",
+             annual_revenue: float = 0, country: str = ""):
     progress_q = queue.Queue()
     _scan_progress[scan_id] = progress_q
 
@@ -175,7 +203,11 @@ def run_scan(scan_id: str, domain: str):
                 securitytrails_api_key=SECURITYTRAILS_API_KEY,
                 shodan_api_key=SHODAN_API_KEY,
             )
-            results = scanner.scan(domain, on_progress=on_progress)
+            results = scanner.scan(
+                domain, on_progress=on_progress,
+                industry=industry, annual_revenue=annual_revenue,
+                country=country,
+            )
             update_scan(scan_id, results)
             progress_q.put({"type": "complete"})
         except Exception as e:
@@ -208,10 +240,24 @@ def start_scan():
     if not domain or not valid_domain(domain):
         return jsonify({"error": "Invalid or missing domain"}), 400
 
-    scan_id = str(uuid.uuid4())
-    save_scan(scan_id, domain)
+    # Parse optional insurance context fields
+    industry = str(data.get("industry", "other")).strip().lower()
+    if industry not in VALID_INDUSTRIES:
+        industry = "other"
+    try:
+        annual_revenue = float(data.get("annual_revenue", 0))
+    except (ValueError, TypeError):
+        annual_revenue = 0
+    country = str(data.get("country", "")).strip()
 
-    t = threading.Thread(target=run_scan, args=(scan_id, domain), daemon=True)
+    scan_id = str(uuid.uuid4())
+    save_scan(scan_id, domain, industry, annual_revenue, country)
+
+    t = threading.Thread(
+        target=run_scan,
+        args=(scan_id, domain, industry, annual_revenue, country),
+        daemon=True,
+    )
     t.start()
 
     return jsonify({

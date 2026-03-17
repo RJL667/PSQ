@@ -680,6 +680,117 @@ def cat_website(d, S):
     return build_cat_card("Website Security", col, f"{score}%", rows, ws.get("issues", []), S)
 
 
+def cat_web_ranking(d, S):
+    wr = d.get("web_ranking", {})
+    rank = wr.get("rank")
+    score = wr.get("score", 30)
+    col = _tl(score >= 70, score >= 40)
+    rows = [
+        ("Tranco Rank", f"#{rank:,}" if rank else "Not in top 1M"),
+        ("In List", "Yes" if wr.get("in_list") else "No"),
+        ("Score", f"{score}/100"),
+    ]
+    return build_cat_card("Web Ranking (Tranco)", col,
+                          f"#{rank:,}" if rank else "Unranked",
+                          rows, wr.get("issues", []), S)
+
+
+def cat_info_disclosure(d, S):
+    info = d.get("info_disclosure", {})
+    score = info.get("score", 100)
+    col = _tl(score >= 90, score >= 60)
+    exposed = info.get("exposed_paths", [])
+    rows = [("Exposed Paths", str(len(exposed)))]
+    for p in exposed[:5]:
+        rows.append((p.get("path", ""), f"{p.get('risk_level','').upper()} — {p.get('description','')}"))
+    if len(exposed) > 5:
+        rows.append(("...", f"+{len(exposed)-5} more"))
+    return build_cat_card("Information Disclosure", col, f"{score}%",
+                          rows, info.get("issues", []), S)
+
+
+def cat_rsi(results, S):
+    """RSI (Ransomware Susceptibility Index) card for PDF."""
+    ins = results if "rsi" in results else results.get("insurance", {})
+    rsi = ins.get("rsi", {})
+    score = rsi.get("rsi_score", 0)
+    col = C_CRITICAL if score >= 0.75 else (C_RED if score >= 0.50 else (C_AMBER if score >= 0.25 else C_GREEN))
+    rows = [
+        ("RSI Score", f"{score:.3f} / 1.000"),
+        ("Risk Label", rsi.get("risk_label", "Unknown")),
+        ("Base Score", f"{rsi.get('base_score', 0):.3f}"),
+        ("Industry", f"{rsi.get('industry', 'other').capitalize()} (×{rsi.get('industry_multiplier', 1.0)})"),
+        ("Size Multiplier", f"×{rsi.get('size_multiplier', 1.0)}"),
+    ]
+    for f in rsi.get("contributing_factors", [])[:8]:
+        rows.append((f"  P{f['priority']}: {f['factor']}", f"+{f['impact']:.2f}"))
+    return build_cat_card("Ransomware Susceptibility Index (RSI)", col,
+                          f"{score:.2f} — {rsi.get('risk_label', '')}",
+                          rows, [], S)
+
+
+def cat_financial_impact(results, S):
+    """Financial Impact Analysis card for PDF."""
+    ins = results if "financial_impact" in results else results.get("insurance", {})
+    fin = ins.get("financial_impact", {})
+    total = fin.get("total", {})
+    likely = total.get("most_likely", 0)
+    col = C_CRITICAL if likely > 500000 else (C_RED if likely > 200000 else (C_AMBER if likely > 50000 else C_GREEN))
+
+    rows = []
+    for name, key in [("Data Breach", "data_breach"), ("Ransomware", "ransomware"), ("Business Interruption", "business_interruption")]:
+        sc = fin.get("scenarios", {}).get(key, {})
+        rows.append((name, f"${sc.get('min',0):,.0f} / ${sc.get('most_likely',0):,.0f} / ${sc.get('max',0):,.0f}"))
+    rows.append(("TOTAL", f"${total.get('min',0):,.0f} / ${total.get('most_likely',0):,.0f} / ${total.get('max',0):,.0f}"))
+
+    rec = fin.get("insurance_recommendations", {})
+    rows.append(("", ""))
+    rows.append(("Suggested Deductible", f"${rec.get('suggested_deductible',0):,.0f}"))
+    rows.append(("Expected Annual Loss", f"${rec.get('expected_annual_loss',0):,.0f}"))
+    rows.append(("Recommended Coverage", f"${rec.get('recommended_coverage',0):,.0f}"))
+
+    return build_cat_card("Financial Impact Analysis (FAIR)", col,
+                          f"${likely:,.0f} est. annual loss",
+                          rows, [], S)
+
+
+def cat_dbi(results, S):
+    """Data Breach Index card for PDF."""
+    ins = results if "dbi" in results else results.get("insurance", {})
+    dbi = ins.get("dbi", {})
+    score = dbi.get("dbi_score", 50)
+    col = _tl(score >= 80, score >= 40)
+    rows = [("DBI Score", f"{score}/{dbi.get('max_score', 100)} — {dbi.get('label', '')}")]
+    for key, comp in dbi.get("components", {}).items():
+        rows.append((key.replace("_", " ").capitalize(), f"{comp.get('value', '')} ({comp.get('points', 0)}/{comp.get('max', 0)} pts)"))
+    return build_cat_card("Data Breach Index (DBI)", col,
+                          f"{score}/100 — {dbi.get('label', '')}",
+                          rows, [], S)
+
+
+def cat_remediation(results, S):
+    """Remediation Roadmap card for PDF."""
+    ins = results if "remediation" in results else results.get("insurance", {})
+    rem = ins.get("remediation", {})
+    steps = rem.get("steps", [])
+    if not steps:
+        return []
+    savings = rem.get("total_potential_savings", 0)
+    col = C_BLUE
+
+    rows = [
+        ("Current RSI", f"{rem.get('current_rsi', 0):.3f}"),
+        ("Projected RSI (after fixes)", f"{rem.get('simulated_rsi', 0):.3f}"),
+        ("Total Potential Savings", f"${savings:,.0f}/year"),
+        ("", ""),
+    ]
+    for i, step in enumerate(steps[:10], 1):
+        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves ${step['annual_savings_estimate']:,.0f}/yr"))
+    return build_cat_card("Remediation Roadmap — Before/After", col,
+                          f"{len(steps)} steps — ${savings:,.0f} savings",
+                          rows, [], S)
+
+
 # ---------------------------------------------------------------------------
 # Executive summary table
 # ---------------------------------------------------------------------------
@@ -702,6 +813,11 @@ def build_summary_table(results: dict, S) -> Table:
     waf       = cats.get("waf", {}).get("detected", False)
     vpn_rdp   = cats.get("vpn_remote", {}).get("rdp_exposed", False)
 
+    # Insurance analytics
+    ins       = results.get("insurance", {})
+    rsi_score = ins.get("rsi", {}).get("rsi_score")
+    dbi_score = ins.get("dbi", {}).get("score")
+
     rows = [
         row("SSL Grade",             ssl_grade,
             _tl(ssl_grade in ("A+", "A", "B"), ssl_grade == "C")),
@@ -722,6 +838,15 @@ def build_summary_table(results: dict, S) -> Table:
         row("RDP Exposed",           "YES — CRITICAL" if vpn_rdp else "No",
             C_CRITICAL if vpn_rdp else C_GREEN),
     ]
+
+    # Add insurance rows if available
+    if rsi_score is not None:
+        rows.insert(0, row("Ransomware Susceptibility", f"{rsi_score:.2f}",
+            _tl(rsi_score < 0.3, rsi_score < 0.6)))
+    if dbi_score is not None:
+        rows.insert(1 if rsi_score is not None else 0,
+            row("Data Breach Index", f"{dbi_score}/100",
+            _tl(dbi_score >= 70, dbi_score >= 40)))
 
     tbl = Table(rows, colWidths=[14, 70 * mm, INNER_W - 14 - 70 * mm])
     style = [
@@ -814,7 +939,20 @@ def generate_pdf(results: dict) -> bytes:
     story.append(Spacer(1, 2 * mm))
     story.append(build_summary_table(results, S))
 
+    # ── Insurance Analytics ─────────────────────────────────────────────────
+    if results.get("insurance"):
+        story.append(PageBreak())
+        story += section_header("INSURANCE ANALYTICS", S)
+        story += cat_rsi(results, S)
+        story += cat_financial_impact(results, S)
+        story += cat_dbi(results, S)
+        story += cat_remediation(results, S)
+
     story.append(PageBreak())
+
+    # ── Discovery ─────────────────────────────────────────────────────────────
+    story += section_header("DISCOVERY", S)
+    story += cat_web_ranking(cats, S)
 
     # ── Core Security ────────────────────────────────────────────────────────
     story += section_header("CORE SECURITY", S)
@@ -822,6 +960,10 @@ def generate_pdf(results: dict) -> bytes:
     story += cat_headers(cats, S)
     story += cat_waf(cats, S)
     story += cat_website(cats, S)
+
+    # ── Information Security ──────────────────────────────────────────────────
+    story += section_header("INFORMATION SECURITY", S)
+    story += cat_info_disclosure(cats, S)
 
     # ── Email Security ───────────────────────────────────────────────────────
     story += section_header("EMAIL SECURITY", S)
