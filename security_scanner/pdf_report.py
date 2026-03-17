@@ -629,24 +629,6 @@ def cat_securitytrails(d, S):
     return build_cat_card("DNS Intelligence (SecurityTrails)", col, summary, rows, st.get("issues", []), S)
 
 
-def cat_fraudulent_domains(d, S):
-    fd      = d.get("fraudulent_domains", {})
-    count   = fd.get("resolved_count", 0)
-    checked = fd.get("total_permutations", 0)
-    col     = C_CRITICAL if count > 5 else (C_RED if count > 2 else (C_AMBER if count > 0 else C_GREEN))
-    summary = f"{count} detected" if count > 0 else "Clean"
-    rows = [
-        ("Permutations checked", checked),
-        ("Resolved (active)",    count),
-    ]
-    for dom in fd.get("fraudulent_domains", [])[:8]:
-        rows.append((
-            dom.get("domain", ""),
-            f"{dom.get('technique', '')}  |  {dom.get('similarity', 0)}% match"
-        ))
-    return build_cat_card("Fraudulent / Lookalike Domains", col, summary, rows, fd.get("issues", []), S)
-
-
 def cat_privacy_compliance(d, S):
     pc    = d.get("privacy_compliance", {})
     pct   = pc.get("compliance_pct", 0)
@@ -753,31 +735,6 @@ def cat_rsi(results, S):
                           rows, [], S)
 
 
-def cat_financial_impact(results, S):
-    """Financial Impact Analysis card for PDF — insurance analytics."""
-    ins = results if "financial_impact" in results else results.get("insurance", {})
-    fin = ins.get("financial_impact", {})
-    total = fin.get("total", {})
-    likely = total.get("most_likely", 0)
-    col = C_CRITICAL if likely > 500000 else (C_RED if likely > 200000 else (C_AMBER if likely > 50000 else C_GREEN))
-
-    rows = []
-    for name, key in [("Data Breach", "data_breach"), ("Ransomware", "ransomware"), ("Business Interruption", "business_interruption")]:
-        sc = fin.get("scenarios", {}).get(key, {})
-        rows.append((name, f"${sc.get('min',0):,.0f} / ${sc.get('most_likely',0):,.0f} / ${sc.get('max',0):,.0f}"))
-    rows.append(("TOTAL", f"${total.get('min',0):,.0f} / ${total.get('most_likely',0):,.0f} / ${total.get('max',0):,.0f}"))
-
-    rec = fin.get("insurance_recommendations", {})
-    rows.append(("", ""))
-    rows.append(("Suggested Deductible", f"${rec.get('suggested_deductible',0):,.0f}"))
-    rows.append(("Expected Annual Loss", f"${rec.get('expected_annual_loss',0):,.0f}"))
-    rows.append(("Recommended Coverage", f"${rec.get('recommended_coverage',0):,.0f}"))
-
-    return build_cat_card("Financial Impact Analysis (FAIR)", col,
-                          f"${likely:,.0f} est. annual loss",
-                          rows, [], S)
-
-
 def cat_dbi(results, S):
     """Data Breach Index card for PDF — insurance analytics."""
     ins = results if "dbi" in results else results.get("insurance", {})
@@ -801,17 +758,18 @@ def cat_remediation(results, S):
         return []
     savings = rem.get("total_potential_savings", 0)
     col = C_BLUE
+    cur = "R" if ins.get("financial_impact", {}).get("currency") == "ZAR" else "$"
 
     rows = [
         ("Current RSI", f"{rem.get('current_rsi', 0):.3f}"),
         ("Projected RSI (after fixes)", f"{rem.get('simulated_rsi', 0):.3f}"),
-        ("Total Potential Savings", f"${savings:,.0f}/year"),
+        ("Total Potential Savings", f"{cur} {savings:,.0f}/year"),
         ("", ""),
     ]
     for i, step in enumerate(steps[:10], 1):
-        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves ${step['annual_savings_estimate']:,.0f}/yr"))
+        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves {cur} {step['annual_savings_estimate']:,.0f}/yr"))
     return build_cat_card("Remediation Roadmap — Before/After", col,
-                          f"{len(steps)} steps — ${savings:,.0f} savings",
+                          f"{len(steps)} steps — {cur} {savings:,.0f} savings",
                           rows, [], S)
 
 
@@ -852,39 +810,62 @@ def cat_data_breach_index(d, S):
 
 def cat_financial_impact(d, S):
     fin = d.get("financial_impact", {})
-    if fin.get("status") != "completed":
+    # Accept ZAR results (currency key present) or legacy completed status
+    if not fin or (not fin.get("currency") and fin.get("status") != "completed"):
         return build_cat_card("Financial Impact (FAIR Model)", C_BLUE, "N/A",
                               [("Status", "Revenue not provided — skipped")], [], S)
 
-    eal    = fin.get("estimated_annual_loss", {})
+    is_zar = fin.get("currency") == "ZAR"
+    cur    = "R" if is_zar else "$"
     sc     = fin.get("scenarios", {})
-    ins    = fin.get("insurance_recommendation", {})
-    most_l = eal.get("most_likely", 0)
-    col    = C_CRITICAL if fin.get("score", 50) < 30 else (C_RED if fin["score"] < 50 else
-              C_AMBER if fin["score"] < 70 else C_GREEN)
+    col    = C_CRITICAL if fin.get("score", 50) < 30 else (C_RED if fin.get("score", 50) < 50 else
+              C_AMBER if fin.get("score", 50) < 70 else C_GREEN)
 
-    rows = [
-        ("Industry",             fin.get("industry", "Other")),
-        ("Annual Revenue",       f"R {fin.get('annual_revenue_zar', 0):,.0f}"),
-        ("",                     ""),
-        ("Est. Annual Loss (Min)",  f"R {eal.get('minimum', 0):,.0f}"),
-        ("Est. Annual Loss (Likely)", f"R {most_l:,.0f}"),
-        ("Est. Annual Loss (Max)",    f"R {eal.get('maximum', 0):,.0f}"),
-        ("",                     ""),
-        ("Data Breach Loss",     f"R {sc.get('data_breach', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('data_breach', {}).get('probability', 0)})"),
-        ("  Records at risk",    f"{sc.get('data_breach', {}).get('estimated_records', 0):,} @ R{sc.get('data_breach', {}).get('cost_per_record', 0):,.0f}/rec"),
-        ("  POPIA regulatory",   f"R {sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
-        ("Ransomware Loss",      f"R {sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
-        ("  Avg downtime",       f"{sc.get('ransomware', {}).get('avg_downtime_days', 0)} days"),
-        ("  Ransom estimate",    f"R {sc.get('ransomware', {}).get('ransom_estimate', 0):,.0f}"),
-        ("Bus. Interruption",    f"R {sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
-        ("",                     ""),
-        ("Min. Insurance Cover", f"R {ins.get('minimum_cover_zar', 0):,.0f}"),
-        ("Rec. Insurance Cover", f"R {ins.get('recommended_cover_zar', 0):,.0f}"),
-        ("Premium Risk Tier",    ins.get("premium_risk_tier", "N/A")),
-    ]
+    if is_zar:
+        eal    = fin.get("estimated_annual_loss", {})
+        ins    = fin.get("insurance_recommendation", {})
+        most_l = eal.get("most_likely", 0)
+        rows = [
+            ("Industry",              fin.get("industry", "Other")),
+            ("Annual Revenue",        f"{cur} {fin.get('annual_revenue_zar', 0):,.0f}"),
+            ("",                      ""),
+            ("Est. Annual Loss (Min)",    f"{cur} {eal.get('minimum', 0):,.0f}"),
+            ("Est. Annual Loss (Likely)", f"{cur} {most_l:,.0f}"),
+            ("Est. Annual Loss (Max)",    f"{cur} {eal.get('maximum', 0):,.0f}"),
+            ("",                      ""),
+            ("Data Breach Loss",      f"{cur} {sc.get('data_breach', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('data_breach', {}).get('probability', 0)})"),
+            ("  Records at risk",     f"{sc.get('data_breach', {}).get('estimated_records', 0):,} @ {cur}{sc.get('data_breach', {}).get('cost_per_record', 0):,.0f}/rec"),
+            ("  POPIA regulatory",    f"{cur} {sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
+            ("Ransomware Loss",       f"{cur} {sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
+            ("  Avg downtime",        f"{sc.get('ransomware', {}).get('avg_downtime_days', 0)} days"),
+            ("  Ransom estimate",     f"{cur} {sc.get('ransomware', {}).get('ransom_estimate', 0):,.0f}"),
+            ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
+            ("",                      ""),
+            ("Min. Insurance Cover",  f"{cur} {ins.get('minimum_cover_zar', 0):,.0f}"),
+            ("Rec. Insurance Cover",  f"{cur} {ins.get('recommended_cover_zar', 0):,.0f}"),
+            ("Premium Risk Tier",     ins.get("premium_risk_tier", "N/A")),
+        ]
+    else:
+        total  = fin.get("total", {})
+        most_l = total.get("most_likely", 0)
+        ins    = fin.get("insurance_recommendations", {})
+        rows = [
+            ("Industry",              fin.get("industry", "Other")),
+            ("",                      ""),
+            ("Est. Annual Loss (Min)",    f"{cur} {total.get('min', 0):,.0f}"),
+            ("Est. Annual Loss (Likely)", f"{cur} {most_l:,.0f}"),
+            ("Est. Annual Loss (Max)",    f"{cur} {total.get('max', 0):,.0f}"),
+            ("",                      ""),
+            ("Data Breach",           f"{cur} {sc.get('data_breach', {}).get('most_likely', 0):,.0f}"),
+            ("Ransomware",            f"{cur} {sc.get('ransomware', {}).get('most_likely', 0):,.0f}"),
+            ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('most_likely', 0):,.0f}"),
+            ("",                      ""),
+            ("Suggested Deductible",  f"{cur} {ins.get('suggested_deductible', 0):,.0f}"),
+            ("Recommended Coverage",  f"{cur} {ins.get('recommended_coverage', 0):,.0f}"),
+        ]
+
     return build_cat_card("Financial Impact (FAIR Model)", col,
-                          f"R {most_l:,.0f}", rows, fin.get("issues", []), S)
+                          f"{cur} {most_l:,.0f}", rows, fin.get("issues", []), S)
 
 
 def cat_risk_mitigations(d, S):
@@ -953,7 +934,7 @@ def build_summary_table(results: dict, S) -> Table:
     # Insurance analytics
     ins       = results.get("insurance", {})
     rsi_score = ins.get("rsi", {}).get("rsi_score")
-    dbi_score = ins.get("dbi", {}).get("score")
+    dbi_score = ins.get("dbi", {}).get("dbi_score")
 
     rows = [
         row("SSL Grade",             ssl_grade,
@@ -985,24 +966,14 @@ def build_summary_table(results: dict, S) -> Table:
             row("Data Breach Index", f"{dbi_score}/100",
             _tl(dbi_score >= 70, dbi_score >= 40)))
 
-    # RSI / DBI / Financial Impact / Fraudulent Domains / Web Ranking
-    rsi      = cats.get("ransomware_risk", {})
-    rsi_val  = rsi.get("rsi_score", 0)
-    if rsi_val:
-        rows.append(row("Ransomware Susceptibility (RSI)", f"{rsi_val} / 1.0 — {rsi.get('rsi_label', 'N/A')}",
-                         C_CRITICAL if rsi_val >= 0.8 else C_RED if rsi_val >= 0.5 else C_AMBER if rsi_val >= 0.25 else C_GREEN))
-
-    dbi      = cats.get("data_breach_index", {})
-    dbi_val  = dbi.get("dbi_score", 0)
-    if dbi_val:
-        rows.append(row("Data Breach Index (DBI)", f"{dbi_val}/100 — {dbi.get('dbi_label', 'N/A')}",
-                         C_CRITICAL if dbi_val < 25 else C_RED if dbi_val < 50 else C_AMBER if dbi_val < 75 else C_GREEN))
-
-    fin       = cats.get("financial_impact", {})
-    if fin.get("status") == "completed":
-        fin_ml = fin.get("estimated_annual_loss", {}).get("most_likely", 0)
-        rows.append(row("Est. Annual Loss (FAIR)", f"R {fin_ml:,.0f}",
-                         C_CRITICAL if fin.get("score", 50) < 30 else C_AMBER if fin["score"] < 70 else C_GREEN))
+    # Est. Annual Loss from insurance analytics
+    fin_ins = ins.get("financial_impact", {})
+    fin_ml  = fin_ins.get("estimated_annual_loss", {}).get("most_likely")
+    if fin_ml is not None:
+        cur_sym   = "R" if fin_ins.get("currency") == "ZAR" else "$"
+        fin_score = fin_ins.get("score", 50)
+        rows.append(row("Est. Annual Loss", f"{cur_sym} {fin_ml:,.0f}",
+                         C_CRITICAL if fin_score < 30 else C_AMBER if fin_score < 70 else C_GREEN))
 
     fd_count = cats.get("fraudulent_domains", {}).get("fraudulent_domains_found", 0)
     if fd_count:
@@ -1109,7 +1080,7 @@ def generate_pdf(results: dict) -> bytes:
         story.append(PageBreak())
         story += section_header("INSURANCE ANALYTICS", S)
         story += cat_rsi(results, S)
-        story += cat_insurance_financial_impact(results, S)
+        story += cat_financial_impact(results.get("insurance", {}), S)
         story += cat_dbi(results, S)
         story += cat_remediation(results, S)
 

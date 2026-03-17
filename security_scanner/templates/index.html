@@ -190,43 +190,8 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) { showError(data.error || 'Failed to start scan.'); submitBtn.disabled = false; return; }
 
-    // Switch to progress view
-    form.style.display = 'none';
-    progress.style.display = 'block';
-    document.getElementById('scan-domain').textContent = domain;
-
-    const startTime = Date.now();
-    const timer = setInterval(() => {
-      const secs = Math.floor((Date.now() - startTime) / 1000);
-      const m = Math.floor(secs / 60);
-      const s = secs % 60;
-      document.getElementById('scan-elapsed').textContent =
-        `Elapsed: ${m}:${s.toString().padStart(2, '0')}`;
-    }, 1000);
-
-    // Poll for results
-    const poll = setInterval(async () => {
-      try {
-        const r = await fetch(data.poll_url);
-        const result = await r.json();
-        if (result.status === 'pending') {
-          return; // keep polling
-        }
-        clearInterval(poll);
-        clearInterval(timer);
-        if (result.status === 'failed') {
-          showError('Scan failed: ' + (result.error || 'Unknown error'));
-          form.style.display = 'block';
-          progress.style.display = 'none';
-          submitBtn.disabled = false;
-          return;
-        }
-        // Success — redirect to results
-        window.location.href = data.report_url;
-      } catch (err) {
-        // Network error — keep polling
-      }
-    }, 5000);
+    // Redirect immediately to results page — it handles live SSE progress
+    window.location.href = data.report_url;
   } catch (err) {
     showError('Network error: ' + err.message);
     submitBtn.disabled = false;

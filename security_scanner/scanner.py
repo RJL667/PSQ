@@ -2791,6 +2791,35 @@ class RiskScorer:
 # ---------------------------------------------------------------------------
 # 29. Ransomware Susceptibility Index (RSI)
 # ---------------------------------------------------------------------------
+# South African industry breach cost data (IBM 2025, translated to ZAR)
+SA_INDUSTRY_COSTS = {
+    "Public Sector":              {"breach_cost_zar": 76_730_000, "cost_per_record": 3273, "multiplier": 1.74},
+    "Healthcare":                 {"breach_cost_zar": 73_650_000, "cost_per_record": 3141, "multiplier": 1.67},
+    "Financial Services":         {"breach_cost_zar": 70_120_000, "cost_per_record": 2992, "multiplier": 1.59},
+    "Finance":                    {"breach_cost_zar": 70_120_000, "cost_per_record": 2992, "multiplier": 1.59},
+    "Hospitality":                {"breach_cost_zar": 57_330_000, "cost_per_record": 2445, "multiplier": 1.30},
+    "Services":                   {"breach_cost_zar": 56_890_000, "cost_per_record": 2426, "multiplier": 1.29},
+    "Industrial / Manufacturing": {"breach_cost_zar": 49_390_000, "cost_per_record": 2107, "multiplier": 1.12},
+    "Manufacturing":              {"breach_cost_zar": 49_390_000, "cost_per_record": 2107, "multiplier": 1.12},
+    "Energy":                     {"breach_cost_zar": 48_070_000, "cost_per_record": 2051, "multiplier": 1.09},
+    "Technology":                 {"breach_cost_zar": 47_630_000, "cost_per_record": 2032, "multiplier": 1.08},
+    "Tech":                       {"breach_cost_zar": 47_630_000, "cost_per_record": 2032, "multiplier": 1.08},
+    "Pharmaceuticals":            {"breach_cost_zar": 45_860_000, "cost_per_record": 1956, "multiplier": 1.04},
+    "Entertainment":              {"breach_cost_zar": 44_100_000, "cost_per_record": 1881, "multiplier": 1.00},
+    "Media":                      {"breach_cost_zar": 41_900_000, "cost_per_record": 1787, "multiplier": 0.95},
+    "Transportation":             {"breach_cost_zar": 39_690_000, "cost_per_record": 1693, "multiplier": 0.90},
+    "Education":                  {"breach_cost_zar": 37_490_000, "cost_per_record": 1599, "multiplier": 0.85},
+    "Research":                   {"breach_cost_zar": 37_490_000, "cost_per_record": 1599, "multiplier": 0.85},
+    "Communications":             {"breach_cost_zar": 37_040_000, "cost_per_record": 1580, "multiplier": 0.84},
+    "Consumer":                   {"breach_cost_zar": 37_040_000, "cost_per_record": 1580, "multiplier": 0.84},
+    "Retail":                     {"breach_cost_zar": 35_280_000, "cost_per_record": 1505, "multiplier": 0.80},
+    "Agriculture":                {"breach_cost_zar": 28_670_000, "cost_per_record": 1223, "multiplier": 0.65},
+    "Government":                 {"breach_cost_zar": 76_730_000, "cost_per_record": 3273, "multiplier": 1.74},
+    "Legal":                      {"breach_cost_zar": 56_890_000, "cost_per_record": 2426, "multiplier": 1.29},
+    "Other":                      {"breach_cost_zar": 44_100_000, "cost_per_record": 1881, "multiplier": 1.00},
+}
+
+# ---------------------------------------------------------------------------
 
 class RansomwareIndex:
     """
@@ -2947,12 +2976,17 @@ class FinancialImpactCalculator:
     RANSOM_PCT = 0.03  # 3% of annual revenue
 
     def calculate(self, categories: dict, rsi_result: dict,
-                  annual_revenue: float, industry: str = "other") -> dict:
+                  annual_revenue: float, industry: str = "other",
+                  annual_revenue_zar: int = 0) -> dict:
+
+        # Use ZAR path when ZAR revenue is provided (SA-specific model)
+        if annual_revenue_zar > 0:
+            return self._calculate_zar(categories, rsi_result, annual_revenue_zar, industry)
+
         daily_revenue = annual_revenue / 365 if annual_revenue > 0 else 5_000
 
         # --- Scenario 1: Data Breach ---
         breach_count = categories.get("breaches", {}).get("breach_count", 0)
-        # P(breach) based on history + technical posture
         tech_score = categories.get("ssl", {}).get("score", 50)
         if breach_count > 3:
             p_breach = 0.35
@@ -2960,11 +2994,9 @@ class FinancialImpactCalculator:
             p_breach = 0.20
         else:
             p_breach = 0.08
-        # Adjust by technical weakness
         p_breach = min(0.5, p_breach + (100 - tech_score) / 500)
 
         cost_per_record = self.COST_PER_RECORD.get(industry, 165)
-        # Estimate records from revenue proxy
         est_records = max(1000, int(annual_revenue / 50_000)) if annual_revenue > 0 else 5000
         reg_fine = self.REGULATORY_FINE.get(industry, self.REGULATORY_FINE["other"])
 
@@ -2984,7 +3016,7 @@ class FinancialImpactCalculator:
 
         # --- Scenario 2: Ransomware ---
         rsi = rsi_result.get("rsi_score", 0.1)
-        downtime_days = 22  # Industry average
+        downtime_days = 22
         ransom_demand = min(5_000_000, annual_revenue * self.RANSOM_PCT) if annual_revenue > 0 else 50_000
         ir_cost = min(500_000, max(50_000, annual_revenue * 0.005)) if annual_revenue > 0 else 75_000
 
@@ -3060,6 +3092,122 @@ class FinancialImpactCalculator:
             },
             "annual_revenue": annual_revenue,
             "industry": industry,
+            "currency": "USD",
+        }
+
+    def _calculate_zar(self, categories: dict, rsi_result: dict,
+                       annual_revenue_zar: int, industry: str) -> dict:
+        """SA-specific ZAR calculation using IBM 2025 SA breach cost data and POPIA fines."""
+        # Normalise industry key
+        industry_key = industry.title()
+        industry_data = SA_INDUSTRY_COSTS.get(industry_key, SA_INDUSTRY_COSTS["Other"])
+        rsi_score = rsi_result.get("rsi_score", 0.1)
+        daily_revenue = annual_revenue_zar / 365
+
+        # --- Scenario 1: Data Breach (ZAR) ---
+        overall_score = categories.get("_overall_score", 500)  # fallback
+        p_breach = min(1.0, max(0.0, ((100 - overall_score / 10) / 100) * industry_data["multiplier"] * 0.3))
+        estimated_records = max(100, annual_revenue_zar // 50_000)
+        cost_per_record = industry_data["cost_per_record"]
+        regulatory_fine = annual_revenue_zar * 0.02  # POPIA max ~2% of annual turnover
+        data_breach_loss = p_breach * (estimated_records * cost_per_record + regulatory_fine)
+
+        # --- Scenario 2: Ransomware (ZAR) ---
+        avg_downtime_days = 22
+        if annual_revenue_zar < 50_000_000:
+            ransom_estimate = 500_000
+            ir_cost = 500_000
+        elif annual_revenue_zar < 200_000_000:
+            ransom_estimate = 2_500_000
+            ir_cost = 1_500_000
+        elif annual_revenue_zar < 500_000_000:
+            ransom_estimate = 10_000_000
+            ir_cost = 3_000_000
+        else:
+            ransom_estimate = 50_000_000
+            ir_cost = 5_000_000
+        ransomware_loss = rsi_score * (avg_downtime_days * daily_revenue * 0.5 + ransom_estimate + ir_cost)
+
+        # --- Scenario 3: Business Interruption (ZAR) ---
+        waf_detected = categories.get("waf", {}).get("detected", False)
+        cdn_detected = categories.get("cloud_cdn", {}).get("cdn_detected", False)
+        single_asn = categories.get("external_ips", {}).get("unique_asns", 2) <= 1
+        p_interruption = min(0.5, 0.05 + (0.05 if not waf_detected else 0) + (0.05 if not cdn_detected else 0) + (0.05 if single_asn else 0))
+        impact_factor = min(0.8, 0.3 + (0.15 if not waf_detected else 0) + (0.15 if not cdn_detected else 0) + (0.1 if single_asn else 0))
+        bi_loss = p_interruption * (5 * daily_revenue * impact_factor)
+
+        most_likely = round(data_breach_loss + ransomware_loss + bi_loss)
+        minimum = round(most_likely * 0.15)
+        maximum = round(most_likely * 3.5)
+        recommended_cover = max(1_000_000, round(maximum * 1.2, -5))
+        minimum_cover = max(500_000, round(most_likely, -5))
+
+        if rsi_score >= 0.7:
+            premium_tier = "Very High"
+        elif rsi_score >= 0.5:
+            premium_tier = "High"
+        elif rsi_score >= 0.25:
+            premium_tier = "Medium"
+        else:
+            premium_tier = "Low"
+
+        loss_pct = most_likely / annual_revenue_zar if annual_revenue_zar > 0 else 0
+        if loss_pct >= 0.10:
+            fin_score = 10
+        elif loss_pct >= 0.05:
+            fin_score = 30
+        elif loss_pct >= 0.02:
+            fin_score = 50
+        elif loss_pct >= 0.01:
+            fin_score = 70
+        else:
+            fin_score = 90
+
+        return {
+            "currency": "ZAR",
+            "industry": industry,
+            "annual_revenue_zar": annual_revenue_zar,
+            "score": fin_score,
+            "estimated_annual_loss": {
+                "minimum": minimum,
+                "most_likely": most_likely,
+                "maximum": maximum,
+            },
+            "scenarios": {
+                "data_breach": {
+                    "probability": round(p_breach, 3),
+                    "estimated_loss": round(data_breach_loss),
+                    "cost_per_record": cost_per_record,
+                    "estimated_records": estimated_records,
+                    "regulatory_fine": round(regulatory_fine),
+                },
+                "ransomware": {
+                    "rsi_score": rsi_score,
+                    "estimated_loss": round(ransomware_loss),
+                    "avg_downtime_days": avg_downtime_days,
+                    "ransom_estimate": ransom_estimate,
+                },
+                "business_interruption": {
+                    "probability": round(p_interruption, 3),
+                    "estimated_loss": round(bi_loss),
+                },
+            },
+            "insurance_recommendation": {
+                "minimum_cover_zar": minimum_cover,
+                "recommended_cover_zar": recommended_cover,
+                "premium_risk_tier": premium_tier,
+            },
+            # Keep total key for template compatibility
+            "total": {
+                "min": minimum,
+                "most_likely": most_likely,
+                "max": maximum,
+            },
+            "insurance_recommendations": {
+                "suggested_deductible": minimum_cover,
+                "expected_annual_loss": most_likely,
+                "recommended_coverage": recommended_cover,
+            },
         }
 
 
@@ -3469,9 +3617,12 @@ class SecurityScanner:
             rsi_result = rsi_calc.calculate(cat_results, industry, annual_revenue)
             results["insurance"]["rsi"] = rsi_result
 
-            # Financial Impact
+            # Financial Impact — use ZAR model if annual_revenue_zar provided
             fin_calc = FinancialImpactCalculator()
-            fin_result = fin_calc.calculate(cat_results, rsi_result, annual_revenue, industry)
+            fin_result = fin_calc.calculate(
+                cat_results, rsi_result, annual_revenue, industry,
+                annual_revenue_zar=annual_revenue_zar
+            )
             results["insurance"]["financial_impact"] = fin_result
 
             # DBI
@@ -3481,7 +3632,9 @@ class SecurityScanner:
             # Remediation Simulator
             sim = RemediationSimulator()
             results["insurance"]["remediation"] = sim.calculate(
-                cat_results, rsi_result, fin_result, annual_revenue, industry
+                cat_results, rsi_result, fin_result,
+                annual_revenue_zar if annual_revenue_zar > 0 else annual_revenue,
+                industry
             )
         except Exception as e:
             results["insurance"]["error"] = str(e)

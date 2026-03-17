@@ -186,7 +186,7 @@ def fetch_scan(scan_id: str):
 # ---------------------------------------------------------------------------
 
 def run_scan(scan_id: str, domain: str, industry: str = "other",
-             annual_revenue: float = 0, country: str = "",
+             annual_revenue: float = 0, annual_revenue_zar: int = 0, country: str = "",
              include_fraudulent_domains: bool = False):
     progress_q = queue.Queue()
     _scan_progress[scan_id] = progress_q
@@ -207,6 +207,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
             results = scanner.scan(
                 domain, on_progress=on_progress,
                 industry=industry, annual_revenue=annual_revenue,
+                annual_revenue_zar=annual_revenue_zar,
                 country=country,
                 include_fraudulent_domains=include_fraudulent_domains,
             )
@@ -233,6 +234,11 @@ def valid_domain(domain: str) -> bool:
 # Routes
 # ---------------------------------------------------------------------------
 
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
 @app.route("/api/scan", methods=["POST"])
 def start_scan():
     data = request.get_json(silent=True) or {}
@@ -250,6 +256,10 @@ def start_scan():
         annual_revenue = float(data.get("annual_revenue", 0))
     except (ValueError, TypeError):
         annual_revenue = 0
+    try:
+        annual_revenue_zar = int(data.get("annual_revenue_zar", 0))
+    except (ValueError, TypeError):
+        annual_revenue_zar = 0
     country = str(data.get("country", "")).strip()
     include_fraudulent_domains = bool(data.get("include_fraudulent_domains", False))
 
@@ -258,7 +268,7 @@ def start_scan():
 
     t = threading.Thread(
         target=run_scan,
-        args=(scan_id, domain, industry, annual_revenue, country,
+        args=(scan_id, domain, industry, annual_revenue, annual_revenue_zar, country,
               include_fraudulent_domains),
         daemon=True,
     )
