@@ -164,7 +164,27 @@ class SSLChecker:
 # ---------------------------------------------------------------------------
 
 class EmailSecurityChecker:
-    DKIM_SELECTORS = ["default", "google", "selector1", "selector2", "mail", "dkim", "k1", "smtp"]
+    DKIM_SELECTORS = [
+        # Google / Gmail
+        "google", "google2", "gm1", "gm2",
+        # Microsoft / Office 365
+        "selector1", "selector2",
+        # Generic / common
+        "default", "mail", "dkim", "k1", "k2", "smtp", "email",
+        # Transactional / marketing ESPs
+        "sendgrid", "s1", "s2", "smtpapi",
+        "mandrill", "mte1", "mte2",
+        "mailchimp", "mc",
+        "mailgun", "mg",
+        "postmark", "pm",
+        "amazonses", "ses", "ug7nbmlcpnkfm3bm5tul7oy2kqoyno3s",
+        "everlytickey1", "everlytickey2", "everlytic",
+        # Security / enterprise
+        "mimecast", "protonmail",
+        "zendesk", "zendesk1", "zendesk2",
+        # CMS / platforms
+        "cm", "turbo-smtp", "sparkpost",
+    ]
 
     def check(self, domain: str) -> dict:
         result = {
@@ -194,12 +214,59 @@ class EmailSecurityChecker:
             for rdata in answers:
                 txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
                 if txt.startswith("v=spf1"):
-                    valid = "all" in txt
-                    return {"present": True, "valid": valid, "record": txt,
-                            "dangerous": "+all" in txt}
+                    has_all = "all" in txt
+                    has_redirect = "redirect=" in txt
+                    valid = has_all or has_redirect
+                    # Count DNS lookups in SPF chain (include, a, mx, redirect, exists)
+                    dns_lookups = self._count_spf_lookups(txt, depth=0)
+                    return {
+                        "present": True, "valid": valid, "record": txt,
+                        "dangerous": "+all" in txt,
+                        "has_redirect": has_redirect,
+                        "dns_lookups": dns_lookups,
+                        "exceeds_lookup_limit": dns_lookups > 10,
+                    }
         except Exception:
             pass
-        return {"present": False, "valid": False, "record": None, "dangerous": False}
+        return {"present": False, "valid": False, "record": None, "dangerous": False,
+                "has_redirect": False, "dns_lookups": 0, "exceeds_lookup_limit": False}
+
+    def _count_spf_lookups(self, spf_record: str, depth: int = 0) -> int:
+        """Count DNS lookup mechanisms in SPF chain (max 10 per RFC 7208)."""
+        if depth > 5:
+            return 0
+        count = 0
+        includes = re.findall(r"include:(\S+)", spf_record)
+        count += len(includes)
+        count += len(re.findall(r"\ba\b|\ba:", spf_record))
+        count += len(re.findall(r"\bmx\b|\bmx:", spf_record))
+        count += len(re.findall(r"exists:", spf_record))
+        redirect = re.search(r"redirect=(\S+)", spf_record)
+        if redirect:
+            count += 1
+        # Follow includes to count nested lookups
+        for inc_domain in includes[:5]:
+            try:
+                inc_answers = dns.resolver.resolve(inc_domain.rstrip("."), "TXT", lifetime=3)
+                for rd in inc_answers:
+                    inc_txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rd.strings)
+                    if inc_txt.startswith("v=spf1"):
+                        count += self._count_spf_lookups(inc_txt, depth + 1)
+                        break
+            except Exception:
+                pass
+        # Follow redirect
+        if redirect:
+            try:
+                red_answers = dns.resolver.resolve(redirect.group(1).rstrip("."), "TXT", lifetime=3)
+                for rd in red_answers:
+                    red_txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rd.strings)
+                    if red_txt.startswith("v=spf1"):
+                        count += self._count_spf_lookups(red_txt, depth + 1)
+                        break
+            except Exception:
+                pass
+        return count
 
     def _check_dmarc(self, domain: str) -> dict:
         try:
@@ -209,19 +276,40 @@ class EmailSecurityChecker:
                 if "v=DMARC1" in txt:
                     match = re.search(r"p=(\w+)", txt)
                     policy = match.group(1) if match else "none"
-                    return {"present": True, "policy": policy, "record": txt}
+                    # Parse pct= (percentage enforcement, default 100)
+                    pct_match = re.search(r"pct=(\d+)", txt)
+                    pct = int(pct_match.group(1)) if pct_match else 100
+                    # Parse sp= (subdomain policy, defaults to p= value)
+                    sp_match = re.search(r"sp=(\w+)", txt)
+                    subdomain_policy = sp_match.group(1) if sp_match else policy
+                    # Check for rua= (aggregate reporting)
+                    has_reporting = "rua=" in txt
+                    return {
+                        "present": True, "policy": policy, "record": txt,
+                        "pct": pct,
+                        "partial_enforcement": pct < 100,
+                        "subdomain_policy": subdomain_policy,
+                        "has_reporting": has_reporting,
+                    }
         except Exception:
             pass
-        return {"present": False, "policy": None, "record": None}
+        return {"present": False, "policy": None, "record": None,
+                "pct": 0, "partial_enforcement": False,
+                "subdomain_policy": None, "has_reporting": False}
 
     def _check_dkim(self, domain: str) -> dict:
         found = []
-        for selector in self.DKIM_SELECTORS:
+
+        def _probe(selector):
             try:
-                dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=5)
-                found.append(selector)
+                dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=3)
+                return selector
             except Exception:
-                pass
+                return None
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            results = pool.map(_probe, self.DKIM_SELECTORS)
+            found = [s for s in results if s is not None]
         return {"selectors_found": found}
 
     def _check_mx(self, domain: str) -> dict:
@@ -236,20 +324,31 @@ class EmailSecurityChecker:
 
     def _calculate_score(self, spf, dmarc, dkim) -> tuple:
         score, issues = 10, []
+        # SPF scoring
         if not spf["present"]:
             score -= 3; issues.append("No SPF record — spoofing risk")
         elif spf.get("dangerous"):
             score -= 3; issues.append("SPF uses '+all' — allows any server to send on your behalf")
         elif not spf["valid"]:
-            score -= 1; issues.append("SPF record may be invalid")
+            score -= 1; issues.append("SPF record may be invalid (no 'all' or 'redirect=' mechanism)")
+        if spf.get("exceeds_lookup_limit"):
+            score -= 1; issues.append(f"SPF exceeds 10 DNS lookup limit ({spf['dns_lookups']} lookups) — may cause validation failures")
+        # DMARC scoring
         if not dmarc["present"]:
             score -= 4; issues.append("No DMARC record — phishing risk")
         elif dmarc["policy"] == "none":
-            score -= 2; issues.append("DMARC policy is 'none' — no enforcement")
+            score -= 2; issues.append("DMARC policy is 'none' — not enforced")
         elif dmarc["policy"] == "quarantine":
             score -= 1; issues.append("DMARC policy is 'quarantine' — consider upgrading to 'reject'")
+        if dmarc.get("partial_enforcement"):
+            score -= 1; issues.append(f"DMARC pct={dmarc['pct']}% — only partial enforcement, should be 100%")
+        if dmarc["present"] and dmarc.get("subdomain_policy") == "none" and dmarc["policy"] != "none":
+            issues.append("DMARC subdomain policy (sp=none) is weaker than main domain policy")
+        if dmarc["present"] and not dmarc.get("has_reporting"):
+            issues.append("DMARC has no rua= reporting — no visibility into authentication failures")
+        # DKIM scoring
         if not dkim["selectors_found"]:
-            score -= 2; issues.append("No DKIM selectors found for common selector names")
+            score -= 2; issues.append("No DKIM selectors found across 40 common selector names")
         return max(0, score), issues
 
 
@@ -3074,7 +3173,7 @@ class FinancialImpactCalculator:
         expected_annual = round(total_likely, -3)
         coverage_limit = round(total_max * 1.2, -3)
 
-        return {
+        output = {
             "scenarios": {
                 "data_breach": data_breach,
                 "ransomware": ransomware,
@@ -3094,6 +3193,8 @@ class FinancialImpactCalculator:
             "industry": industry,
             "currency": "USD",
         }
+        output["mitigations"] = self._build_mitigations(categories, output)
+        return output
 
     def _calculate_zar(self, categories: dict, rsi_result: dict,
                        annual_revenue_zar: int, industry: str) -> dict:
@@ -3208,6 +3309,173 @@ class FinancialImpactCalculator:
                 "expected_annual_loss": most_likely,
                 "recommended_coverage": recommended_cover,
             },
+        }
+        # Append risk mitigation recommendations
+        output["mitigations"] = self._build_mitigations(categories, output)
+        return output
+
+    def _build_mitigations(self, categories: dict, fin_output: dict) -> dict:
+        """
+        Analyse scan findings and produce prioritised remediation steps
+        with estimated cost reduction per finding (Black Kite-style).
+        """
+        total_loss = fin_output.get("total", {}).get("most_likely", 0)
+        if total_loss <= 0:
+            return {"findings": [], "current_loss": 0, "mitigated_loss": 0, "savings": 0}
+
+        findings = []
+
+        # --- Critical findings ---
+        ssl = categories.get("ssl", {})
+        if ssl.get("grade", "A") in ("D", "E", "F"):
+            findings.append({"severity": "Critical", "category": "SSL/TLS",
+                             "finding": f"SSL grade {ssl.get('grade', '?')}",
+                             "recommendation": "Upgrade to TLS 1.2+ with strong cipher suites",
+                             "reduction_pct": 0.08})
+
+        rdp_exposed = False
+        for svc in categories.get("high_risk_protocols", {}).get("exposed_services", []):
+            if svc.get("port") in (3389, 3388):
+                rdp_exposed = True
+                break
+        if rdp_exposed:
+            findings.append({"severity": "Critical", "category": "Remote Access",
+                             "finding": "RDP port exposed to internet",
+                             "recommendation": "Disable public RDP; use VPN or zero-trust access",
+                             "reduction_pct": 0.15})
+
+        kev_count = 0
+        for ip_data in categories.get("shodan_vulns", {}).get("ip_results", {}).values():
+            kev_count += len([v for v in ip_data.get("vulns", []) if v.get("kev")])
+        if kev_count > 0:
+            findings.append({"severity": "Critical", "category": "Patching",
+                             "finding": f"{kev_count} CISA KEV (actively exploited) vulnerabilities",
+                             "recommendation": "Patch all KEV-listed CVEs immediately",
+                             "reduction_pct": min(0.12, kev_count * 0.04)})
+
+        # --- High findings ---
+        dmarc = categories.get("email_security", {}).get("dmarc", {})
+        if not dmarc.get("present"):
+            findings.append({"severity": "High", "category": "Email Security",
+                             "finding": "No DMARC record",
+                             "recommendation": "Implement DMARC with p=reject policy",
+                             "reduction_pct": 0.06})
+        elif dmarc.get("policy") == "none":
+            findings.append({"severity": "High", "category": "Email Security",
+                             "finding": "DMARC policy is 'none' — not enforced",
+                             "recommendation": "Upgrade DMARC policy to p=quarantine or p=reject",
+                             "reduction_pct": 0.04})
+
+        spf = categories.get("email_security", {}).get("spf", {})
+        if not spf.get("present"):
+            findings.append({"severity": "High", "category": "Email Security",
+                             "finding": "No SPF record",
+                             "recommendation": "Add SPF record to prevent email spoofing",
+                             "reduction_pct": 0.03})
+
+        if not categories.get("waf", {}).get("detected"):
+            findings.append({"severity": "High", "category": "WAF/DDoS",
+                             "finding": "No WAF or DDoS protection detected",
+                             "recommendation": "Deploy a WAF (Cloudflare, AWS WAF, etc.)",
+                             "reduction_pct": 0.07})
+
+        exposed_db = [s for s in categories.get("high_risk_protocols", {}).get("exposed_services", [])
+                      if s.get("port") in (3306, 5432, 27017, 6379, 9200, 11211)]
+        if exposed_db:
+            findings.append({"severity": "High", "category": "Database Exposure",
+                             "finding": f"{len(exposed_db)} database port(s) exposed to internet",
+                             "recommendation": "Restrict database access to private networks/VPN",
+                             "reduction_pct": min(0.10, len(exposed_db) * 0.04)})
+
+        breach_count = categories.get("breaches", {}).get("breach_count", 0)
+        if breach_count >= 3:
+            findings.append({"severity": "High", "category": "Credential Hygiene",
+                             "finding": f"Domain appears in {breach_count} known breaches",
+                             "recommendation": "Enforce password resets, enable MFA across all accounts",
+                             "reduction_pct": 0.05})
+
+        # --- Medium findings ---
+        if ssl.get("grade", "A") in ("C",):
+            findings.append({"severity": "Medium", "category": "SSL/TLS",
+                             "finding": f"SSL grade {ssl.get('grade', 'C')} — weak configuration",
+                             "recommendation": "Enforce HTTPS, disable weak ciphers/protocols",
+                             "reduction_pct": 0.04})
+
+        headers = categories.get("http_headers", {})
+        if headers.get("score", 100) < 50:
+            findings.append({"severity": "Medium", "category": "HTTP Headers",
+                             "finding": f"Security headers score {headers.get('score', 0)}/100",
+                             "recommendation": "Add CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy",
+                             "reduction_pct": 0.03})
+
+        exposed_admin = categories.get("exposed_admin", {}).get("exposed_paths", [])
+        if exposed_admin:
+            findings.append({"severity": "Medium", "category": "Admin Exposure",
+                             "finding": f"{len(exposed_admin)} admin/sensitive paths publicly accessible",
+                             "recommendation": "Restrict admin panels to VPN/internal network; add authentication",
+                             "reduction_pct": min(0.05, len(exposed_admin) * 0.015)})
+
+        dkim = categories.get("email_security", {}).get("dkim", {})
+        if not dkim.get("selectors_found"):
+            findings.append({"severity": "Medium", "category": "Email Security",
+                             "finding": "No DKIM signing detected",
+                             "recommendation": "Enable DKIM signing on your mail server",
+                             "reduction_pct": 0.02})
+
+        vpn = categories.get("vpn_remote", {})
+        if vpn.get("portals_found"):
+            findings.append({"severity": "Medium", "category": "VPN/Remote Access",
+                             "finding": f"VPN/remote access portal detected ({', '.join(vpn.get('portals_found', [])[:3])})",
+                             "recommendation": "Ensure MFA is enforced; implement zero-trust network access",
+                             "reduction_pct": 0.04})
+
+        if not categories.get("cloud_cdn", {}).get("cdn_detected"):
+            findings.append({"severity": "Medium", "category": "CDN/Resilience",
+                             "finding": "No CDN detected",
+                             "recommendation": "Deploy a CDN for DDoS resilience and availability",
+                             "reduction_pct": 0.02})
+
+        tech = categories.get("tech_stack", {})
+        eol_tech = [t for t in tech.get("technologies", []) if t.get("end_of_life")]
+        if eol_tech:
+            findings.append({"severity": "Medium", "category": "Technology Stack",
+                             "finding": f"{len(eol_tech)} end-of-life technology component(s) detected",
+                             "recommendation": "Upgrade to supported versions to receive security patches",
+                             "reduction_pct": min(0.05, len(eol_tech) * 0.02)})
+
+        dehashed = categories.get("dehashed", {})
+        leak_count = dehashed.get("total_results", 0)
+        if leak_count > 100:
+            findings.append({"severity": "Medium", "category": "Credential Leaks",
+                             "finding": f"{leak_count} credentials found in dark web/leak databases",
+                             "recommendation": "Force password resets for affected accounts; enforce MFA",
+                             "reduction_pct": 0.04})
+        elif leak_count > 0:
+            findings.append({"severity": "Medium", "category": "Credential Leaks",
+                             "finding": f"{leak_count} credential(s) in leak databases",
+                             "recommendation": "Reset affected passwords; enable MFA",
+                             "reduction_pct": 0.02})
+
+        # Sort by severity then reduction_pct
+        severity_order = {"Critical": 0, "High": 1, "Medium": 2}
+        findings.sort(key=lambda f: (severity_order.get(f["severity"], 3), -f["reduction_pct"]))
+
+        # Calculate cumulative savings (cap at 85% of total loss)
+        cumulative_reduction = 0.0
+        for f in findings:
+            f["estimated_savings"] = round(total_loss * f["reduction_pct"])
+            cumulative_reduction += f["reduction_pct"]
+
+        cumulative_reduction = min(0.85, cumulative_reduction)
+        total_savings = round(total_loss * cumulative_reduction)
+        mitigated_loss = total_loss - total_savings
+
+        return {
+            "findings": findings,
+            "current_loss": total_loss,
+            "mitigated_loss": mitigated_loss,
+            "savings": total_savings,
+            "reduction_pct": round(cumulative_reduction * 100, 1),
         }
 
 
@@ -3333,33 +3601,33 @@ class RemediationSimulator:
     # Remediation catalog: maps issue patterns to actions
     REMEDIATION_MAP = [
         # (checker_key, condition_fn, action, est_cost, rsi_reduction)
-        ("vpn_remote", lambda c: c.get("rdp_exposed"), "Block RDP (port 3389) from public internet — use VPN/ZTNA instead", "$500–$2,000", 0.35),
+        ("vpn_remote", lambda c: c.get("rdp_exposed"), "Block RDP (port 3389) from public internet — use VPN/ZTNA instead", "R9,000–R36,000", 0.35),
         ("high_risk_protocols", lambda c: any(s.get("port") in (27017, 6379, 9200, 5432, 1433) for s in c.get("exposed_services", [])),
-         "Firewall exposed database ports (MongoDB, Redis, PostgreSQL, etc.)", "$500–$2,000", 0.15),
+         "Firewall exposed database ports (MongoDB, Redis, PostgreSQL, etc.)", "R9,000–R36,000", 0.15),
         ("shodan_vulns", lambda c: c.get("kev_count", 0) > 0,
-         "Patch CISA KEV vulnerabilities — actively exploited in the wild", "$1,000–$5,000", 0.10),
+         "Patch CISA KEV vulnerabilities — actively exploited in the wild", "R18,000–R90,000", 0.10),
         ("shodan_vulns", lambda c: c.get("high_epss_count", 0) > 0,
-         "Patch high-EPSS CVEs (>50% exploitation probability)", "$1,000–$5,000", 0.05),
+         "Patch high-EPSS CVEs (>50% exploitation probability)", "R18,000–R90,000", 0.05),
         ("email_security", lambda c: not c.get("dmarc", {}).get("present"),
-         "Implement DMARC with 'quarantine' or 'reject' policy", "$200–$500", 0.05),
+         "Implement DMARC with 'quarantine' or 'reject' policy", "R3,600–R9,000", 0.05),
         ("waf", lambda c: not c.get("detected"),
-         "Deploy a Web Application Firewall (Cloudflare, AWS WAF, etc.)", "$0–$500/mo", 0.05),
+         "Deploy a Web Application Firewall (Cloudflare, AWS WAF, etc.)", "R0–R9,000/mo", 0.05),
         ("ssl", lambda c: c.get("grade", "A") in ("D", "E", "F"),
-         "Upgrade SSL/TLS configuration — enable TLS 1.2+, strong ciphers", "$0–$200", 0.05),
+         "Upgrade SSL/TLS configuration — enable TLS 1.2+, strong ciphers", "R0–R3,600", 0.05),
         ("info_disclosure", lambda c: any(p.get("risk_level") == "critical" for p in c.get("exposed_paths", [])),
-         "Remove exposed sensitive files (.env, .git, backups) from web root", "$0–$500", 0.03),
+         "Remove exposed sensitive files (.env, .git, backups) from web root", "R0–R9,000", 0.03),
         ("exposed_admin", lambda c: c.get("critical_count", 0) > 0,
-         "Restrict admin panel access — IP whitelist or VPN-only", "$200–$1,000", 0.02),
+         "Restrict admin panel access — IP whitelist or VPN-only", "R3,600–R18,000", 0.02),
         ("dnsbl", lambda c: c.get("blacklisted"),
-         "Investigate and resolve IP/domain blacklisting", "$500–$2,000", 0.05),
+         "Investigate and resolve IP/domain blacklisting", "R9,000–R36,000", 0.05),
         ("dehashed", lambda c: c.get("total_entries", 0) > 100,
-         "Force password reset for leaked credentials and enable MFA", "$500–$2,000", 0.05),
+         "Force password reset for leaked credentials and enable MFA", "R9,000–R36,000", 0.05),
         ("breaches", lambda c: c.get("breach_count", 0) > 0,
-         "Implement breach response plan and credential monitoring", "$1,000–$5,000", 0.02),
+         "Implement breach response plan and credential monitoring", "R18,000–R90,000", 0.02),
         ("fraudulent_domains", lambda c: c.get("lookalike_count", 0) > 5,
-         "Register key lookalike domains defensively and set up monitoring", "$500–$2,000", 0.01),
+         "Register key lookalike domains defensively and set up monitoring", "R9,000–R36,000", 0.01),
         ("privacy_compliance", lambda c: c.get("score", 100) < 50,
-         "Update privacy policy to cover all POPIA/GDPR required sections", "$500–$2,000", 0.01),
+         "Update privacy policy to cover all POPIA/GDPR required sections", "R9,000–R36,000", 0.01),
     ]
 
     def calculate(self, categories: dict, rsi_result: dict,
