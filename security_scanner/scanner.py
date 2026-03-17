@@ -3065,7 +3065,127 @@ class FinancialImpactCalculator:
     """
     Estimates monetary loss in ZAR across three scenarios:
     data breach, ransomware, business interruption.
+    Includes risk mitigation analysis with per-finding cost reduction.
     """
+
+    MITIGATIONS = [
+        {"pattern": r"RDP.*exposed",                          "severity": "Critical", "scenario": "ransomware",             "rsi_reduction": 0.35, "label": "Block RDP from public internet and enforce VPN/Zero Trust access"},
+        {"pattern": r"SSL certificate has EXPIRED",           "severity": "Critical", "scenario": "data_breach",            "probability_reduction": 0.15, "label": "Renew SSL certificate immediately"},
+        {"pattern": r"listed in CISA KEV",                    "severity": "Critical", "scenario": "ransomware",             "rsi_reduction": 0.10, "label": "Patch CISA Known Exploited Vulnerabilities within 48 hours"},
+        {"pattern": r"critical CVE",                          "severity": "Critical", "scenario": "ransomware",             "rsi_reduction": 0.10, "label": "Patch critical CVEs on public-facing servers"},
+        {"pattern": r"CRITICAL:.*Sensitive file exposed",     "severity": "Critical", "scenario": "data_breach",            "probability_reduction": 0.10, "label": "Restrict access to exposed sensitive files"},
+        {"pattern": r"high.severity CVE|high CVE",            "severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.05, "label": "Patch high-severity CVEs within 30 days"},
+        {"pattern": r"No WAF detected",                       "severity": "High",     "scenario": "both",                   "rsi_reduction": 0.05, "bi_reduction": 0.05, "label": "Deploy a Web Application Firewall (WAF)"},
+        {"pattern": r"No SPF record|No DMARC record",         "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Implement email authentication (SPF/DMARC/DKIM)"},
+        {"pattern": r"password.*leaked|Plaintext.*password",   "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.10, "label": "Force password resets for all leaked credentials"},
+        {"pattern": r"credential record.*found in Dehashed",  "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Audit and rotate credentials exposed in data leaks"},
+        {"pattern": r"admin.*exposed|login.*exposed",          "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Restrict access to admin and login panels"},
+        {"pattern": r"Telnet|FTP.*exposed|high.risk.*protocol","severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.15, "label": "Disable insecure protocols (Telnet, FTP, etc.)"},
+        {"pattern": r"SSL.*grade.*(C|D|F|T)",                  "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Upgrade SSL/TLS configuration to grade A"},
+        {"pattern": r"HTTPS not enforced",                     "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Enforce HTTPS across all endpoints"},
+        {"pattern": r"EOL software|end.of.life",               "severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.05, "label": "Update end-of-life software components"},
+        {"pattern": r"Self.hosted payment",                    "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Migrate to PCI-compliant payment provider"},
+        {"pattern": r"DNSSEC.*not enabled",                    "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Enable DNSSEC for DNS integrity"},
+        {"pattern": r"Missing security header|HSTS.*missing|X-Frame|Content-Security-Policy", "severity": "Medium", "scenario": "data_breach", "probability_reduction": 0.02, "label": "Implement security headers (HSTS, CSP, X-Frame-Options)"},
+        {"pattern": r"blacklist|blocklist|listed on",          "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.03, "label": "Resolve DNS blocklist entries"},
+        {"pattern": r"lookalike domain|typosquat|fraudulent",  "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.03, "label": "Monitor and take down fraudulent lookalike domains"},
+        {"pattern": r"single ASN|unique_asns.*1",              "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.05, "label": "Add hosting redundancy across multiple providers"},
+        {"pattern": r"No VPN.*detected",                       "severity": "Medium",   "scenario": "ransomware",             "rsi_reduction": 0.03, "label": "Implement VPN or Zero Trust Network Access for remote workers"},
+    ]
+
+    def _build_mitigations(self, results: dict, scenarios: dict) -> dict:
+        """Analyse scan findings and estimate per-finding cost reduction."""
+        # Collect all issues from every checker
+        all_issues = []
+        for cat_name, cat_data in results.items():
+            if isinstance(cat_data, dict):
+                for issue in cat_data.get("issues", []):
+                    all_issues.append({"category": cat_name, "text": str(issue)})
+
+        db_loss = scenarios["data_breach"]["estimated_loss"]
+        rw_loss = scenarios["ransomware"]["estimated_loss"]
+        bi_loss = scenarios["business_interruption"]["estimated_loss"]
+        rsi_score = scenarios["ransomware"].get("rsi_score", 0)
+        p_breach = scenarios["data_breach"].get("probability", 0)
+
+        matched_labels = set()
+        findings = []
+
+        for mit in self.MITIGATIONS:
+            pat = re.compile(mit["pattern"], re.IGNORECASE)
+            matched_issue = None
+            for issue in all_issues:
+                if pat.search(issue["text"]):
+                    matched_issue = issue["text"]
+                    break
+            if not matched_issue:
+                continue
+            if mit["label"] in matched_labels:
+                continue
+            matched_labels.add(mit["label"])
+
+            savings = 0
+            scenario_impact = mit["scenario"]
+
+            if "rsi_reduction" in mit:
+                # Reduction in ransomware loss proportional to RSI factor removal
+                if rsi_score > 0:
+                    savings += rw_loss * (mit["rsi_reduction"] / rsi_score)
+                else:
+                    savings += 0
+
+            if "probability_reduction" in mit:
+                # Reduction in data breach loss from lowering breach probability
+                if p_breach > 0:
+                    savings += db_loss * (mit["probability_reduction"] / p_breach)
+                else:
+                    savings += 0
+
+            if "bi_reduction" in mit:
+                # Direct reduction in business interruption loss
+                p_int = scenarios["business_interruption"].get("probability", 0.05)
+                if p_int > 0:
+                    savings += bi_loss * (mit["bi_reduction"] / p_int)
+
+            savings = round(min(savings, db_loss + rw_loss + bi_loss))  # Cap at total loss
+
+            findings.append({
+                "severity": mit["severity"],
+                "finding": matched_issue,
+                "recommendation": mit["label"],
+                "estimated_annual_savings_zar": savings,
+                "scenario_impact": scenario_impact,
+            })
+
+        # Sort: Critical first, then High, then Medium; within tier by savings desc
+        severity_order = {"Critical": 0, "High": 1, "Medium": 2}
+        findings.sort(key=lambda f: (severity_order.get(f["severity"], 3), -f["estimated_annual_savings_zar"]))
+
+        # Cap total savings at 85% of current loss (can't eliminate all risk)
+        current_loss = db_loss + rw_loss + bi_loss
+        total_savings = sum(f["estimated_annual_savings_zar"] for f in findings)
+        if total_savings > current_loss * 0.85:
+            scale = (current_loss * 0.85) / total_savings if total_savings > 0 else 0
+            for f in findings:
+                f["estimated_annual_savings_zar"] = round(f["estimated_annual_savings_zar"] * scale)
+            total_savings = round(current_loss * 0.85)
+
+        summary = {"critical": {"count": 0, "total_savings_zar": 0},
+                    "high": {"count": 0, "total_savings_zar": 0},
+                    "medium": {"count": 0, "total_savings_zar": 0}}
+        for f in findings:
+            key = f["severity"].lower()
+            if key in summary:
+                summary[key]["count"] += 1
+                summary[key]["total_savings_zar"] += f["estimated_annual_savings_zar"]
+
+        return {
+            "current_annual_loss": current_loss,
+            "mitigated_annual_loss": current_loss - total_savings,
+            "total_potential_savings": total_savings,
+            "findings": findings,
+            "summary": summary,
+        }
 
     def calculate(self, results: dict, rsi_result: dict, dbi_result: dict,
                   overall_score: int, industry: str = "Other",
@@ -3167,7 +3287,7 @@ class FinancialImpactCalculator:
         else:
             score = 90
 
-        return {
+        output = {
             "status": "completed",
             "currency": "ZAR",
             "industry": industry,
@@ -3204,6 +3324,11 @@ class FinancialImpactCalculator:
             "issues": [],
             "score": score,
         }
+
+        # --- Risk Mitigation Analysis ---
+        output["risk_mitigations"] = self._build_mitigations(results, output["scenarios"])
+
+        return output
 
 
 # ---------------------------------------------------------------------------

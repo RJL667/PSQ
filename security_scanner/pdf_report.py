@@ -793,6 +793,47 @@ def cat_financial_impact(d, S):
                           f"R {most_l:,.0f}", rows, fin.get("issues", []), S)
 
 
+def cat_risk_mitigations(d, S):
+    fin = d.get("financial_impact", {})
+    mit = fin.get("risk_mitigations", {})
+    findings = mit.get("findings", [])
+    if fin.get("status") != "completed" or not findings:
+        return []
+
+    total_savings = mit.get("total_potential_savings", 0)
+    current = mit.get("current_annual_loss", 0)
+    mitigated = mit.get("mitigated_annual_loss", 0)
+    summary = mit.get("summary", {})
+
+    rows = [
+        ("Current Annual Loss",  f"R {current:,.0f}"),
+        ("Mitigated Annual Loss", f"R {mitigated:,.0f}"),
+        ("Total Potential Savings", f"R {total_savings:,.0f}"),
+        ("", ""),
+    ]
+
+    # Summary counts
+    for sev in ("critical", "high", "medium"):
+        s = summary.get(sev, {})
+        if s.get("count", 0) > 0:
+            rows.append((f"{sev.title()} Findings", f"{s['count']} — R {s['total_savings_zar']:,.0f} savings"))
+
+    rows.append(("", ""))
+
+    # Individual findings
+    for i, f in enumerate(findings):
+        sev = f.get("severity", "Medium")
+        savings = f.get("estimated_annual_savings_zar", 0)
+        rows.append((f"[{sev}] {f.get('recommendation', '')}",
+                      f"R {savings:,.0f}"))
+
+    rows.append(("", ""))
+    rows.append(("Note", "Savings are modelled projections based on FAIR methodology"))
+
+    return build_cat_card("Risk Mitigation Recommendations", C_GREEN,
+                          f"Save R {total_savings:,.0f}", rows, [], S)
+
+
 # ---------------------------------------------------------------------------
 # Executive summary table
 # ---------------------------------------------------------------------------
@@ -982,6 +1023,7 @@ def generate_pdf(results: dict) -> bytes:
     story += cat_ransomware_risk(cats, S)
     story += cat_data_breach_index(cats, S)
     story += cat_financial_impact(cats, S)
+    story += cat_risk_mitigations(cats, S)
 
     # ── Exposure & Reputation ────────────────────────────────────────────────
     story += section_header("EXPOSURE & REPUTATION", S)
