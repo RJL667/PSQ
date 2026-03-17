@@ -14,7 +14,6 @@ import json
 import queue
 import sqlite3
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
@@ -30,12 +29,9 @@ from scanner import SecurityScanner
 app = Flask(__name__)
 CORS(app)  # Allow cross-origin calls from Vercel frontend
 
-HIBP_API_KEY           = os.environ.get("HIBP_API_KEY")            # Optional
-DEHASHED_EMAIL         = os.environ.get("DEHASHED_EMAIL")          # Optional — paid
-DEHASHED_API_KEY       = os.environ.get("DEHASHED_API_KEY")        # Optional — paid
-VIRUSTOTAL_API_KEY     = os.environ.get("VIRUSTOTAL_API_KEY")      # Optional — free tier
-SECURITYTRAILS_API_KEY = os.environ.get("SECURITYTRAILS_API_KEY")  # Optional — free tier
-SHODAN_API_KEY         = os.environ.get("SHODAN_API_KEY")          # Optional — free account
+HIBP_API_KEY     = os.environ.get("HIBP_API_KEY")      # Optional
+DEHASHED_EMAIL   = os.environ.get("DEHASHED_EMAIL")    # Optional — paid
+DEHASHED_API_KEY = os.environ.get("DEHASHED_API_KEY")  # Optional — paid
 DB_PATH = os.environ.get("DB_PATH", "scans.db")
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SCANS", "5"))
 
@@ -186,7 +182,8 @@ def fetch_scan(scan_id: str):
 # ---------------------------------------------------------------------------
 
 def run_scan(scan_id: str, domain: str, industry: str = "other",
-             annual_revenue: float = 0, country: str = ""):
+             annual_revenue: float = 0, country: str = "",
+             include_fraudulent_domains: bool = False):
     progress_q = queue.Queue()
     _scan_progress[scan_id] = progress_q
 
@@ -199,20 +196,16 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
                 hibp_api_key=HIBP_API_KEY,
                 dehashed_email=DEHASHED_EMAIL,
                 dehashed_api_key=DEHASHED_API_KEY,
-                virustotal_api_key=VIRUSTOTAL_API_KEY,
-                securitytrails_api_key=SECURITYTRAILS_API_KEY,
-                shodan_api_key=SHODAN_API_KEY,
             )
             results = scanner.scan(
                 domain, on_progress=on_progress,
                 industry=industry, annual_revenue=annual_revenue,
                 country=country,
+                include_fraudulent_domains=include_fraudulent_domains,
             )
             update_scan(scan_id, results)
-            progress_q.put({"type": "complete"})
         except Exception as e:
             mark_failed(scan_id, str(e))
-            progress_q.put({"type": "error", "message": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +223,11 @@ def valid_domain(domain: str) -> bool:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
 
 @app.route("/api/scan", methods=["POST"])
 def start_scan():
@@ -249,13 +247,15 @@ def start_scan():
     except (ValueError, TypeError):
         annual_revenue = 0
     country = str(data.get("country", "")).strip()
+    include_fraudulent_domains = bool(data.get("include_fraudulent_domains", False))
 
     scan_id = str(uuid.uuid4())
     save_scan(scan_id, domain, industry, annual_revenue, country)
 
     t = threading.Thread(
         target=run_scan,
-        args=(scan_id, domain, industry, annual_revenue, country),
+        args=(scan_id, domain, industry, annual_revenue, country,
+              include_fraudulent_domains),
         daemon=True,
     )
     t.start()
@@ -285,46 +285,6 @@ def get_scan(scan_id: str):
     results = json.loads(row["results"])
     results["scan_id"] = scan_id
     return jsonify(results)
-
-
-@app.route("/api/scan/<scan_id>/progress")
-def scan_progress(scan_id: str):
-    row = fetch_scan(scan_id)
-    if not row:
-        return jsonify({"error": "Scan not found"}), 404
-
-    # Already finished — send immediate terminal event
-    if row["status"] == "completed":
-        def done_stream():
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-        return Response(done_stream(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-    if row["status"] == "failed":
-        def fail_stream():
-            yield f"data: {json.dumps({'type': 'error'})}\n\n"
-        return Response(fail_stream(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-    progress_q = _scan_progress.get(scan_id)
-    if not progress_q:
-        def empty_stream():
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-        return Response(empty_stream(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-    def event_stream():
-        while True:
-            try:
-                event = progress_q.get(timeout=30)
-                yield f"data: {json.dumps(event, default=str)}\n\n"
-                if event.get("type") in ("complete", "error"):
-                    break
-            except queue.Empty:
-                yield ": keepalive\n\n"
-        _scan_progress.pop(scan_id, None)
-
-    return Response(event_stream(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.route("/api/scan/<scan_id>/pdf", methods=["GET"])
@@ -380,8 +340,6 @@ def view_results(scan_id: str):
         status=row["status"],
         results=results,
         results_json=json.dumps(results, default=str) if results else "null",
-        checker_manifest=CHECKER_MANIFEST,
-        manifest_json=json.dumps(CHECKER_MANIFEST),
     )
 
 

@@ -372,6 +372,26 @@ def cat_dns(d, S):
         ("X-Powered-By",  dns.get("server_info", {}).get("X-Powered-By", "—")),
         ("Reverse DNS",   dns.get("reverse_dns") or "—"),
     ]
+    # Add exploit intelligence per risky port
+    risky = [p for p in ports if p.get("risk") in ("high", "medium")]
+    for p in risky:
+        rows.append(("", ""))  # spacer row
+        sev = p.get("typical_severity", "").upper() or p.get("risk", "").upper()
+        rows.append((f"Port {p['port']}/{p['service']}", f"{sev} RISK"))
+        if p.get("exploits"):
+            rows.append(("  Typical exploits", p["exploits"][:120]))
+        cvss = p.get("typical_cvss")
+        epss = p.get("typical_epss")
+        if cvss or epss:
+            detail = []
+            if cvss: detail.append(f"CVSS {cvss}")
+            if epss: detail.append(f"EPSS {int(epss*100)}%")
+            if p.get("in_kev"): detail.append("CISA KEV")
+            rows.append(("  Vuln metrics", " | ".join(detail)))
+        if p.get("typical_cves"):
+            rows.append(("  Notable CVEs", ", ".join(p["typical_cves"][:3])))
+        if p.get("insurance_risk"):
+            rows.append(("  Insurance risk", p["insurance_risk"][:120]))
     return build_cat_card("DNS & Open Ports", col, f"{len(ports)} open port(s)", rows, dns.get("issues", []), S)
 
 
@@ -379,7 +399,27 @@ def cat_hrp(d, S):
     hrp  = d.get("high_risk_protocols", {})
     svcs = hrp.get("exposed_services", [])
     col  = C_CRITICAL if svcs else C_GREEN
-    rows = [(s["service"], f"Port {s['port']} — EXPOSED") for s in svcs] or [("Status", "No critical services exposed")]
+    rows = []
+    if not svcs:
+        rows.append(("Status", "No critical services exposed"))
+    for s in svcs:
+        rows.append((s["service"], f"Port {s['port']} — EXPOSED"))
+        if s.get("exploits"):
+            rows.append(("  Known exploits", s["exploits"][:120]))
+        cvss = s.get("typical_cvss")
+        epss = s.get("typical_epss")
+        if cvss or epss:
+            detail = []
+            if cvss: detail.append(f"CVSS {cvss}")
+            if epss: detail.append(f"EPSS {int(epss*100)}%")
+            if s.get("in_kev"): detail.append("CISA KEV")
+            rows.append(("  Vuln metrics", " | ".join(detail)))
+        if s.get("typical_cves"):
+            rows.append(("  Notable CVEs", ", ".join(s["typical_cves"][:3])))
+        if s.get("insurance_risk"):
+            rows.append(("  Insurance risk", s["insurance_risk"][:120]))
+        if s.get("underwriting_impact"):
+            rows.append(("  Underwriting impact", s["underwriting_impact"][:120]))
     return build_cat_card("Database & Service Exposure", col,
                           f"{len(svcs)} critical exposure(s)", rows, hrp.get("issues", []), S)
 
@@ -521,45 +561,105 @@ def cat_shodan(d, S):
     low   = sv.get("low_count", 0)
     total = crit + high + med + low
     col   = C_CRITICAL if crit > 0 else (C_RED if high > 0 else (C_AMBER if med > 0 else C_GREEN))
-    source = "Full API" if sv.get("data_source") == "shodan_full_api" else "InternetDB"
     summary = f"{total} CVE(s)" if total > 0 else "Clean"
 
+    # Summary rows
     rows = [
         ("IP scanned",   sv.get("ip") or "—"),
-        ("Data source",  source),
         ("Total CVEs",   total),
         ("Breakdown",    f"Critical: {crit}  |  High: {high}  |  Medium: {med}  |  Low: {low}"),
         ("Open ports",   ", ".join(str(p) for p in sv.get("open_ports", [])) or "—"),
     ]
-    if sv.get("os"):
-        rows.append(("OS", sv["os"]))
-    if sv.get("org"):
-        rows.append(("Organization", sv["org"]))
-    if sv.get("isp"):
-        rows.append(("ISP", sv["isp"]))
-    if sv.get("asn"):
-        rows.append(("ASN", sv["asn"]))
     if sv.get("tags"):
         rows.append(("Tags", ", ".join(sv["tags"])))
 
-    # Service banners (full API)
-    for svc in sv.get("services", [])[:6]:
-        port_label = f"Port {svc.get('port', '?')}/{svc.get('transport', 'tcp')}"
-        product = svc.get("product", "")
-        version = svc.get("version", "")
-        rows.append((port_label, f"{product} {version}".strip() or "—"))
+    # EPSS / KEV aggregate stats
+    kev_count = sv.get("kev_count", 0)
+    max_epss = sv.get("max_epss", 0)
+    high_epss = sv.get("high_epss_count", 0)
+    if kev_count > 0:
+        rows.append(("CISA KEV", f"{kev_count} CVE(s) confirmed actively exploited"))
+    if max_epss > 0:
+        rows.append(("Max EPSS", f"{max_epss * 100:.1f}% probability of exploitation (30-day)"))
+    if high_epss > 0:
+        rows.append(("High EPSS (≥10%)", f"{high_epss} CVE(s) with significant exploitation probability"))
 
-    # Detailed CVE rows
+    # Detailed CVE rows with severity + CVSS + EPSS + KEV
     for cve in sv.get("cves", [])[:8]:
         sev = cve.get("severity", "unknown").upper()
         cvss = cve.get("cvss_score", 0)
-        desc = cve.get("description", "")[:120]
+        desc = cve.get("description", "")[:100]
+        epss = cve.get("epss_score")
+        kev = cve.get("kev_exploited", False)
         label = f"{sev}  |  CVSS {cvss}"
+        if epss is not None:
+            label += f"  |  EPSS {epss * 100:.1f}%"
+        if kev:
+            label += "  |  KEV: EXPLOITED"
         if desc:
             label += f"  —  {desc}"
         rows.append((cve.get("cve_id", ""), label))
 
-    return build_cat_card(f"CVE / Known Vulnerabilities (Shodan {source})", col, summary, rows, sv.get("issues", []), S)
+    return build_cat_card("CVE / Known Vulnerabilities", col, summary, rows, sv.get("issues", []), S)
+
+
+def cat_external_ips(d, S):
+    ext = d.get("external_ips", {})
+    agg = ext.get("aggregate_vulns", {})
+    total_ips = ext.get("total_unique_ips", 0)
+    crit = agg.get("critical_count", 0)
+    high = agg.get("high_count", 0)
+    kev = agg.get("kev_count", 0)
+    col = C_CRITICAL if crit > 0 or kev > 0 else (C_RED if high > 0 else (C_AMBER if agg.get("total_cves", 0) > 0 else C_GREEN))
+    summary = f"{total_ips} IPs found"
+
+    rows = [
+        ("Total unique IPs",  total_ips),
+        ("IPv4 / IPv6",       f"{ext.get('ipv4_count', 0)} / {ext.get('ipv6_count', 0)}"),
+        ("Unique ASNs",       ext.get("unique_asns", 0)),
+        ("Unique countries",  ext.get("unique_countries", 0)),
+    ]
+    if agg.get("total_cves", 0) > 0:
+        rows.append(("Total CVEs across IPs", agg["total_cves"]))
+        rows.append(("Severity breakdown",    f"Critical: {crit}  |  High: {high}  |  Medium: {agg.get('medium_count', 0)}"))
+        rows.append(("IPs with CVEs",         agg.get("ips_with_vulns", 0)))
+    if agg.get("max_cvss", 0) > 0:
+        rows.append(("Max CVSS",              agg["max_cvss"]))
+    if agg.get("max_epss", 0) > 0:
+        rows.append(("Max EPSS",              f"{agg['max_epss'] * 100:.1f}%"))
+    if kev > 0:
+        rows.append(("CISA KEV",              f"{kev} CVE(s) confirmed actively exploited"))
+
+    # Per-IP details (top 10)
+    for ip_entry in ext.get("ip_addresses", [])[:10]:
+        ip = ip_entry.get("ip", "")
+        org = ip_entry.get("org", "")
+        country = ip_entry.get("country", "")
+        vuln = ip_entry.get("shodan") or {}
+        cve_count = vuln.get("cve_count", 0)
+        risk_score = vuln.get("risk_score", 100)
+        risk_label = vuln.get("risk_label", "Low")
+        label_parts = [f"Score: {risk_score}/100 ({risk_label})"]
+        if org:
+            label_parts.append(org)
+        if country:
+            label_parts.append(country)
+        if vuln.get("open_ports"):
+            label_parts.append(f"Ports: {', '.join(str(p) for p in vuln['open_ports'][:6])}")
+        if cve_count > 0:
+            label_parts.append(f"{cve_count} CVE(s)")
+        if vuln.get("max_cvss", 0) > 0:
+            label_parts.append(f"CVSS {vuln['max_cvss']}")
+        if vuln.get("kev_count", 0) > 0:
+            label_parts.append("KEV: EXPLOITED")
+        sources = ", ".join(ip_entry.get("sources", []))[:50]
+        rows.append((f"{ip} ({sources})", "  |  ".join(label_parts)))
+        # Add remediation row if there are issues
+        remediation = vuln.get("remediation", "")
+        if remediation and risk_score < 80:
+            rows.append(("  → Remediation", remediation))
+
+    return build_cat_card("External IP Discovery", col, summary, rows, ext.get("issues", []), S)
 
 
 def cat_dehashed(d, S):
@@ -580,91 +680,6 @@ def cat_dehashed(d, S):
     return build_cat_card("Dehashed Credential Leaks", col, summary, rows, dh.get("issues", []), S)
 
 
-def cat_virustotal(d, S):
-    vt     = d.get("virustotal", {})
-    status = vt.get("status", "completed")
-    mal    = vt.get("malicious_count", 0)
-    sus    = vt.get("suspicious_count", 0)
-    col    = (C_CRITICAL if mal > 3 else C_RED if mal > 0 else
-              C_AMBER if sus > 0 else (C_BLUE if status == "no_api_key" else C_GREEN))
-    summary = ("No API key" if status == "no_api_key" else
-               f"{mal} malicious" if mal > 0 else
-               f"{sus} suspicious" if sus > 0 else "Clean")
-    rows = [
-        ("Status",              "API key not configured" if status == "no_api_key" else status),
-        ("Malicious detections", mal),
-        ("Suspicious detections", sus),
-        ("Harmless",             vt.get("harmless_count", 0)),
-        ("Undetected",           vt.get("undetected_count", 0)),
-        ("Community reputation", vt.get("reputation", 0)),
-        ("Community votes",      f"Harmless: {vt.get('harmless_votes', 0)}  |  Malicious: {vt.get('malicious_votes', 0)}"),
-    ]
-    if vt.get("popularity_rank"):
-        rows.append(("Popularity rank", f"#{vt['popularity_rank']:,}"))
-    if vt.get("categories"):
-        rows.append(("Categories", " | ".join(list(vt["categories"].values())[:5])))
-    for eng in vt.get("flagging_engines", [])[:5]:
-        rows.append((eng.get("engine", ""), f"{eng.get('category', '')} — {eng.get('result', '')}"))
-    return build_cat_card("VirusTotal Reputation", col, summary, rows, vt.get("issues", []), S)
-
-
-def cat_securitytrails(d, S):
-    st     = d.get("securitytrails", {})
-    status = st.get("status", "completed")
-    assoc  = st.get("associated_count", 0)
-    col    = C_AMBER if assoc > 50 else (C_BLUE if status == "no_api_key" else C_GREEN)
-    summary = ("No API key" if status == "no_api_key" else
-               f"{assoc} associated" if assoc > 0 else "Info")
-    rows = [
-        ("Status",             "API key not configured" if status == "no_api_key" else status),
-        ("A records",          ", ".join(st.get("a_records", [])) or "—"),
-        ("MX records",         ", ".join(st.get("mx_records", [])) or "—"),
-        ("NS records",         ", ".join(st.get("ns_records", [])) or "—"),
-        ("Associated domains", assoc),
-    ]
-    if st.get("alexa_rank"):
-        rows.append(("Alexa rank", f"#{st['alexa_rank']:,}"))
-    if st.get("associated_domains"):
-        rows.append(("Top associated", " | ".join(st["associated_domains"][:5])))
-    return build_cat_card("DNS Intelligence (SecurityTrails)", col, summary, rows, st.get("issues", []), S)
-
-
-def cat_fraudulent_domains(d, S):
-    fd      = d.get("fraudulent_domains", {})
-    count   = fd.get("resolved_count", 0)
-    checked = fd.get("total_permutations", 0)
-    col     = C_CRITICAL if count > 5 else (C_RED if count > 2 else (C_AMBER if count > 0 else C_GREEN))
-    summary = f"{count} detected" if count > 0 else "Clean"
-    rows = [
-        ("Permutations checked", checked),
-        ("Resolved (active)",    count),
-    ]
-    for dom in fd.get("fraudulent_domains", [])[:8]:
-        rows.append((
-            dom.get("domain", ""),
-            f"{dom.get('technique', '')}  |  {dom.get('similarity', 0)}% match"
-        ))
-    return build_cat_card("Fraudulent / Lookalike Domains", col, summary, rows, fd.get("issues", []), S)
-
-
-def cat_privacy_compliance(d, S):
-    pc    = d.get("privacy_compliance", {})
-    pct   = pc.get("compliance_pct", 0)
-    found = pc.get("policy_found", False)
-    col   = C_GREEN if pct >= 80 else (C_AMBER if pct >= 50 else (C_RED if found else C_CRITICAL))
-    summary = f"{pct}%" if found else "Not found"
-    rows = [
-        ("Policy found", "Yes" if found else "No — compliance risk"),
-    ]
-    if found:
-        rows.append(("Compliance score", f"{pct}%"))
-        if pc.get("sections_found"):
-            rows.append(("Sections present", " | ".join(pc["sections_found"])))
-        if pc.get("sections_missing"):
-            rows.append(("Sections missing", " | ".join(pc["sections_missing"])))
-    return build_cat_card("Privacy Policy Compliance", col, summary, rows, pc.get("issues", []), S)
-
-
 def cat_website(d, S):
     ws    = d.get("website_security", {})
     score = ws.get("score", 0)
@@ -683,16 +698,27 @@ def cat_website(d, S):
 def cat_web_ranking(d, S):
     wr = d.get("web_ranking", {})
     rank = wr.get("rank")
-    score = wr.get("score", 30)
-    col = _tl(score >= 70, score >= 40)
-    rows = [
-        ("Tranco Rank", f"#{rank:,}" if rank else "Not in top 1M"),
-        ("In List", "Yes" if wr.get("in_list") else "No"),
-        ("Score", f"{score}/100"),
-    ]
-    return build_cat_card("Web Ranking (Tranco)", col,
-                          f"#{rank:,}" if rank else "Unranked",
-                          rows, wr.get("issues", []), S)
+    # Support both HEAD and Sarel's data formats
+    if wr.get("ranked") is not None:
+        col = C_GREEN if wr.get("ranked") else C_AMBER
+        rows = [
+            ("Ranked",      "Yes" if wr.get("ranked") else "Not in top 1M"),
+            ("Position",    f"#{rank:,}" if rank else "—"),
+            ("Popularity",  wr.get("popularity", "Unranked")),
+            ("Rank Band",   wr.get("rank_label", "Unranked")),
+        ]
+        return build_cat_card("Web Ranking (Tranco)", col, wr.get("rank_label", "Unranked"), rows, wr.get("issues", []), S)
+    else:
+        score = wr.get("score", 30)
+        col = _tl(score >= 70, score >= 40)
+        rows = [
+            ("Tranco Rank", f"#{rank:,}" if rank else "Not in top 1M"),
+            ("In List", "Yes" if wr.get("in_list") else "No"),
+            ("Score", f"{score}/100"),
+        ]
+        return build_cat_card("Web Ranking (Tranco)", col,
+                              f"#{rank:,}" if rank else "Unranked",
+                              rows, wr.get("issues", []), S)
 
 
 def cat_info_disclosure(d, S):
@@ -709,8 +735,21 @@ def cat_info_disclosure(d, S):
                           rows, info.get("issues", []), S)
 
 
+def cat_fraudulent_domains(d, S):
+    fd     = d.get("fraudulent_domains", {})
+    found  = fd.get("fraudulent_domains_found", 0)
+    col    = C_CRITICAL if found > 3 else (C_RED if found > 0 else C_GREEN)
+    rows   = [
+        ("Variants checked",  fd.get("variants_checked", 0)),
+        ("Lookalikes found",  found),
+    ]
+    for dom in fd.get("domains", [])[:5]:
+        rows.append((dom.get("type", "lookalike"), f"{dom.get('domain','')} ({dom.get('cert_issuer','')})"))
+    return build_cat_card("Fraudulent Domains (Typosquat)", col, f"{found} found", rows, fd.get("issues", []), S)
+
+
 def cat_rsi(results, S):
-    """RSI (Ransomware Susceptibility Index) card for PDF."""
+    """RSI (Ransomware Susceptibility Index) card for PDF — insurance analytics."""
     ins = results if "rsi" in results else results.get("insurance", {})
     rsi = ins.get("rsi", {})
     score = rsi.get("rsi_score", 0)
@@ -719,8 +758,8 @@ def cat_rsi(results, S):
         ("RSI Score", f"{score:.3f} / 1.000"),
         ("Risk Label", rsi.get("risk_label", "Unknown")),
         ("Base Score", f"{rsi.get('base_score', 0):.3f}"),
-        ("Industry", f"{rsi.get('industry', 'other').capitalize()} (×{rsi.get('industry_multiplier', 1.0)})"),
-        ("Size Multiplier", f"×{rsi.get('size_multiplier', 1.0)}"),
+        ("Industry", f"{rsi.get('industry', 'other').capitalize()} (x{rsi.get('industry_multiplier', 1.0)})"),
+        ("Size Multiplier", f"x{rsi.get('size_multiplier', 1.0)}"),
     ]
     for f in rsi.get("contributing_factors", [])[:8]:
         rows.append((f"  P{f['priority']}: {f['factor']}", f"+{f['impact']:.2f}"))
@@ -729,8 +768,8 @@ def cat_rsi(results, S):
                           rows, [], S)
 
 
-def cat_financial_impact(results, S):
-    """Financial Impact Analysis card for PDF."""
+def cat_insurance_financial_impact(results, S):
+    """Financial Impact Analysis card for PDF — insurance analytics."""
     ins = results if "financial_impact" in results else results.get("insurance", {})
     fin = ins.get("financial_impact", {})
     total = fin.get("total", {})
@@ -755,7 +794,7 @@ def cat_financial_impact(results, S):
 
 
 def cat_dbi(results, S):
-    """Data Breach Index card for PDF."""
+    """Data Breach Index card for PDF — insurance analytics."""
     ins = results if "dbi" in results else results.get("insurance", {})
     dbi = ins.get("dbi", {})
     score = dbi.get("dbi_score", 50)
@@ -769,7 +808,7 @@ def cat_dbi(results, S):
 
 
 def cat_remediation(results, S):
-    """Remediation Roadmap card for PDF."""
+    """Remediation Roadmap card for PDF — insurance analytics."""
     ins = results if "remediation" in results else results.get("insurance", {})
     rem = ins.get("remediation", {})
     steps = rem.get("steps", [])
@@ -789,6 +828,119 @@ def cat_remediation(results, S):
     return build_cat_card("Remediation Roadmap — Before/After", col,
                           f"{len(steps)} steps — ${savings:,.0f} savings",
                           rows, [], S)
+
+
+def cat_ransomware_risk(d, S):
+    rsi   = d.get("ransomware_risk", {})
+    score = rsi.get("rsi_score", 0)
+    label = rsi.get("rsi_label", "N/A")
+    col   = (C_CRITICAL if score >= 0.8 else C_RED if score >= 0.5 else
+             C_AMBER if score >= 0.25 else C_GREEN)
+    rows  = [
+        ("RSI Score",       f"{score} / 1.0"),
+        ("Risk Level",      label),
+        ("Industry",        rsi.get("industry", "Other")),
+    ]
+    if rsi.get("annual_revenue_zar"):
+        rows.append(("Annual Revenue", f"R {rsi['annual_revenue_zar']:,.0f}"))
+    for f in rsi.get("contributing_factors", [])[:5]:
+        rows.append((f["factor"], f"+{f['impact']}"))
+    return build_cat_card("Ransomware Susceptibility (RSI)", col, f"{score}", rows, rsi.get("issues", []), S)
+
+
+def cat_data_breach_index(d, S):
+    dbi   = d.get("data_breach_index", {})
+    score = dbi.get("dbi_score", 0)
+    label = dbi.get("dbi_label", "N/A")
+    col   = (C_CRITICAL if score < 25 else C_RED if score < 50 else
+             C_AMBER if score < 75 else C_GREEN)
+    rows  = [
+        ("DBI Score",              f"{score} / 100"),
+        ("Risk Level",             label),
+        ("Breach Count",           dbi.get("breach_count", 0)),
+        ("Most Recent Breach",     dbi.get("most_recent_breach") or "None"),
+        ("Sensitive Data Exposed", "Yes" if dbi.get("has_sensitive_data") else "No"),
+        ("Credential Leaks",       f"{dbi.get('credential_leaks', 0):,}"),
+    ]
+    return build_cat_card("Data Breach Index (DBI)", col, f"{score}/100", rows, dbi.get("issues", []), S)
+
+
+def cat_financial_impact(d, S):
+    fin = d.get("financial_impact", {})
+    if fin.get("status") != "completed":
+        return build_cat_card("Financial Impact (FAIR Model)", C_BLUE, "N/A",
+                              [("Status", "Revenue not provided — skipped")], [], S)
+
+    eal    = fin.get("estimated_annual_loss", {})
+    sc     = fin.get("scenarios", {})
+    ins    = fin.get("insurance_recommendation", {})
+    most_l = eal.get("most_likely", 0)
+    col    = C_CRITICAL if fin.get("score", 50) < 30 else (C_RED if fin["score"] < 50 else
+              C_AMBER if fin["score"] < 70 else C_GREEN)
+
+    rows = [
+        ("Industry",             fin.get("industry", "Other")),
+        ("Annual Revenue",       f"R {fin.get('annual_revenue_zar', 0):,.0f}"),
+        ("",                     ""),
+        ("Est. Annual Loss (Min)",  f"R {eal.get('minimum', 0):,.0f}"),
+        ("Est. Annual Loss (Likely)", f"R {most_l:,.0f}"),
+        ("Est. Annual Loss (Max)",    f"R {eal.get('maximum', 0):,.0f}"),
+        ("",                     ""),
+        ("Data Breach Loss",     f"R {sc.get('data_breach', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('data_breach', {}).get('probability', 0)})"),
+        ("  Records at risk",    f"{sc.get('data_breach', {}).get('estimated_records', 0):,} @ R{sc.get('data_breach', {}).get('cost_per_record', 0):,.0f}/rec"),
+        ("  POPIA regulatory",   f"R {sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
+        ("Ransomware Loss",      f"R {sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
+        ("  Avg downtime",       f"{sc.get('ransomware', {}).get('avg_downtime_days', 0)} days"),
+        ("  Ransom estimate",    f"R {sc.get('ransomware', {}).get('ransom_estimate', 0):,.0f}"),
+        ("Bus. Interruption",    f"R {sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
+        ("",                     ""),
+        ("Min. Insurance Cover", f"R {ins.get('minimum_cover_zar', 0):,.0f}"),
+        ("Rec. Insurance Cover", f"R {ins.get('recommended_cover_zar', 0):,.0f}"),
+        ("Premium Risk Tier",    ins.get("premium_risk_tier", "N/A")),
+    ]
+    return build_cat_card("Financial Impact (FAIR Model)", col,
+                          f"R {most_l:,.0f}", rows, fin.get("issues", []), S)
+
+
+def cat_risk_mitigations(d, S):
+    fin = d.get("financial_impact", {})
+    mit = fin.get("risk_mitigations", {})
+    findings = mit.get("findings", [])
+    if fin.get("status") != "completed" or not findings:
+        return []
+
+    total_savings = mit.get("total_potential_savings", 0)
+    current = mit.get("current_annual_loss", 0)
+    mitigated = mit.get("mitigated_annual_loss", 0)
+    summary = mit.get("summary", {})
+
+    rows = [
+        ("Current Annual Loss",  f"R {current:,.0f}"),
+        ("Mitigated Annual Loss", f"R {mitigated:,.0f}"),
+        ("Total Potential Savings", f"R {total_savings:,.0f}"),
+        ("", ""),
+    ]
+
+    # Summary counts
+    for sev in ("critical", "high", "medium"):
+        s = summary.get(sev, {})
+        if s.get("count", 0) > 0:
+            rows.append((f"{sev.title()} Findings", f"{s['count']} — R {s['total_savings_zar']:,.0f} savings"))
+
+    rows.append(("", ""))
+
+    # Individual findings
+    for i, f in enumerate(findings):
+        sev = f.get("severity", "Medium")
+        savings = f.get("estimated_annual_savings_zar", 0)
+        rows.append((f"[{sev}] {f.get('recommendation', '')}",
+                      f"R {savings:,.0f}"))
+
+    rows.append(("", ""))
+    rows.append(("Note", "Savings are modelled projections based on FAIR methodology"))
+
+    return build_cat_card("Risk Mitigation Recommendations", C_GREEN,
+                          f"Save R {total_savings:,.0f}", rows, [], S)
 
 
 # ---------------------------------------------------------------------------
@@ -837,6 +989,9 @@ def build_summary_table(results: dict, S) -> Table:
             C_GREEN if waf else C_AMBER),
         row("RDP Exposed",           "YES — CRITICAL" if vpn_rdp else "No",
             C_CRITICAL if vpn_rdp else C_GREEN),
+        row("External IPs",          f"{cats.get('external_ips', {}).get('total_unique_ips', 0)} IPs ({cats.get('external_ips', {}).get('aggregate_vulns', {}).get('ips_with_vulns', 0)} with CVEs)",
+            _tl(cats.get("external_ips", {}).get("aggregate_vulns", {}).get("critical_count", 0) == 0,
+                cats.get("external_ips", {}).get("aggregate_vulns", {}).get("high_count", 0) == 0)),
     ]
 
     # Add insurance rows if available
@@ -847,6 +1002,31 @@ def build_summary_table(results: dict, S) -> Table:
         rows.insert(1 if rsi_score is not None else 0,
             row("Data Breach Index", f"{dbi_score}/100",
             _tl(dbi_score >= 70, dbi_score >= 40)))
+
+    # RSI / DBI / Financial Impact / Fraudulent Domains / Web Ranking (Sarel's categories)
+    rsi      = cats.get("ransomware_risk", {})
+    rsi_val  = rsi.get("rsi_score", 0)
+    rows.append(row("Ransomware Susceptibility (RSI)", f"{rsi_val} / 1.0 — {rsi.get('rsi_label', 'N/A')}",
+                     C_CRITICAL if rsi_val >= 0.8 else C_RED if rsi_val >= 0.5 else C_AMBER if rsi_val >= 0.25 else C_GREEN))
+
+    dbi      = cats.get("data_breach_index", {})
+    dbi_val  = dbi.get("dbi_score", 0)
+    rows.append(row("Data Breach Index (DBI)", f"{dbi_val}/100 — {dbi.get('dbi_label', 'N/A')}",
+                     C_CRITICAL if dbi_val < 25 else C_RED if dbi_val < 50 else C_AMBER if dbi_val < 75 else C_GREEN))
+
+    fin       = cats.get("financial_impact", {})
+    if fin.get("status") == "completed":
+        fin_ml = fin.get("estimated_annual_loss", {}).get("most_likely", 0)
+        rows.append(row("Est. Annual Loss (FAIR)", f"R {fin_ml:,.0f}",
+                         C_CRITICAL if fin.get("score", 50) < 30 else C_AMBER if fin["score"] < 70 else C_GREEN))
+
+    fd_count = cats.get("fraudulent_domains", {}).get("fraudulent_domains_found", 0)
+    rows.append(row("Fraudulent Domains", f"{fd_count} lookalike(s)",
+                     C_CRITICAL if fd_count > 3 else C_RED if fd_count > 0 else C_GREEN))
+
+    wr_label = cats.get("web_ranking", {}).get("rank_label", "Unranked")
+    rows.append(row("Web Ranking (Tranco)", wr_label,
+                     C_GREEN if cats.get("web_ranking", {}).get("ranked") else C_AMBER))
 
     tbl = Table(rows, colWidths=[14, 70 * mm, INNER_W - 14 - 70 * mm])
     style = [
@@ -944,7 +1124,7 @@ def generate_pdf(results: dict) -> bytes:
         story.append(PageBreak())
         story += section_header("INSURANCE ANALYTICS", S)
         story += cat_rsi(results, S)
-        story += cat_financial_impact(results, S)
+        story += cat_insurance_financial_impact(results, S)
         story += cat_dbi(results, S)
         story += cat_remediation(results, S)
 
@@ -976,6 +1156,14 @@ def generate_pdf(results: dict) -> bytes:
     story += cat_hrp(cats, S)
     story += cat_cloud(cats, S)
     story += cat_vpn(cats, S)
+    story += cat_external_ips(cats, S)
+
+    # ── Risk Quantification ───────────────────────────────────────────────────
+    story += section_header("RISK QUANTIFICATION", S)
+    story += cat_ransomware_risk(cats, S)
+    story += cat_data_breach_index(cats, S)
+    story += cat_financial_impact(cats, S)
+    story += cat_risk_mitigations(cats, S)
 
     # ── Exposure & Reputation ────────────────────────────────────────────────
     story += section_header("EXPOSURE & REPUTATION", S)
@@ -985,15 +1173,13 @@ def generate_pdf(results: dict) -> bytes:
     story += cat_subdomains(cats, S)
     story += cat_shodan(cats, S)
     story += cat_dehashed(cats, S)
-    story += cat_virustotal(cats, S)
     story += cat_fraudulent_domains(cats, S)
+    story += cat_web_ranking(cats, S)
 
     # ── Technology & Governance ──────────────────────────────────────────────
     story += section_header("TECHNOLOGY & GOVERNANCE", S)
     story += cat_tech(cats, S)
     story += cat_domain(cats, S)
-    story += cat_securitytrails(cats, S)
-    story += cat_privacy_compliance(cats, S)
     story += cat_security_policy(cats, S)
     story += cat_payment(cats, S)
 
