@@ -108,7 +108,8 @@ def fetch_scan(scan_id: str):
 # ---------------------------------------------------------------------------
 
 def run_scan(scan_id: str, domain: str, industry: str = "Other",
-             annual_revenue_zar: int = 0):
+             annual_revenue_zar: int = 0,
+             include_fraudulent_domains: bool = False):
     with _semaphore:
         try:
             scanner = SecurityScanner(
@@ -117,7 +118,8 @@ def run_scan(scan_id: str, domain: str, industry: str = "Other",
                 dehashed_api_key=DEHASHED_API_KEY,
             )
             results = scanner.scan(domain, industry=industry,
-                                   annual_revenue_zar=annual_revenue_zar)
+                                   annual_revenue_zar=annual_revenue_zar,
+                                   include_fraudulent_domains=include_fraudulent_domains)
             update_scan(scan_id, results)
         except Exception as e:
             mark_failed(scan_id, str(e))
@@ -153,12 +155,14 @@ def start_scan():
         annual_revenue_zar = int(data.get("annual_revenue_zar", 0))
     except (ValueError, TypeError):
         annual_revenue_zar = 0
+    include_fraudulent_domains = bool(data.get("include_fraudulent_domains", False))
 
     scan_id = str(uuid.uuid4())
     save_scan(scan_id, domain)
 
     t = threading.Thread(target=run_scan,
-                         args=(scan_id, domain, industry, annual_revenue_zar),
+                         args=(scan_id, domain, industry, annual_revenue_zar,
+                               include_fraudulent_domains),
                          daemon=True)
     t.start()
 

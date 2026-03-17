@@ -3435,7 +3435,8 @@ class SecurityScanner:
         self.dehashed_api_key  = dehashed_api_key
 
     def scan(self, domain: str, industry: str = "Other",
-             annual_revenue_zar: int = 0) -> dict:
+             annual_revenue_zar: int = 0,
+             include_fraudulent_domains: bool = False) -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
         results = {
             "domain_scanned": domain,
@@ -3470,9 +3471,11 @@ class SecurityScanner:
             "shodan_vulns":        (ShodanVulnChecker().check,         domain),
             "external_ips":        (ExternalIPDiscoveryChecker().check, domain),
             "dehashed":            (DehashedChecker().check,           domain),
-            "fraudulent_domains":  (FraudulentDomainChecker().check,   domain),
             "web_ranking":         (WebRankingChecker().check,         domain),
         }
+
+        if include_fraudulent_domains:
+            checkers["fraudulent_domains"] = (FraudulentDomainChecker().check, domain)
 
         cat_results = {}
         with ThreadPoolExecutor(max_workers=12) as ex:

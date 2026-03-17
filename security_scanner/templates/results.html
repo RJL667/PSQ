@@ -882,6 +882,7 @@
 
     <!-- Fraudulent Domains -->
     {% set fraud = results.categories.get('fraudulent_domains', {}) %}
+    {% if fraud %}
     {% set fraud_tl = 'tl-crimson' if fraud.fraudulent_domains_found > 3 else ('tl-red' if fraud.fraudulent_domains_found > 0 else 'tl-green') %}
     <div class="cat-card">
       <div class="cat-header" onclick="toggle(this)">
@@ -916,6 +917,17 @@
         {% if fraud.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in fraud.issues %}<li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
       </div>
     </div>
+    {% else %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Fraudulent Domains (Typosquat)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade" style="color:var(--muted);">Skipped</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="color:var(--muted);font-size:.82rem;margin-top:8px;">Set <code>include_fraudulent_domains: true</code> in the scan request to enable typosquat detection. This check adds ~2 minutes to scan time.</p>
+      </div>
+    </div>
+    {% endif %}
 
     <!-- Web Ranking -->
     {% set wr = results.categories.get('web_ranking', {}) %}
