@@ -1462,7 +1462,7 @@ class ShodanVulnChecker:
     When SHODAN_API_KEY is provided, uses the full Shodan API for richer data
     (service banners, OS detection, ISP/ASN info) and falls back to InternetDB otherwise.
     Enriches top CVEs with CVSS scores from the NVD API (also free, no key),
-    CISA KEV (Known Exploited Vulnerabilities) status, and EPSS scores.
+    CISA KEV (Known Exploited Vulnerabilities) status, EPSS from FIRST.org, and EPSS scores.
     """
     INTERNETDB_URL = "https://internetdb.shodan.io/{ip}"
     SHODAN_HOST_URL = "https://api.shodan.io/shodan/host/{ip}"
@@ -2572,7 +2572,11 @@ class RiskScorer:
         "privacy_compliance":   0.02,
         "web_ranking":          0.02,
         "info_disclosure":      0.05,
-    }  # Sum = 0.98 — remaining 0.02 = WAF bonus headroom
+        "external_ips":         0.03,
+        "ransomware_risk":      0.06,
+        "data_breach_index":    0.03,
+        "financial_impact":     0.02,
+    }  # Sum — includes all checkers from both branches
 
     RECOMMENDATIONS = {
         "SSL certificate has EXPIRED": "Renew your SSL certificate immediately — an expired cert causes browser warnings and erodes user trust.",
@@ -2702,28 +2706,48 @@ class RiskScorer:
         id_res = results.get("info_disclosure", {})
         id_risk = inv(id_res.get("score", 100))
 
+        # External IPs risk (feature branch checker)
+        ext_ip = results.get("external_ips", {})
+        ext_ip_risk = inv(ext_ip.get("score", 100)) if ext_ip.get("status") not in ("error", None) else 0
+
+        # Ransomware susceptibility index risk (insurance analytics)
+        rsi_res = results.get("ransomware_risk", {})
+        rsi_risk = min(100, rsi_res.get("rsi_score", 0) * 100) if rsi_res else 0
+
+        # Data breach index risk (insurance analytics)
+        dbi_res = results.get("data_breach_index", {})
+        dbi_risk = inv(dbi_res.get("dbi_score", 50)) if dbi_res else 0
+
+        # Financial impact risk (insurance analytics)
+        fin_res = results.get("financial_impact", {})
+        fin_risk = inv(fin_res.get("score", 50)) if fin_res.get("status") == "completed" else 0
+
         weighted = (
-            ssl_risk         * self.WEIGHTS["ssl"] +
-            email_risk       * self.WEIGHTS["email_security"] +
-            email_hard_risk  * self.WEIGHTS["email_hardening"] +
-            breach_risk      * self.WEIGHTS["breaches"] +
-            header_risk      * self.WEIGHTS["http_headers"] +
-            website_risk     * self.WEIGHTS["website_security"] +
-            admin_risk       * self.WEIGHTS["exposed_admin"] +
-            hrisk            * self.WEIGHTS["high_risk_protocols"] +
-            dnsbl_risk       * self.WEIGHTS["dnsbl"] +
-            tech_risk        * self.WEIGHTS["tech_stack"] +
-            pay_risk         * self.WEIGHTS["payment_security"] +
-            vpn_risk         * self.WEIGHTS["vpn_remote"] +
-            sub_risk         * self.WEIGHTS["subdomains"] +
-            shodan_risk      * self.WEIGHTS["shodan_vulns"] +
-            dehashed_risk    * self.WEIGHTS["dehashed"] +
-            vt_risk          * self.WEIGHTS["virustotal"] +
-            st_risk          * self.WEIGHTS["securitytrails"] +
-            fd_risk          * self.WEIGHTS["fraudulent_domains"] +
-            pc_risk          * self.WEIGHTS["privacy_compliance"] +
-            wr_risk          * self.WEIGHTS["web_ranking"] +
-            id_risk          * self.WEIGHTS["info_disclosure"]
+            ssl_risk         * self.WEIGHTS.get("ssl", 0) +
+            email_risk       * self.WEIGHTS.get("email_security", 0) +
+            email_hard_risk  * self.WEIGHTS.get("email_hardening", 0) +
+            breach_risk      * self.WEIGHTS.get("breaches", 0) +
+            header_risk      * self.WEIGHTS.get("http_headers", 0) +
+            website_risk     * self.WEIGHTS.get("website_security", 0) +
+            admin_risk       * self.WEIGHTS.get("exposed_admin", 0) +
+            hrisk            * self.WEIGHTS.get("high_risk_protocols", 0) +
+            dnsbl_risk       * self.WEIGHTS.get("dnsbl", 0) +
+            tech_risk        * self.WEIGHTS.get("tech_stack", 0) +
+            pay_risk         * self.WEIGHTS.get("payment_security", 0) +
+            vpn_risk         * self.WEIGHTS.get("vpn_remote", 0) +
+            sub_risk         * self.WEIGHTS.get("subdomains", 0) +
+            shodan_risk      * self.WEIGHTS.get("shodan_vulns", 0) +
+            dehashed_risk    * self.WEIGHTS.get("dehashed", 0) +
+            vt_risk          * self.WEIGHTS.get("virustotal", 0) +
+            st_risk          * self.WEIGHTS.get("securitytrails", 0) +
+            fd_risk          * self.WEIGHTS.get("fraudulent_domains", 0) +
+            pc_risk          * self.WEIGHTS.get("privacy_compliance", 0) +
+            wr_risk          * self.WEIGHTS.get("web_ranking", 0) +
+            id_risk          * self.WEIGHTS.get("info_disclosure", 0) +
+            ext_ip_risk      * self.WEIGHTS.get("external_ips", 0) +
+            rsi_risk         * self.WEIGHTS.get("ransomware_risk", 0) +
+            dbi_risk         * self.WEIGHTS.get("data_breach_index", 0) +
+            fin_risk         * self.WEIGHTS.get("financial_impact", 0)
         )
 
         risk_score = round(weighted * 10)
@@ -3323,7 +3347,9 @@ class SecurityScanner:
 
     def scan(self, domain: str, on_progress: callable = None,
              industry: str = "other", annual_revenue: float = 0,
-             country: str = "") -> dict:
+             annual_revenue_zar: int = 0,
+             country: str = "",
+             include_fraudulent_domains: bool = False) -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
         results = {
             "domain_scanned": domain,
