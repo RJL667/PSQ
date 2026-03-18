@@ -3193,7 +3193,7 @@ class FinancialImpactCalculator:
             "industry": industry,
             "currency": "ZAR",
         }
-        output["mitigations"] = self._build_mitigations(categories, output)
+        output["risk_mitigations"] = self._build_mitigations(categories, output)
         return output
 
     def _calculate_zar(self, categories: dict, rsi_result: dict,
@@ -3264,7 +3264,7 @@ class FinancialImpactCalculator:
         else:
             fin_score = 90
 
-        return {
+        output = {
             "currency": "ZAR",
             "industry": industry,
             "annual_revenue_zar": annual_revenue_zar,
@@ -3311,171 +3311,136 @@ class FinancialImpactCalculator:
             },
         }
         # Append risk mitigation recommendations
-        output["mitigations"] = self._build_mitigations(categories, output)
+        output["risk_mitigations"] = self._build_mitigations(categories, output)
         return output
 
-    def _build_mitigations(self, categories: dict, fin_output: dict) -> dict:
-        """
-        Analyse scan findings and produce prioritised remediation steps
-        with estimated cost reduction per finding (Black Kite-style).
-        """
-        total_loss = fin_output.get("total", {}).get("most_likely", 0)
-        if total_loss <= 0:
-            return {"findings": [], "current_loss": 0, "mitigated_loss": 0, "savings": 0}
+    MITIGATIONS = [
+        {"pattern": r"RDP.*exposed",                          "severity": "Critical", "scenario": "ransomware",             "rsi_reduction": 0.35, "label": "Block RDP from public internet and enforce VPN/Zero Trust access"},
+        {"pattern": r"SSL certificate has EXPIRED",           "severity": "Critical", "scenario": "data_breach",            "probability_reduction": 0.15, "label": "Renew SSL certificate immediately"},
+        {"pattern": r"listed in CISA KEV",                    "severity": "Critical", "scenario": "ransomware",             "rsi_reduction": 0.10, "label": "Patch CISA Known Exploited Vulnerabilities within 48 hours"},
+        {"pattern": r"critical CVE",                          "severity": "Critical", "scenario": "ransomware",             "rsi_reduction": 0.10, "label": "Patch critical CVEs on public-facing servers"},
+        {"pattern": r"CRITICAL:.*Sensitive file exposed",     "severity": "Critical", "scenario": "data_breach",            "probability_reduction": 0.10, "label": "Restrict access to exposed sensitive files"},
+        {"pattern": r"high.severity CVE|high CVE",            "severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.05, "label": "Patch high-severity CVEs within 30 days"},
+        {"pattern": r"No WAF detected",                       "severity": "High",     "scenario": "both",                   "rsi_reduction": 0.05, "bi_reduction": 0.05, "label": "Deploy a Web Application Firewall (WAF)"},
+        {"pattern": r"No SPF record|No DMARC record",         "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Implement email authentication (SPF/DMARC/DKIM)"},
+        {"pattern": r"password.*leaked|Plaintext.*password",   "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.10, "label": "Force password resets for all leaked credentials"},
+        {"pattern": r"credential record.*found in Dehashed",  "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Audit and rotate credentials exposed in data leaks"},
+        {"pattern": r"admin.*exposed|login.*exposed",          "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Restrict access to admin and login panels"},
+        {"pattern": r"Telnet|FTP.*exposed|high.risk.*protocol","severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.15, "label": "Disable insecure protocols (Telnet, FTP, etc.)"},
+        {"pattern": r"SSL.*grade.*(C|D|F|T)",                  "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Upgrade SSL/TLS configuration to grade A"},
+        {"pattern": r"HTTPS not enforced",                     "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Enforce HTTPS across all endpoints"},
+        {"pattern": r"EOL software|end.of.life",               "severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.05, "label": "Update end-of-life software components"},
+        {"pattern": r"Self.hosted payment",                    "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Migrate to PCI-compliant payment provider"},
+        {"pattern": r"DNSSEC.*not enabled",                    "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Enable DNSSEC for DNS integrity"},
+        {"pattern": r"Missing security header|HSTS.*missing|X-Frame|Content-Security-Policy", "severity": "Medium", "scenario": "data_breach", "probability_reduction": 0.02, "label": "Implement security headers (HSTS, CSP, X-Frame-Options)"},
+        {"pattern": r"blacklist|blocklist|listed on",          "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.03, "label": "Resolve DNS blocklist entries"},
+        {"pattern": r"lookalike domain|typosquat|fraudulent",  "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.03, "label": "Monitor and take down fraudulent lookalike domains"},
+        {"pattern": r"single ASN|unique_asns.*1",              "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.05, "label": "Add hosting redundancy across multiple providers"},
+        {"pattern": r"No VPN.*detected",                       "severity": "Medium",   "scenario": "ransomware",             "rsi_reduction": 0.03, "label": "Implement VPN or Zero Trust Network Access for remote workers"},
+        {"pattern": r"No DKIM",                                "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Enable DKIM signing on your mail server"},
+        {"pattern": r"No CDN detected",                        "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.03, "label": "Deploy a CDN for DDoS resilience and availability"},
+        {"pattern": r"database port|MySQL|PostgreSQL|MongoDB|Redis|Elasticsearch", "severity": "High", "scenario": "data_breach", "probability_reduction": 0.08, "label": "Restrict database access to private networks/VPN"},
+        {"pattern": r"breach_count|known breach",              "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.05, "label": "Enforce password resets and MFA across all accounts"},
+    ]
 
+    def _build_mitigations(self, categories: dict, fin_output: dict) -> dict:
+        """Analyse scan findings and estimate per-finding cost reduction using FAIR methodology."""
+        # Get scenario losses — works for both USD and ZAR paths
+        scenarios = fin_output.get("scenarios", {})
+        db_scenario = scenarios.get("data_breach", {})
+        rw_scenario = scenarios.get("ransomware", {})
+        bi_scenario = scenarios.get("business_interruption", {})
+
+        # ZAR path uses estimated_loss, USD path uses most_likely
+        db_loss = db_scenario.get("estimated_loss", db_scenario.get("most_likely", 0))
+        rw_loss = rw_scenario.get("estimated_loss", rw_scenario.get("most_likely", 0))
+        bi_loss = bi_scenario.get("estimated_loss", bi_scenario.get("most_likely", 0))
+        rsi_score = rw_scenario.get("rsi_score", rw_scenario.get("rsi", 0))
+        p_breach = db_scenario.get("probability", 0)
+
+        current_loss = db_loss + rw_loss + bi_loss
+        if current_loss <= 0:
+            return {"findings": [], "current_annual_loss": 0, "mitigated_annual_loss": 0,
+                    "total_potential_savings": 0, "summary": {
+                        "critical": {"count": 0, "total_savings_zar": 0},
+                        "high": {"count": 0, "total_savings_zar": 0},
+                        "medium": {"count": 0, "total_savings_zar": 0}}}
+
+        # Collect all issues from every category for pattern matching
+        all_issues = []
+        for cat_name, cat_data in categories.items():
+            if isinstance(cat_data, dict):
+                for issue in cat_data.get("issues", []):
+                    all_issues.append({"category": cat_name, "text": str(issue)})
+
+        matched_labels = set()
         findings = []
 
-        # --- Critical findings ---
-        ssl = categories.get("ssl", {})
-        if ssl.get("grade", "A") in ("D", "E", "F"):
-            findings.append({"severity": "Critical", "category": "SSL/TLS",
-                             "finding": f"SSL grade {ssl.get('grade', '?')}",
-                             "recommendation": "Upgrade to TLS 1.2+ with strong cipher suites",
-                             "reduction_pct": 0.08})
+        for mit in self.MITIGATIONS:
+            pat = re.compile(mit["pattern"], re.IGNORECASE)
+            matched_issue = None
+            for issue in all_issues:
+                if pat.search(issue["text"]):
+                    matched_issue = issue["text"]
+                    break
+            if not matched_issue:
+                continue
+            if mit["label"] in matched_labels:
+                continue
+            matched_labels.add(mit["label"])
 
-        rdp_exposed = False
-        for svc in categories.get("high_risk_protocols", {}).get("exposed_services", []):
-            if svc.get("port") in (3389, 3388):
-                rdp_exposed = True
-                break
-        if rdp_exposed:
-            findings.append({"severity": "Critical", "category": "Remote Access",
-                             "finding": "RDP port exposed to internet",
-                             "recommendation": "Disable public RDP; use VPN or zero-trust access",
-                             "reduction_pct": 0.15})
+            savings = 0
 
-        kev_count = 0
-        for ip_data in categories.get("shodan_vulns", {}).get("ip_results", {}).values():
-            kev_count += len([v for v in ip_data.get("vulns", []) if v.get("kev")])
-        if kev_count > 0:
-            findings.append({"severity": "Critical", "category": "Patching",
-                             "finding": f"{kev_count} CISA KEV (actively exploited) vulnerabilities",
-                             "recommendation": "Patch all KEV-listed CVEs immediately",
-                             "reduction_pct": min(0.12, kev_count * 0.04)})
+            if "rsi_reduction" in mit:
+                if rsi_score > 0:
+                    savings += rw_loss * (mit["rsi_reduction"] / rsi_score)
 
-        # --- High findings ---
-        dmarc = categories.get("email_security", {}).get("dmarc", {})
-        if not dmarc.get("present"):
-            findings.append({"severity": "High", "category": "Email Security",
-                             "finding": "No DMARC record",
-                             "recommendation": "Implement DMARC with p=reject policy",
-                             "reduction_pct": 0.06})
-        elif dmarc.get("policy") == "none":
-            findings.append({"severity": "High", "category": "Email Security",
-                             "finding": "DMARC policy is 'none' — not enforced",
-                             "recommendation": "Upgrade DMARC policy to p=quarantine or p=reject",
-                             "reduction_pct": 0.04})
+            if "probability_reduction" in mit:
+                if p_breach > 0:
+                    savings += db_loss * (mit["probability_reduction"] / p_breach)
 
-        spf = categories.get("email_security", {}).get("spf", {})
-        if not spf.get("present"):
-            findings.append({"severity": "High", "category": "Email Security",
-                             "finding": "No SPF record",
-                             "recommendation": "Add SPF record to prevent email spoofing",
-                             "reduction_pct": 0.03})
+            if "bi_reduction" in mit:
+                p_int = bi_scenario.get("probability", 0.05)
+                if p_int > 0:
+                    savings += bi_loss * (mit["bi_reduction"] / p_int)
 
-        if not categories.get("waf", {}).get("detected"):
-            findings.append({"severity": "High", "category": "WAF/DDoS",
-                             "finding": "No WAF or DDoS protection detected",
-                             "recommendation": "Deploy a WAF (Cloudflare, AWS WAF, etc.)",
-                             "reduction_pct": 0.07})
+            savings = round(min(savings, current_loss))
 
-        exposed_db = [s for s in categories.get("high_risk_protocols", {}).get("exposed_services", [])
-                      if s.get("port") in (3306, 5432, 27017, 6379, 9200, 11211)]
-        if exposed_db:
-            findings.append({"severity": "High", "category": "Database Exposure",
-                             "finding": f"{len(exposed_db)} database port(s) exposed to internet",
-                             "recommendation": "Restrict database access to private networks/VPN",
-                             "reduction_pct": min(0.10, len(exposed_db) * 0.04)})
+            findings.append({
+                "severity": mit["severity"],
+                "finding": matched_issue,
+                "recommendation": mit["label"],
+                "estimated_annual_savings_zar": savings,
+                "scenario_impact": mit["scenario"],
+            })
 
-        breach_count = categories.get("breaches", {}).get("breach_count", 0)
-        if breach_count >= 3:
-            findings.append({"severity": "High", "category": "Credential Hygiene",
-                             "finding": f"Domain appears in {breach_count} known breaches",
-                             "recommendation": "Enforce password resets, enable MFA across all accounts",
-                             "reduction_pct": 0.05})
-
-        # --- Medium findings ---
-        if ssl.get("grade", "A") in ("C",):
-            findings.append({"severity": "Medium", "category": "SSL/TLS",
-                             "finding": f"SSL grade {ssl.get('grade', 'C')} — weak configuration",
-                             "recommendation": "Enforce HTTPS, disable weak ciphers/protocols",
-                             "reduction_pct": 0.04})
-
-        headers = categories.get("http_headers", {})
-        if headers.get("score", 100) < 50:
-            findings.append({"severity": "Medium", "category": "HTTP Headers",
-                             "finding": f"Security headers score {headers.get('score', 0)}/100",
-                             "recommendation": "Add CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy",
-                             "reduction_pct": 0.03})
-
-        exposed_admin = categories.get("exposed_admin", {}).get("exposed_paths", [])
-        if exposed_admin:
-            findings.append({"severity": "Medium", "category": "Admin Exposure",
-                             "finding": f"{len(exposed_admin)} admin/sensitive paths publicly accessible",
-                             "recommendation": "Restrict admin panels to VPN/internal network; add authentication",
-                             "reduction_pct": min(0.05, len(exposed_admin) * 0.015)})
-
-        dkim = categories.get("email_security", {}).get("dkim", {})
-        if not dkim.get("selectors_found"):
-            findings.append({"severity": "Medium", "category": "Email Security",
-                             "finding": "No DKIM signing detected",
-                             "recommendation": "Enable DKIM signing on your mail server",
-                             "reduction_pct": 0.02})
-
-        vpn = categories.get("vpn_remote", {})
-        if vpn.get("portals_found"):
-            findings.append({"severity": "Medium", "category": "VPN/Remote Access",
-                             "finding": f"VPN/remote access portal detected ({', '.join(vpn.get('portals_found', [])[:3])})",
-                             "recommendation": "Ensure MFA is enforced; implement zero-trust network access",
-                             "reduction_pct": 0.04})
-
-        if not categories.get("cloud_cdn", {}).get("cdn_detected"):
-            findings.append({"severity": "Medium", "category": "CDN/Resilience",
-                             "finding": "No CDN detected",
-                             "recommendation": "Deploy a CDN for DDoS resilience and availability",
-                             "reduction_pct": 0.02})
-
-        tech = categories.get("tech_stack", {})
-        eol_tech = [t for t in tech.get("technologies", []) if t.get("end_of_life")]
-        if eol_tech:
-            findings.append({"severity": "Medium", "category": "Technology Stack",
-                             "finding": f"{len(eol_tech)} end-of-life technology component(s) detected",
-                             "recommendation": "Upgrade to supported versions to receive security patches",
-                             "reduction_pct": min(0.05, len(eol_tech) * 0.02)})
-
-        dehashed = categories.get("dehashed", {})
-        leak_count = dehashed.get("total_results", 0)
-        if leak_count > 100:
-            findings.append({"severity": "Medium", "category": "Credential Leaks",
-                             "finding": f"{leak_count} credentials found in dark web/leak databases",
-                             "recommendation": "Force password resets for affected accounts; enforce MFA",
-                             "reduction_pct": 0.04})
-        elif leak_count > 0:
-            findings.append({"severity": "Medium", "category": "Credential Leaks",
-                             "finding": f"{leak_count} credential(s) in leak databases",
-                             "recommendation": "Reset affected passwords; enable MFA",
-                             "reduction_pct": 0.02})
-
-        # Sort by severity then reduction_pct
+        # Sort: Critical first, then High, then Medium; within tier by savings desc
         severity_order = {"Critical": 0, "High": 1, "Medium": 2}
-        findings.sort(key=lambda f: (severity_order.get(f["severity"], 3), -f["reduction_pct"]))
+        findings.sort(key=lambda f: (severity_order.get(f["severity"], 3), -f["estimated_annual_savings_zar"]))
 
-        # Calculate cumulative savings (cap at 85% of total loss)
-        cumulative_reduction = 0.0
+        # Cap total savings at 85% of current loss (can't eliminate all risk)
+        total_savings = sum(f["estimated_annual_savings_zar"] for f in findings)
+        if total_savings > current_loss * 0.85:
+            scale = (current_loss * 0.85) / total_savings if total_savings > 0 else 0
+            for f in findings:
+                f["estimated_annual_savings_zar"] = round(f["estimated_annual_savings_zar"] * scale)
+            total_savings = round(current_loss * 0.85)
+
+        summary = {"critical": {"count": 0, "total_savings_zar": 0},
+                    "high": {"count": 0, "total_savings_zar": 0},
+                    "medium": {"count": 0, "total_savings_zar": 0}}
         for f in findings:
-            f["estimated_savings"] = round(total_loss * f["reduction_pct"])
-            cumulative_reduction += f["reduction_pct"]
-
-        cumulative_reduction = min(0.85, cumulative_reduction)
-        total_savings = round(total_loss * cumulative_reduction)
-        mitigated_loss = total_loss - total_savings
+            key = f["severity"].lower()
+            if key in summary:
+                summary[key]["count"] += 1
+                summary[key]["total_savings_zar"] += f["estimated_annual_savings_zar"]
 
         return {
+            "current_annual_loss": current_loss,
+            "mitigated_annual_loss": current_loss - total_savings,
+            "total_potential_savings": total_savings,
             "findings": findings,
-            "current_loss": total_loss,
-            "mitigated_loss": mitigated_loss,
-            "savings": total_savings,
-            "reduction_pct": round(cumulative_reduction * 100, 1),
+            "summary": summary,
         }
 
 

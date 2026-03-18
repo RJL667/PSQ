@@ -870,7 +870,7 @@ def cat_financial_impact(d, S):
 
 def cat_risk_mitigations(d, S):
     fin = d.get("financial_impact", {})
-    mit = fin.get("mitigations", {})
+    mit = fin.get("risk_mitigations", {})
     findings = mit.get("findings", [])
     if not findings:
         return []
@@ -878,10 +878,10 @@ def cat_risk_mitigations(d, S):
     is_zar = fin.get("currency") == "ZAR"
     cur = "R" if is_zar else "$"
 
-    total_savings = mit.get("savings", 0)
-    current = mit.get("current_loss", 0)
-    mitigated = mit.get("mitigated_loss", 0)
-    reduction_pct = mit.get("reduction_pct", 0)
+    total_savings = mit.get("total_potential_savings", 0)
+    current = mit.get("current_annual_loss", 0)
+    mitigated = mit.get("mitigated_annual_loss", 0)
+    reduction_pct = round((total_savings / current * 100) if current > 0 else 0, 1)
 
     rows = [
         ("Current Annual Loss",    f"{cur} {current:,.0f}"),
@@ -890,20 +890,20 @@ def cat_risk_mitigations(d, S):
         ("", ""),
     ]
 
-    # Count by severity
-    for sev in ("Critical", "High", "Medium"):
-        sev_findings = [f for f in findings if f.get("severity") == sev]
-        if sev_findings:
-            sev_total = sum(f.get("estimated_savings", 0) for f in sev_findings)
-            rows.append((f"{sev} Findings", f"{len(sev_findings)} — {cur} {sev_total:,.0f} savings"))
+    # Count by severity from summary
+    summary = mit.get("summary", {})
+    for sev in ("critical", "high", "medium"):
+        s = summary.get(sev, {})
+        if s.get("count", 0) > 0:
+            rows.append((f"{sev.title()} Findings", f"{s['count']} — {cur} {s['total_savings_zar']:,.0f} savings"))
 
     rows.append(("", ""))
 
     # Individual findings
     for f in findings:
         sev = f.get("severity", "Medium")
-        savings = f.get("estimated_savings", 0)
-        rows.append((f"[{sev}] {f.get('category', '')}: {f.get('recommendation', '')}",
+        savings = f.get("estimated_annual_savings_zar", 0)
+        rows.append((f"[{sev}] {f.get('recommendation', '')}",
                       f"{cur} {savings:,.0f}"))
 
     rows.append(("", ""))
