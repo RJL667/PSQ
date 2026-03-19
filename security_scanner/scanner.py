@@ -919,6 +919,87 @@ class DNSInfrastructureChecker:
     INFO_PORTS = {80: "HTTP", 443: "HTTPS", 993: "IMAPS", 995: "POP3S", 8080: "HTTP-Alt", 8443: "HTTPS-Alt"}
     ALL_PORTS = {**HIGH_RISK_PORTS, **MEDIUM_RISK_PORTS, **INFO_PORTS}
 
+    # Per-port exploit intelligence for insurance underwriting context
+    PORT_INTEL = {
+        21: {
+            "risk_level": "CRITICAL RISK",
+            "typical_exploits": "Anonymous login, credential brute-force, cleartext credential theft (CVE-2015-3306, CVE-2019-12815)",
+            "vuln_metrics": "CVSS 9.8 | EPSS 85% | CISA KEV",
+            "notable_cves": ["CVE-2015-3306", "CVE-2019-12815", "CVE-2010-4221"],
+            "insurance_risk": "Data exfiltration via unencrypted file transfer; ransomware initial access vector",
+        },
+        22: {
+            "risk_level": "HIGH RISK",
+            "typical_exploits": "Brute-force attacks, key-based auth bypass (CVE-2024-6387 regreSSHion, CVE-2023-48795 Terrapin)",
+            "vuln_metrics": "CVSS 8.1 | EPSS 35%",
+            "notable_cves": ["CVE-2024-6387", "CVE-2023-48795", "CVE-2016-20012"],
+            "insurance_risk": "Remote command execution if compromised; privilege escalation",
+        },
+        23: {
+            "risk_level": "CRITICAL RISK",
+            "typical_exploits": "Cleartext credential theft, session hijacking, no encryption",
+            "vuln_metrics": "CVSS 9.8 | EPSS 90%",
+            "notable_cves": ["CVE-2020-10188", "CVE-2011-4862"],
+            "insurance_risk": "Full credential interception; trivially exploitable remote access",
+        },
+        25: {
+            "risk_level": "MEDIUM RISK",
+            "typical_exploits": "Open relay abuse, email spoofing, spam distribution",
+            "vuln_metrics": "CVSS 5.3 | EPSS 10%",
+            "notable_cves": ["CVE-2021-3156", "CVE-2020-28018"],
+            "insurance_risk": "Email-based attacks; domain reputation damage if abused as open relay",
+        },
+        110: {
+            "risk_level": "HIGH RISK",
+            "typical_exploits": "Cleartext credential theft, brute-force, buffer overflow attacks",
+            "vuln_metrics": "CVSS 7.5 | EPSS 15%",
+            "notable_cves": ["CVE-2011-1720"],
+            "insurance_risk": "Email account takeover via credential interception",
+        },
+        143: {
+            "risk_level": "HIGH RISK",
+            "typical_exploits": "Cleartext credential interception, brute-force, injection attacks",
+            "vuln_metrics": "CVSS 7.5 | EPSS 12%",
+            "notable_cves": ["CVE-2021-33515", "CVE-2019-11500"],
+            "insurance_risk": "Email account compromise leading to BEC or data theft",
+        },
+        3306: {
+            "risk_level": "CRITICAL RISK",
+            "typical_exploits": "Authentication bypass (CVE-2012-2122), SQL injection, credential brute-force, data dumping",
+            "vuln_metrics": "CVSS 9.8 | EPSS 92% | CISA KEV",
+            "notable_cves": ["CVE-2012-2122", "CVE-2016-6662", "CVE-2020-14812"],
+            "insurance_risk": "Direct database access enables mass data theft; ransomware encryption of data",
+        },
+        3389: {
+            "risk_level": "CRITICAL RISK",
+            "typical_exploits": "BlueKeep (CVE-2019-0708), credential brute-force, NLA bypass, session hijacking",
+            "vuln_metrics": "CVSS 9.8 | EPSS 97% | CISA KEV",
+            "notable_cves": ["CVE-2019-0708", "CVE-2019-1181", "CVE-2019-1182"],
+            "insurance_risk": "Primary ransomware initial access vector; full system compromise",
+        },
+        5432: {
+            "risk_level": "CRITICAL RISK",
+            "typical_exploits": "Credential brute-force, privilege escalation (CVE-2023-5868), SQL injection chaining",
+            "vuln_metrics": "CVSS 8.8 | EPSS 40%",
+            "notable_cves": ["CVE-2023-5868", "CVE-2019-9193", "CVE-2023-39417"],
+            "insurance_risk": "Direct access to structured business data; credential reuse attacks",
+        },
+        5900: {
+            "risk_level": "CRITICAL RISK",
+            "typical_exploits": "Authentication bypass, unencrypted session hijacking, brute-force",
+            "vuln_metrics": "CVSS 9.8 | EPSS 60%",
+            "notable_cves": ["CVE-2006-2369", "CVE-2019-15681"],
+            "insurance_risk": "Full desktop control without encryption; trivial lateral movement",
+        },
+        8080: {
+            "risk_level": "MEDIUM RISK",
+            "typical_exploits": "Default admin consoles, proxy abuse, application-level attacks",
+            "vuln_metrics": "CVSS 5.0 | EPSS 8%",
+            "notable_cves": [],
+            "insurance_risk": "Exposed management interface; potential application compromise",
+        },
+    }
+
     def check(self, domain: str, ip: str = None) -> dict:
         result = {
             "status": "completed", "dns_records": {}, "reverse_dns": None,
@@ -1006,10 +1087,25 @@ class DNSInfrastructureChecker:
     def _assess_risk(self, open_ports: list) -> tuple:
         issues, score = [], 0
         for p in open_ports:
+            # Enrich port data with exploit intelligence
+            intel = self.PORT_INTEL.get(p["port"])
+            if intel:
+                p["risk_level"] = intel["risk_level"]
+                p["typical_exploits"] = intel["typical_exploits"]
+                p["vuln_metrics"] = intel["vuln_metrics"]
+                p["notable_cves"] = intel["notable_cves"]
+                p["insurance_risk"] = intel["insurance_risk"]
+
             if p["risk"] == "high":
-                score += 40; issues.append(f"High-risk port open: {p['port']} ({p['service']})")
+                desc = intel["insurance_risk"] if intel else ""
+                score += 40
+                issues.append(f"High-risk port open: {p['port']} ({p['service']}) — {desc}" if desc
+                              else f"High-risk port open: {p['port']} ({p['service']})")
             elif p["risk"] == "medium":
-                score += 15; issues.append(f"Medium-risk port open: {p['port']} ({p['service']})")
+                desc = intel["insurance_risk"] if intel else ""
+                score += 15
+                issues.append(f"Medium-risk port open: {p['port']} ({p['service']}) — {desc}" if desc
+                              else f"Medium-risk port open: {p['port']} ({p['service']})")
         return min(score, 150), issues
 
 
@@ -1037,6 +1133,54 @@ class HighRiskProtocolChecker:
         8069: "Odoo ERP",
     }
 
+    SERVICE_INTEL = {
+        445: {"known_exploits": "EternalBlue (CVE-2017-0144), relay attacks, ransomware propagation",
+              "vuln_metrics": "CVSS 9.8 | EPSS 97% | CISA KEV",
+              "notable_cves": ["CVE-2017-0144", "CVE-2020-0796", "CVE-2017-0145"],
+              "insurance_risk": "Primary ransomware lateral movement vector; mass encryption of network shares",
+              "underwriting_impact": "Exposed SMB is a critical ransomware indicator"},
+        161: {"known_exploits": "Community string brute-force, information disclosure, device enumeration",
+              "vuln_metrics": "CVSS 7.5 | EPSS 20%",
+              "notable_cves": ["CVE-2017-6736", "CVE-2002-0012"],
+              "insurance_risk": "Network device enumeration; configuration extraction",
+              "underwriting_impact": "SNMP exposure reveals network architecture to attackers"},
+        27017: {"known_exploits": "No-auth default config, data exfiltration, ransom-delete attacks",
+                "vuln_metrics": "CVSS 9.8 | EPSS 88%",
+                "notable_cves": ["CVE-2015-7882", "CVE-2013-1892"],
+                "insurance_risk": "Mass data theft from misconfigured NoSQL database; ransom deletion",
+                "underwriting_impact": "Exposed MongoDB frequently targeted by automated ransom bots"},
+        6379: {"known_exploits": "No-auth RCE via SLAVEOF, config rewrite, Lua sandbox escape",
+               "vuln_metrics": "CVSS 9.8 | EPSS 85%",
+               "notable_cves": ["CVE-2022-0543", "CVE-2021-32761"],
+               "insurance_risk": "Remote code execution leading to full server compromise",
+               "underwriting_impact": "Exposed Redis enables trivial RCE on the host system"},
+        9200: {"known_exploits": "No-auth data access, Groovy RCE, cluster takeover",
+               "vuln_metrics": "CVSS 9.8 | EPSS 75%",
+               "notable_cves": ["CVE-2015-1427", "CVE-2014-3120"],
+               "insurance_risk": "Full search index exfiltration; remote code execution",
+               "underwriting_impact": "Exposed Elasticsearch enables mass data extraction"},
+        5432: {"known_exploits": "Credential brute-force, privilege escalation (CVE-2023-5868), SQL injection chaining",
+               "vuln_metrics": "CVSS 8.8 | EPSS 40%",
+               "notable_cves": ["CVE-2023-5868", "CVE-2019-9193", "CVE-2023-39417"],
+               "insurance_risk": "Direct access to structured business data; credential reuse attacks",
+               "underwriting_impact": "Exposed PostgreSQL significantly increases data breach claim probability"},
+        1433: {"known_exploits": "Credential brute-force, xp_cmdshell RCE, SQL injection",
+               "vuln_metrics": "CVSS 9.8 | EPSS 70%",
+               "notable_cves": ["CVE-2020-0618", "CVE-2019-1068"],
+               "insurance_risk": "Remote code execution via SQL Server; lateral movement",
+               "underwriting_impact": "Exposed MSSQL enables direct command execution on the server"},
+        5984: {"known_exploits": "No-auth admin access, data replication hijack",
+               "vuln_metrics": "CVSS 9.8 | EPSS 50%",
+               "notable_cves": ["CVE-2017-12635", "CVE-2017-12636"],
+               "insurance_risk": "Database admin takeover; data manipulation and theft",
+               "underwriting_impact": "Exposed CouchDB admin panel accessible without credentials"},
+        2375: {"known_exploits": "Unauthenticated container escape, host filesystem mount, crypto-mining",
+               "vuln_metrics": "CVSS 9.8 | EPSS 90%",
+               "notable_cves": ["CVE-2019-5736"],
+               "insurance_risk": "Full host compromise via container escape; crypto-mining and ransomware",
+               "underwriting_impact": "Exposed Docker API = full host root access"},
+    }
+
     def check(self, domain: str, ip: str = None) -> dict:
         result = {
             "status": "completed",
@@ -1058,7 +1202,12 @@ class HighRiskProtocolChecker:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(3)
                 if s.connect_ex((ip, port)) == 0:
-                    return {"port": port, "service": service}
+                    svc = {"port": port, "service": service}
+                    # Enrich with exploit intelligence
+                    intel = self.SERVICE_INTEL.get(port)
+                    if intel:
+                        svc.update(intel)
+                    return svc
             except Exception:
                 pass
             finally:
@@ -1080,9 +1229,9 @@ class HighRiskProtocolChecker:
         result["critical_count"] = len(exposed)
 
         for e in exposed:
+            desc = e.get("insurance_risk", "database/service should never be publicly accessible")
             result["issues"].append(
-                f"CRITICAL: {e['service']} (port {e['port']}) exposed to internet — "
-                f"database/service should never be publicly accessible"
+                f"CRITICAL: {e['service']} (port {e['port']}) exposed to internet — {desc}"
             )
 
         return result

@@ -394,6 +394,32 @@
       </div>
     </div>
 
+    <!-- Data Breach Index -->
+    {% set dbi = results.insurance.dbi %}
+    {% if dbi %}
+    {% set dbi_tl = 'tl-green' if dbi.dbi_score >= 80 else ('tl-amber' if dbi.dbi_score >= 40 else 'tl-red') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ dbi_tl }}"></div><div class="cat-title">Data Breach Index (DBI)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">{{ dbi.dbi_score }}/{{ dbi.max_score }} — {{ dbi.label }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="vuln-table">
+          <thead><tr><th>Component</th><th>Value</th><th>Points</th><th>Max</th></tr></thead>
+          <tbody>
+          {% for key, comp in dbi.components.items() %}
+            <tr><td>{{ key | replace('_', ' ') | capitalize }}</td><td>{{ comp.value }}</td><td>{{ comp.points }}</td><td>{{ comp.max }}</td></tr>
+          {% endfor %}
+            <tr style="border-top:2px solid var(--border);font-weight:700;"><td>Total</td><td></td><td>{{ dbi.dbi_score }}</td><td>{{ dbi.max_score }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Financial Impact -->
     {% set fin = results.insurance.financial_impact %}
     {% if fin and fin.total %}
@@ -409,53 +435,67 @@
         </div>
       </div>
       <div class="cat-body open">
-        {% if is_zar and fin.annual_revenue_zar %}
-        <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px;">
-          Industry: <strong>{{ fin.industry | title }}</strong> &nbsp;|&nbsp;
-          Annual Revenue: <strong>R {{ '{:,.0f}'.format(fin.annual_revenue_zar) }}</strong>
-          {% if not results.scan_context or not results.scan_context.annual_revenue_zar %}<span style="opacity:.6;"> (default estimate)</span>{% endif %}
-        </div>
-        {% endif %}
         {% if is_zar %}
-        {# ZAR path: scenarios have estimated_loss + probability (ransomware uses rsi_score) #}
-        <table class="vuln-table">
-          <thead><tr><th>Scenario</th><th>Probability / Driver</th><th>Estimated Loss</th><th>Key Detail</th></tr></thead>
-          <tbody>
-            {% set db = fin.scenarios.data_breach %}
-            <tr>
-              <td>Data Breach</td>
-              <td>P={{ '%.1f'|format((db.probability | default(0)) * 100) }}%</td>
-              <td><strong>{{ cur }} {{ '{:,.0f}'.format(db.estimated_loss | default(0)) }}</strong></td>
-              <td>{{ '{:,}'.format(db.estimated_records | default(0)) }} records @ {{ cur }}{{ '{:,.0f}'.format(db.cost_per_record | default(0)) }}/rec &nbsp;+&nbsp; POPIA {{ cur }} {{ '{:,.0f}'.format(db.regulatory_fine | default(0)) }}</td>
-            </tr>
-            {% set rw = fin.scenarios.ransomware %}
-            <tr>
-              <td>Ransomware</td>
-              <td>RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }}</td>
-              <td><strong>{{ cur }} {{ '{:,.0f}'.format(rw.estimated_loss | default(0)) }}</strong></td>
-              <td>{{ rw.avg_downtime_days | default(22) }} days downtime &nbsp;+&nbsp; {{ cur }} {{ '{:,.0f}'.format(rw.ransom_estimate | default(0)) }} ransom</td>
-            </tr>
-            {% set bi = fin.scenarios.business_interruption %}
-            <tr>
-              <td>Business Interruption</td>
-              <td>P={{ '%.1f'|format((bi.probability | default(0)) * 100) }}%</td>
-              <td><strong>{{ cur }} {{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }}</strong></td>
-              <td>—</td>
-            </tr>
-            <tr style="border-top:2px solid var(--border);font-weight:700;">
-              <td>Total Estimated Loss</td><td></td>
-              <td style="color:var(--critical);">{{ cur }} {{ '{:,.0f}'.format(fin.total.most_likely) }}</td>
-              <td>Min {{ cur }} {{ '{:,.0f}'.format(fin.total.min) }} &nbsp;|&nbsp; Max {{ cur }} {{ '{:,.0f}'.format(fin.total.max) }}</td>
-            </tr>
-          </tbody>
-        </table>
+        {# ── ZAR Financial Impact — full granularity ── #}
+        {% set db = fin.scenarios.data_breach %}
+        {% set rw = fin.scenarios.ransomware %}
+        {% set bi = fin.scenarios.business_interruption %}
         {% set ins = fin.insurance_recommendation %}
+
+        {# Context strip #}
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:180px;">Industry</td><td><strong>{{ fin.industry | title }}</strong></td></tr>
+          <tr><td>Annual Revenue</td><td><strong>R {{ '{:,.0f}'.format(fin.annual_revenue_zar | default(0)) }}</strong></td></tr>
+        </table>
+
+        {# Estimated Annual Loss range #}
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Estimated Annual Loss</div>
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:180px;">Est. Annual Loss (Min)</td><td>R {{ '{:,.0f}'.format(fin.total.min) }}</td></tr>
+          <tr><td>Est. Annual Loss (Likely)</td><td><strong style="color:var(--critical);">R {{ '{:,.0f}'.format(fin.total.most_likely) }}</strong></td></tr>
+          <tr><td>Est. Annual Loss (Max)</td><td>R {{ '{:,.0f}'.format(fin.total.max) }}</td></tr>
+        </table>
+
+        {# Scenario breakdown #}
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Scenario Breakdown</div>
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="width:180px;font-weight:600;">Data Breach Loss</td>
+            <td>R {{ '{:,.0f}'.format(db.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((db.probability | default(0)) * 100) }}%)</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);padding-left:20px;">Records at risk</td>
+            <td>{{ '{:,}'.format(db.estimated_records | default(0)) }} @ R{{ '{:,.0f}'.format(db.cost_per_record | default(0)) }}/rec</td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);padding-left:20px;">POPIA regulatory</td>
+            <td>R {{ '{:,.0f}'.format(db.regulatory_fine | default(0)) }}</td>
+          </tr>
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="font-weight:600;">Ransomware Loss</td>
+            <td>R {{ '{:,.0f}'.format(rw.estimated_loss | default(0)) }} <span style="color:var(--muted);">(RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }})</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);padding-left:20px;">Avg downtime</td>
+            <td>{{ rw.avg_downtime_days | default(22) }} days</td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);padding-left:20px;">Ransom estimate</td>
+            <td>R {{ '{:,.0f}'.format(rw.ransom_estimate | default(0)) }}</td>
+          </tr>
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="font-weight:600;">Bus. Interruption</td>
+            <td>R {{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((bi.probability | default(0)) * 100) }}%)</span></td>
+          </tr>
+        </table>
+
+        {# Insurance Recommendation #}
         {% if ins %}
-        <div style="margin-top:14px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Insurance Cover Recommendation</div>
-        <table class="kv-table" style="margin-top:6px;">
-          <tr><td>Minimum Cover</td><td>{{ cur }} {{ '{:,.0f}'.format(ins.minimum_cover_zar | default(0)) }}</td></tr>
-          <tr><td>Recommended Cover</td><td><strong>{{ cur }} {{ '{:,.0f}'.format(ins.recommended_cover_zar | default(0)) }}</strong></td></tr>
-          <tr><td>Premium Risk Tier</td><td><strong>{{ ins.premium_risk_tier | default('N/A') }}</strong></td></tr>
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Insurance Cover Recommendation</div>
+        <table class="kv-table">
+          <tr><td style="width:180px;">Min. Insurance Cover</td><td>R {{ '{:,.0f}'.format(ins.minimum_cover_zar | default(0)) }}</td></tr>
+          <tr><td>Rec. Insurance Cover</td><td><strong>R {{ '{:,.0f}'.format(ins.recommended_cover_zar | default(0)) }}</strong></td></tr>
+          <tr><td>Premium Risk Tier</td><td><strong style="{% if ins.premium_risk_tier == 'High' %}color:var(--critical);{% elif ins.premium_risk_tier == 'Medium' %}color:var(--medium);{% else %}color:var(--low);{% endif %}">{{ ins.premium_risk_tier | default('N/A') }}</strong></td></tr>
         </table>
         {% endif %}
         {% else %}
@@ -555,32 +595,6 @@
           </tbody>
         </table>
         <div style="margin-top:10px;font-size:.72rem;color:var(--muted);">Savings estimates are modelled projections based on FAIR methodology. Actual risk reduction depends on implementation quality and scope.</div>
-      </div>
-    </div>
-    {% endif %}
-
-    <!-- Data Breach Index -->
-    {% set dbi = results.insurance.dbi %}
-    {% if dbi %}
-    {% set dbi_tl = 'tl-green' if dbi.dbi_score >= 80 else ('tl-amber' if dbi.dbi_score >= 40 else 'tl-red') %}
-    <div class="cat-card">
-      <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light {{ dbi_tl }}"></div><div class="cat-title">Data Breach Index (DBI)</div></div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade">{{ dbi.dbi_score }}/{{ dbi.max_score }} — {{ dbi.label }}</span>
-          <span class="chevron">&#9660;</span>
-        </div>
-      </div>
-      <div class="cat-body">
-        <table class="vuln-table">
-          <thead><tr><th>Component</th><th>Value</th><th>Points</th><th>Max</th></tr></thead>
-          <tbody>
-          {% for key, comp in dbi.components.items() %}
-            <tr><td>{{ key | replace('_', ' ') | capitalize }}</td><td>{{ comp.value }}</td><td>{{ comp.points }}</td><td>{{ comp.max }}</td></tr>
-          {% endfor %}
-            <tr style="border-top:2px solid var(--border);font-weight:700;"><td>Total</td><td></td><td>{{ dbi.dbi_score }}</td><td>{{ dbi.max_score }}</td></tr>
-          </tbody>
-        </table>
       </div>
     </div>
     {% endif %}
@@ -828,15 +842,12 @@
               <span class="port-chip port-{{ p.risk }}" style="margin-right:6px;">{{ p.port }}/{{ p.service }}</span>
               <span style="color:{% if p.risk == 'high' %}#e74c3c{% else %}#e67e22{% endif %};">{{ p.risk | upper }} RISK</span>
             </div>
-            {% if p.exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Typical exploits:</span> <span style="color:#cbd5e1;">{{ p.exploits }}</span></div>{% endif %}
-            {% if p.typical_cvss is defined and p.typical_cvss > 0 %}
-            <div style="margin-bottom:3px;display:flex;flex-wrap:wrap;gap:10px;">
-              <span><span style="color:#94a3b8;">Typical CVSS:</span> <span style="font-weight:700;color:{% if p.typical_cvss >= 9.0 %}#e74c3c{% elif p.typical_cvss >= 7.0 %}#e67e22{% else %}#f39c12{% endif %};">{{ p.typical_cvss }}</span> <span style="font-size:0.75rem;color:#64748b;">({{ p.typical_severity | upper }})</span></span>
-              <span><span style="color:#94a3b8;">Typical EPSS:</span> <span style="font-weight:600;color:{% if p.typical_epss >= 0.5 %}#e74c3c{% elif p.typical_epss >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.0f" | format(p.typical_epss * 100) }}%</span></span>
-              {% if p.in_kev %}<span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span>{% endif %}
-            </div>
+            {% if p.typical_exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Typical exploits:</span> <span style="color:#cbd5e1;">{{ p.typical_exploits }}</span></div>{% endif %}
+            {% if p.vuln_metrics is defined %}
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Vuln metrics:</span> <span style="font-weight:600;color:{% if 'CISA KEV' in p.vuln_metrics %}#e74c3c{% elif 'CVSS 9' in p.vuln_metrics %}#e74c3c{% elif 'CVSS 8' in p.vuln_metrics or 'CVSS 7' in p.vuln_metrics %}#e67e22{% else %}#f39c12{% endif %};">{{ p.vuln_metrics }}</span>
+            {% if 'CISA KEV' in p.vuln_metrics %} <span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span>{% endif %}</div>
             {% endif %}
-            {% if p.typical_cves is defined and p.typical_cves %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span> <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;">{{ p.typical_cves | join(', ') }}</span></div>{% endif %}
+            {% if p.notable_cves is defined and p.notable_cves %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span> <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;">{{ p.notable_cves | join(', ') }}</span></div>{% endif %}
             {% if p.insurance_risk is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Insurance risk:</span> <span style="color:#fbbf24;">{{ p.insurance_risk }}</span></div>{% endif %}
             {% if p.underwriting_impact is defined %}<div><span style="color:#94a3b8;">Underwriting impact:</span> <span style="color:#fb923c;">{{ p.underwriting_impact }}</span></div>{% endif %}
           </div>
@@ -864,15 +875,12 @@
             <span class="port-chip port-critical" style="margin-right:6px;">{{ s.port }}/{{ s.service }}</span>
             <span style="color:#e74c3c;">CRITICAL EXPOSURE</span>
           </div>
-          {% if s.exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Known exploits:</span> <span style="color:#cbd5e1;">{{ s.exploits }}</span></div>{% endif %}
-          {% if s.typical_cvss is defined and s.typical_cvss > 0 %}
-          <div style="margin-bottom:3px;display:flex;flex-wrap:wrap;gap:10px;">
-            <span><span style="color:#94a3b8;">Typical CVSS:</span> <span style="font-weight:700;color:{% if s.typical_cvss >= 9.0 %}#e74c3c{% elif s.typical_cvss >= 7.0 %}#e67e22{% else %}#f39c12{% endif %};">{{ s.typical_cvss }}</span> <span style="font-size:0.75rem;color:#64748b;">({{ s.typical_severity | upper }})</span></span>
-            <span><span style="color:#94a3b8;">Typical EPSS:</span> <span style="font-weight:600;color:{% if s.typical_epss >= 0.5 %}#e74c3c{% elif s.typical_epss >= 0.1 %}#e67e22{% else %}#27ae60{% endif %};">{{ "%.0f" | format(s.typical_epss * 100) }}%</span></span>
-            {% if s.in_kev %}<span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span>{% endif %}
-          </div>
+          {% if s.known_exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Known exploits:</span> <span style="color:#cbd5e1;">{{ s.known_exploits }}</span></div>{% endif %}
+          {% if s.vuln_metrics is defined %}
+          <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Vuln metrics:</span> <span style="font-weight:600;color:{% if 'CISA KEV' in s.vuln_metrics %}#e74c3c{% elif 'CVSS 9' in s.vuln_metrics %}#e74c3c{% elif 'CVSS 8' in s.vuln_metrics or 'CVSS 7' in s.vuln_metrics %}#e67e22{% else %}#f39c12{% endif %};">{{ s.vuln_metrics }}</span>
+          {% if 'CISA KEV' in s.vuln_metrics %} <span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span>{% endif %}</div>
           {% endif %}
-          {% if s.typical_cves is defined and s.typical_cves %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span> <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;">{{ s.typical_cves | join(', ') }}</span></div>{% endif %}
+          {% if s.notable_cves is defined and s.notable_cves %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span> <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;">{{ s.notable_cves | join(', ') }}</span></div>{% endif %}
           {% if s.insurance_risk is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Insurance risk:</span> <span style="color:#fbbf24;">{{ s.insurance_risk }}</span></div>{% endif %}
           {% if s.underwriting_impact is defined %}<div><span style="color:#94a3b8;">Underwriting impact:</span> <span style="color:#fb923c;">{{ s.underwriting_impact }}</span></div>{% endif %}
         </div>

@@ -372,6 +372,18 @@ def cat_dns(d, S):
         ("X-Powered-By",  dns.get("server_info", {}).get("X-Powered-By", "—")),
         ("Reverse DNS",   dns.get("reverse_dns") or "—"),
     ]
+    # Add per-port exploit intel for risky ports
+    risky = [p for p in ports if p["risk"] in ("high", "medium")]
+    for p in risky:
+        rows.append((f"Port {p['port']}/{p['service']}", p.get("risk_level", p["risk"].upper() + " RISK")))
+        if p.get("typical_exploits"):
+            rows.append(("Typical exploits", p["typical_exploits"]))
+        if p.get("vuln_metrics"):
+            rows.append(("Vuln metrics", p["vuln_metrics"]))
+        if p.get("notable_cves"):
+            rows.append(("Notable CVEs", ", ".join(p["notable_cves"])))
+        if p.get("insurance_risk"):
+            rows.append(("Insurance risk", p["insurance_risk"]))
     return build_cat_card("DNS & Open Ports", col, f"{len(ports)} open port(s)", rows, dns.get("issues", []), S)
 
 
@@ -379,7 +391,21 @@ def cat_hrp(d, S):
     hrp  = d.get("high_risk_protocols", {})
     svcs = hrp.get("exposed_services", [])
     col  = C_CRITICAL if svcs else C_GREEN
-    rows = [(s["service"], f"Port {s['port']} — EXPOSED") for s in svcs] or [("Status", "No critical services exposed")]
+    rows = []
+    for s in svcs:
+        rows.append((s["service"], f"Port {s['port']} — EXPOSED"))
+        if s.get("known_exploits"):
+            rows.append(("Known exploits", s["known_exploits"]))
+        if s.get("vuln_metrics"):
+            rows.append(("Vuln metrics", s["vuln_metrics"]))
+        if s.get("notable_cves"):
+            rows.append(("Notable CVEs", ", ".join(s["notable_cves"])))
+        if s.get("insurance_risk"):
+            rows.append(("Insurance risk", s["insurance_risk"]))
+        if s.get("underwriting_impact"):
+            rows.append(("Underwriting impact", s["underwriting_impact"]))
+    if not rows:
+        rows = [("Status", "No critical services exposed")]
     return build_cat_card("Database & Service Exposure", col,
                           f"{len(svcs)} critical exposure(s)", rows, hrp.get("issues", []), S)
 
@@ -1084,9 +1110,9 @@ def generate_pdf(results: dict) -> bytes:
         story.append(PageBreak())
         story += section_header("INSURANCE ANALYTICS", S)
         story += cat_rsi(results, S)
+        story += cat_dbi(results, S)
         story += cat_financial_impact(results.get("insurance", {}), S)
         story += cat_risk_mitigations(results.get("insurance", {}), S)
-        story += cat_dbi(results, S)
         story += cat_remediation(results, S)
 
     story.append(PageBreak())
