@@ -10,3 +10,13 @@ services:
       - key: PORT
         value: "10000"
     plan: free
+
+  - type: web
+    name: life-planner
+    runtime: static
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /planner.html
