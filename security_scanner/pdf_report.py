@@ -2290,34 +2290,33 @@ def cat_financial_impact(d, S):
             ("Est. Annual Loss (Max)",    f"{cur} {eal.get('maximum', 0):,.0f}"),
             ("",                      ""),
         ]
-        # Monte Carlo section
+        # Monte Carlo section - supporting detail. Headline loss exposure
+        # scenarios are presented in the dedicated loss_exposure_scenarios_block
+        # immediately after this card (renders as its own Table flowable).
         if mc_t:
             rows.extend([
                 ("MONTE CARLO ANALYSIS",  f"{mc.get('iterations', 10000):,} simulations — PERT distribution"),
                 ("  90% Confidence Interval", f"{cur} {ci90.get('lower', 0):,.0f} — {cur} {ci90.get('upper', 0):,.0f}"),
                 ("  50% Confidence Interval", f"{cur} {ci50.get('lower', 0):,.0f} — {cur} {ci50.get('upper', 0):,.0f}"),
                 ("",                      ""),
-                ("  Percentile Breakdown", ""),
-                ("    P5  (Best case)",   f"{cur} {mc_t.get('p5', 0):,.0f}"),
-                ("    P25 (Optimistic)",  f"{cur} {mc_t.get('p25', 0):,.0f}"),
-                ("    P50 (Median)",      f"{cur} {mc_t.get('p50', 0):,.0f}"),
-                ("    P75 (Conservative)",f"{cur} {mc_t.get('p75', 0):,.0f}"),
-                ("    P95 (Worst case)",  f"{cur} {mc_t.get('p95', 0):,.0f}"),
+                ("  Reference percentiles",      ""),
+                ("    P5  (low band)",           f"{cur} {mc_t.get('p5', 0):,.0f}"),
+                ("    P25 (lower quartile)",     f"{cur} {mc_t.get('p25', 0):,.0f}"),
+                ("    P75 (upper quartile)",     f"{cur} {mc_t.get('p75', 0):,.0f}"),
+                ("    P95 (severe)",             f"{cur} {mc_t.get('p95', 0):,.0f}"),
                 ("",                      ""),
                 ("  Mean",                f"{cur} {mc_t.get('mean', 0):,.0f}"),
                 ("  Std. Deviation",      f"{cur} {mc_t.get('std_dev', 0):,.0f}"),
                 ("",                      ""),
             ])
-            # Per-scenario MC breakdown
+            # Per-scenario MC breakdown - keep median + cat tail for context
             for sname, slabel in [("data_breach", "Data Breach"), ("ransomware", "Ransomware"), ("business_interruption", "Bus. Interruption")]:
                 smc = sc.get(sname, {}).get("monte_carlo", {})
                 if smc:
                     rows.append((f"  {slabel} (MC)", ""))
-                    rows.append((f"    P5",   f"{cur} {smc.get('p5', 0):,.0f}"))
-                    rows.append((f"    P25",  f"{cur} {smc.get('p25', 0):,.0f}"))
-                    rows.append((f"    P50",  f"{cur} {smc.get('p50', 0):,.0f}"))
-                    rows.append((f"    P75",  f"{cur} {smc.get('p75', 0):,.0f}"))
-                    rows.append((f"    P95",  f"{cur} {smc.get('p95', 0):,.0f}"))
+                    rows.append((f"    P50",   f"{cur} {smc.get('p50', 0):,.0f}"))
+                    rows.append((f"    1-in-100", f"{cur} {smc.get('p99', 0):,.0f}"))
+                    rows.append((f"    1-in-250", f"{cur} {smc.get('p99_6', 0):,.0f}"))
                     rows.append(("", ""))
             rows.append(("", ""))
 
@@ -2328,9 +2327,8 @@ def cat_financial_impact(d, S):
             ("Ransom Demand",         f"{cur} {sc4.get('ransom_demand', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})") if sc4 else ("Ransomware Loss", f"{cur} {sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
             ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
             ("",                      ""),
-            ("Min. Insurance Cover",  f"{cur} {ins.get('minimum_cover_zar', 0):,.0f}"),
-            ("Rec. Insurance Cover",  f"{cur} {ins.get('recommended_cover_zar', 0):,.0f}"),
             ("Premium Risk Tier",     ins.get("premium_risk_tier", "N/A")),
+            ("Cover Sizing",          "See Loss Exposure Scenarios above"),
         ])
     else:
         total  = fin.get("total", {})
@@ -2349,17 +2347,18 @@ def cat_financial_impact(d, S):
             ("",                      ""),
         ]
         if mc_t:
+            # Headline loss exposure scenarios are in the dedicated block;
+            # this section keeps the supporting MC reference detail only.
             rows.extend([
                 ("MONTE CARLO ANALYSIS",  f"{mc.get('iterations', 10000):,} simulations — PERT distribution"),
                 ("  90% Confidence Interval", f"{cur} {ci90.get('lower', 0):,.0f} — {cur} {ci90.get('upper', 0):,.0f}"),
                 ("  50% Confidence Interval", f"{cur} {ci50.get('lower', 0):,.0f} — {cur} {ci50.get('upper', 0):,.0f}"),
                 ("",                      ""),
-                ("  Percentile Breakdown", ""),
-                ("    P5  (Best case)",   f"{cur} {mc_t.get('p5', 0):,.0f}"),
-                ("    P25 (Optimistic)",  f"{cur} {mc_t.get('p25', 0):,.0f}"),
-                ("    P50 (Median)",      f"{cur} {mc_t.get('p50', 0):,.0f}"),
-                ("    P75 (Conservative)",f"{cur} {mc_t.get('p75', 0):,.0f}"),
-                ("    P95 (Worst case)",  f"{cur} {mc_t.get('p95', 0):,.0f}"),
+                ("  Reference percentiles",      ""),
+                ("    P5  (low band)",           f"{cur} {mc_t.get('p5', 0):,.0f}"),
+                ("    P25 (lower quartile)",     f"{cur} {mc_t.get('p25', 0):,.0f}"),
+                ("    P75 (upper quartile)",     f"{cur} {mc_t.get('p75', 0):,.0f}"),
+                ("    P95 (severe)",             f"{cur} {mc_t.get('p95', 0):,.0f}"),
                 ("",                      ""),
                 ("  Mean",                f"{cur} {mc_t.get('mean', 0):,.0f}"),
                 ("  Std. Deviation",      f"{cur} {mc_t.get('std_dev', 0):,.0f}"),
@@ -2371,12 +2370,275 @@ def cat_financial_impact(d, S):
             ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('most_likely', 0):,.0f}"),
             ("",                      ""),
             ("Suggested Deductible",  f"{cur} {ins.get('suggested_deductible', 0):,.0f}"),
-            ("Recommended Coverage",  f"{cur} {ins.get('recommended_coverage', 0):,.0f}"),
+            ("Cover Sizing",          "See Loss Exposure Scenarios above"),
         ])
 
     fb = f"Estimated most likely annual loss of {cur} {most_l:,.0f} based on hybrid quantitative risk model with Monte Carlo simulation."
     return build_cat_card("Financial Impact Analysis", col,
                           f"{cur} {most_l:,.0f}", rows, fin.get("issues", []), S, fallback=fb)
+
+
+def loss_exposure_scenarios_block(d, S):
+    """Dedicated Loss Exposure Scenarios table.
+
+    Built from the schema-driven loss_exposure.scenarios dict in the JSON
+    output. Presents Most Likely (mode) / Median (P50) / 1-in-100 / 1-in-200 /
+    1-in-250 alongside annual exceedance probability. Used in both the
+    summary and full report. Replaces the deprecated Insurance Cover
+    Recommendation card (FAIS reasonable-advice compliance)."""
+    fin = d.get("financial_impact", {})
+    if not fin:
+        return []
+    is_zar = fin.get("currency") == "ZAR"
+    cur = "R " if is_zar else "$"
+    loss_exp = fin.get("loss_exposure", {})
+    scenarios = loss_exp.get("scenarios", {})
+    if not scenarios:
+        return []
+
+    # Fixed scenario order for consistent presentation
+    scenario_order = ["most_likely", "median", "return_1_100", "return_1_200", "return_1_250"]
+    # Column widths per rules #6 / #12 — atomic minimums for the widest
+    # values that may appear in each column:
+    #   Scenario: "1-in-250 event (P99.6)" ~ 22 chars at 9pt
+    #   Modelled Loss: "R 999,999,999,999" ~ 17 chars at 9pt
+    #   Annual Probability: "Most likely" ~ 11 chars at 9pt
+    col_widths = [60 * mm, 55 * mm, 40 * mm]
+
+    table_data = [["Scenario", "Modelled Loss", "Annual Probability"]]
+    for key in scenario_order:
+        sc = scenarios.get(key)
+        if not sc:
+            continue
+        label = sc.get("label", key)
+        loss = sc.get("loss_zar", 0)
+        prob = sc.get("annual_prob")
+        if prob is None:
+            prob_text = "Most likely (peak)"
+        else:
+            # Percentage with one-decimal precision for <1% per rule #8
+            prob_pct = prob * 100
+            if prob_pct >= 1:
+                prob_text = f"{prob_pct:.0f}%"
+            else:
+                prob_text = f"{prob_pct:.1f}%"
+        table_data.append([label, f"{cur}{loss:,.0f}", prob_text])
+
+    table = Table(table_data, colWidths=col_widths)
+    table.setStyle(TableStyle([
+        ("FONTNAME",      (0, 0), (-1, 0),   "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1),  9),
+        ("BACKGROUND",    (0, 0), (-1, 0),   C_BLUE),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),   colors.white),
+        ("VALIGN",        (0, 0), (-1, -1),  "MIDDLE"),
+        ("ALIGN",         (1, 0), (-1, -1),  "RIGHT"),
+        ("ALIGN",         (0, 0), (0, -1),   "LEFT"),
+        ("LINEBELOW",     (0, 0), (-1, 0),   0.5, C_GREY_2),
+        ("LEFTPADDING",   (0, 0), (-1, -1),  8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1),  8),
+        ("TOPPADDING",    (0, 0), (-1, -1),  5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1),  5),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1),  [colors.white, C_GREY_1]),
+        ("BOX",           (0, 0), (-1, -1),  0.5, C_GREY_2),
+        # Highlight the catastrophe rows
+        ("FONTNAME",      (0, 3), (-1, 5),   "Helvetica-Bold"),
+    ]))
+
+    return [
+        Spacer(1, 3 * mm),
+        Paragraph("<b>Loss Exposure Scenarios</b>", S["cat_title"]),
+        Spacer(1, 2 * mm),
+        Paragraph(
+            "Modelled annual cyber loss across a range of severity scenarios, "
+            "derived from a Monte Carlo simulation of incident-type cost components. "
+            "Cover sizing should reflect the insured's risk appetite, contractual "
+            "exposures, balance sheet capacity, and existing risk transfer arrangements.",
+            S["body"]),
+        Spacer(1, 2 * mm),
+        table,
+        Spacer(1, 3 * mm),
+    ]
+
+
+def civil_liability_disclosure(S):
+    """Civil liability disclosure block — appears immediately after the
+    Financial Impact card on both the summary and the full report.
+
+    Required by FAIS reasonable-advice / appropriate-disclosure obligations:
+    the report's regulatory-fine figures exclude POPIA Section 99 civil
+    exposure and common-law delict, both of which are uncapped and depend
+    on contractual data invisible to an external scan."""
+    disclosure_title = "<b>Civil Liability Disclosure</b>"
+    disclosure_body = (
+        "The financial impact figures presented in this report exclude civil liability "
+        "arising from contractual or common-law obligations — specifically POPIA Section 99 "
+        "civil action, common-law delict, contractual indemnities, master service agreement "
+        "penalties, and third-party claims. These exposures cannot be quantified from an "
+        "external security assessment because they depend on contracts, customer terms, "
+        "supplier liabilities, and indemnity clauses held by the organisation under "
+        "assessment. <b>Civil exposure is uncapped under POPIA Section 99 and South "
+        "African common law</b> and can materially exceed the regulatory fine figures "
+        "shown. Legal counsel and the organisation's risk officer should review "
+        "contractual exposures alongside this report when determining appropriate cover."
+    )
+    cover_note = (
+        "<i>Figures presented are statistical model output. Selection of cover limit is "
+        "the responsibility of the insured in consultation with the broker. Phishield "
+        "does not recommend a specific cover amount.</i>"
+    )
+    return [
+        Spacer(1, 3 * mm),
+        Paragraph(disclosure_title, S["cat_title"]),
+        Spacer(1, 2 * mm),
+        Paragraph(disclosure_body, S["body"]),
+        Spacer(1, 2 * mm),
+        Paragraph(cover_note, S["body"]),
+        Spacer(1, 4 * mm),
+    ]
+
+
+def flag_audit_panel(d, S):
+    """Regulatory flag audit panel - shows broker_input vs auto_detected
+    side-by-side for every flag, with evidence. FAIS audit trail.
+    `d` is the insurance subtree of the result; flags live under
+    financial_impact.regulatory_exposure.flags + flags._auto_detected."""
+    fin = d.get("financial_impact", {})
+    reg_exp = fin.get("regulatory_exposure", {})
+    flags = reg_exp.get("flags", {})
+    if not flags:
+        return []
+    auto = flags.get("_auto_detected", {}) or {}
+    # Flag display order + label mapping
+    flag_specs = [
+        ("listed_company",          "JSE-listed company"),
+        ("accountable_institution", "FIC Act accountable institution"),
+        ("b2c",                     "Consumer-facing (B2C)"),
+        ("sub_industry_detail",     "Healthcare sub-detail"),
+        ("gdpr",                    "GDPR applicable"),
+        ("pci",                     "PCI DSS applicable"),
+    ]
+    # Map broker-input flag name -> auto-detected dict key
+    auto_key_map = {
+        "gdpr":                "gdpr_applicable",
+        "pci":                 "pci_applicable",
+        "sub_industry_detail": "sub_industry_detail",
+    }
+    table_data = [["Flag", "Broker Input", "Auto-detected", "Evidence"]]
+    for key, label in flag_specs:
+        broker_value = flags.get(key)
+        if key == "sub_industry_detail":
+            broker_disp = str(broker_value) if broker_value else "(not set)"
+        else:
+            broker_disp = "Yes" if broker_value else "No"
+        auto_lookup = auto_key_map.get(key, key)
+        auto_entry = auto.get(auto_lookup) or {}
+        auto_detected = bool(auto_entry.get("auto_detected"))
+        if key == "sub_industry_detail" and auto_detected:
+            auto_disp = str(auto_entry.get("sub_industry_detail", "Yes"))
+        else:
+            auto_disp = "Yes" if auto_detected else "No"
+        evidence = auto_entry.get("evidence", "")[:180] or "—"
+        table_data.append([label, broker_disp, auto_disp, evidence])
+
+    # Column widths per rules #6 / #12.
+    # Atomic minimums (Helvetica 8pt):
+    #   Flag label: "FIC Act accountable institution" = 30 chars ~ 50mm
+    #   Broker Input / Auto-detected: "hospital_clinic" = 15 chars ~ 22mm
+    #   Evidence: long sentences - wraps; 75mm gives ~3 lines max
+    col_widths = [50 * mm, 22 * mm, 22 * mm, 75 * mm]
+
+    # Wrap evidence cells in Paragraphs so long text wraps cleanly
+    evidence_style = ParagraphStyle("flag_evidence", fontName="Helvetica",
+                                    fontSize=7, leading=9, textColor=colors.HexColor("#475569"))
+    wrapped_rows = [table_data[0]]
+    for r in table_data[1:]:
+        wrapped_rows.append([r[0], r[1], r[2], Paragraph(r[3], evidence_style)])
+
+    table = Table(wrapped_rows, colWidths=col_widths)
+    table.setStyle(TableStyle([
+        ("FONTNAME",      (0, 0), (-1, 0),   "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, 0),   8),
+        ("FONTSIZE",      (0, 1), (-1, -1),  8),
+        ("BACKGROUND",    (0, 0), (-1, 0),   C_GREY_1),
+        ("LINEBELOW",     (0, 0), (-1, 0),   0.5, C_GREY_2),
+        ("VALIGN",        (0, 0), (-1, -1),  "MIDDLE"),
+        ("ALIGN",         (1, 0), (2, -1),   "CENTER"),
+        ("LEFTPADDING",   (0, 0), (-1, -1),  6),
+        ("RIGHTPADDING",  (0, 0), (-1, -1),  6),
+        ("TOPPADDING",    (0, 0), (-1, -1),  4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1),  4),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1),  [colors.white, C_GREY_1]),
+        ("BOX",           (0, 0), (-1, -1),  0.5, C_GREY_2),
+    ]))
+    title = "<b>Regulatory Flag Audit</b>"
+    intro = (
+        "FAIS audit trail. Each flag shows the broker's input (authoritative - "
+        "drives the catastrophe stack calculation) alongside what the external "
+        "pre-flight scan detected independently. Discrepancies are not errors; "
+        "they reflect broker knowledge of context the scanner cannot observe "
+        "(contractual exposures, EU customer relationships, etc.)."
+    )
+    return [
+        Spacer(1, 4 * mm),
+        Paragraph(title, S["cat_title"]),
+        Spacer(1, 2 * mm),
+        Paragraph(intro, S["body"]),
+        Spacer(1, 2 * mm),
+        table,
+        Spacer(1, 4 * mm),
+    ]
+
+
+def scan_duration_profile(results, S):
+    """Per-checker wall-time profile section. Populated from
+    _scan_completeness.per_checker_seconds. Shown in the full PDF only
+    as a Scan Quality / SLA diagnostic."""
+    sc = results.get("_scan_completeness", {})
+    durations = sc.get("per_checker_seconds", {})
+    if not durations:
+        return []
+    title = "<b>Scan Duration Profile</b>"
+    intro = (
+        f"Per-checker wall-clock timing for this scan ({sc.get('checkers_observed', 0)} "
+        f"checker invocations recorded). Concurrent checkers overlap; the sum is "
+        f"not the end-to-end scan wall time. Top entries identify the longest-running "
+        f"checkers — useful for SLA diagnostics."
+    )
+    table_data = [["Checker", "Seconds"]]
+    items = sorted(durations.items(), key=lambda kv: kv[1], reverse=True)
+    for name, secs in items[:15]:
+        table_data.append([name, f"{secs:.2f}"])
+    if len(items) > 15:
+        table_data.append([f"... {len(items) - 15} more checker(s) under top 15", ""])
+    total = sc.get("total_checker_seconds", 0)
+    table_data.append(["Sum (concurrent overlap)", f"{total:.1f}"])
+    # Column widths: 130mm for checker name (atomic for "shodan_vulns:192.168.0.1"),
+    # 30mm for seconds (atomic for "1234.56"). Rule #6 / #12 minimums.
+    table = Table(table_data, colWidths=[130 * mm, 30 * mm])
+    table.setStyle(TableStyle([
+        ("FONTNAME",      (0, 0), (-1, 0),   "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1),  8),
+        ("BACKGROUND",    (0, 0), (-1, 0),   C_GREY_1),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("LINEBELOW",     (0, 0), (-1, 0),   0.5, C_GREY_2),
+        ("ALIGN",         (1, 0), (1, -1),   "RIGHT"),
+        ("LEFTPADDING",   (0, 0), (-1, -1),  6),
+        ("RIGHTPADDING",  (0, 0), (-1, -1),  6),
+        ("TOPPADDING",    (0, 0), (-1, -1),  3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1),  3),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -2),  [colors.white, C_GREY_1]),
+        ("BACKGROUND",    (0, -1), (-1, -1), C_BLUE_LIGHT),
+        ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
+    ]))
+    return [
+        Spacer(1, 4 * mm),
+        Paragraph(title, S["cat_title"]),
+        Spacer(1, 2 * mm),
+        Paragraph(intro, S["body"]),
+        Spacer(1, 2 * mm),
+        table,
+        Spacer(1, 4 * mm),
+    ]
 
 
 def cat_risk_mitigations(d, S):
@@ -3086,7 +3348,6 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
                 mc_t = mc.get("total", {})
                 mc_p50 = mc_t.get("p50", 0)
                 ins_rec = fin.get("insurance_recommendation", {})
-                rec_cover = ins_rec.get("recommended_cover_zar", 0)
             else:
                 total = fin.get("total", {})
                 most_likely = total.get("most_likely", 0)
@@ -3094,18 +3355,29 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
                 mc_t = mc.get("total", {})
                 mc_p50 = mc_t.get("p50", 0)
                 ins_rec = fin.get("insurance_recommendations", {})
-                rec_cover = ins_rec.get("recommended_coverage", 0)
 
-            fin_text = (f"Estimated annual loss (most likely): <b>{cur} {most_likely:,.0f}</b>")
+            # Summary banner shows the headline mode + median for a quick
+            # at-a-glance figure. Full Loss Exposure Scenarios table follows.
+            # No "Recommended Cover" string - cover sizing is a broker /
+            # client decision (FAIS reasonable-advice compliance).
+            mc_mode = mc_t.get("mode", most_likely)
+            fin_text = f"Most likely annual loss: <b>{cur} {mc_mode:,.0f}</b>"
             if mc_p50:
-                fin_text += f"  |  Monte Carlo P50 (median): <b>{cur} {mc_p50:,.0f}</b>"
-            if rec_cover:
-                fin_text += f"  |  Recommended insurance cover: <b>{cur} {rec_cover:,.0f}</b>"
+                fin_text += f"  |  Median (P50): <b>{cur} {mc_p50:,.0f}</b>"
             # Wrap header + financial text as atomic block
             story.append(KeepTogether([
                 Spacer(1, 4 * mm), fin_banner, Spacer(1, 3 * mm),
                 Paragraph(fin_text, S["body"]), Spacer(1, 4 * mm)
             ]))
+            # Loss Exposure Scenarios dedicated table — also shown on
+            # summary so brokers and clients have the catastrophe view
+            # before reading further. Schema-driven from loss_exposure.scenarios.
+            story += loss_exposure_scenarios_block(ins_data, S)
+            # Civil liability disclosure - applies to both expected and
+            # catastrophe loss views. FAIS-required next to financial impact.
+            story += civil_liability_disclosure(S)
+            # Regulatory flag audit panel - FAIS audit trail.
+            story += flag_audit_panel(ins_data, S)
 
         # ── Why This Matters — The Reality of a Cyber Breach ──────────────
         why_banner = _section_header_banner("WHY THIS MATTERS", S)
@@ -3114,7 +3386,8 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         total_likely = fin.get("total", {}).get("most_likely", 0) if fin else 0
         mc_data = fin.get("monte_carlo", {}).get("total", {}) if fin else {}
         mc_p50 = mc_data.get("p50", total_likely)
-        mc_p95 = mc_data.get("p95", 0)
+        mc_p99 = mc_data.get("p99", 0)
+        mc_p99_6 = mc_data.get("p99_6", 0)
         cur_cta = "R" if (fin and fin.get("currency") == "ZAR") else "$"
         org_location = "a South African" if (fin and fin.get("currency") == "ZAR") else "an"
 
@@ -3128,21 +3401,22 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         # Wrap WHY THIS MATTERS header with first content block
         story.append(KeepTogether([
             Spacer(1, 4 * mm), why_banner, Spacer(1, 3 * mm),
-            Paragraph(f"<b>Your Estimated Financial Exposure</b>", S["cat_title"]),
+            Paragraph("<b>Estimated Financial Exposure</b>", S["cat_title"]),
             Spacer(1, 2 * mm),
             Paragraph(
-                f"Based on this assessment, your organisation faces an estimated annual cyber loss of "
-                f"<b>{cur_cta} {mc_p50:,.0f}</b> (median scenario). In a worst-case event, losses could reach "
-                f"<b>{cur_cta} {mc_p95:,.0f}</b>. These figures are derived from a Monte Carlo simulation of "
+                f"Based on this assessment, the organisation faces an estimated annual cyber loss of "
+                f"<b>{cur_cta} {mc_p50:,.0f}</b> (median scenario). In a 1-in-100 year event, losses could reach "
+                f"<b>{cur_cta} {mc_p99:,.0f}</b>; in a 1-in-250 year event, "
+                f"<b>{cur_cta} {mc_p99_6:,.0f}</b>. These figures are derived from a Monte Carlo simulation of "
                 f"10,000 scenarios modelling data breach, ransomware, and business interruption events "
-                f"specific to your industry and risk profile.",
+                f"calibrated to the organisation's industry and risk profile.",
                 S["body"]),
             Spacer(1, 4 * mm),
         ]))
 
         # The human cost of a breach
         story.append(Paragraph(
-            f"<b>The Reality of a Cyber Breach</b>", S["cat_title"]))
+            "<b>The Reality of a Cyber Breach</b>", S["cat_title"]))
         story.append(Spacer(1, 2 * mm))
         story.append(Paragraph(
             f"The financial numbers only tell part of the story. When {org_location} organisation "
@@ -3159,7 +3433,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             "a potentially business-ending event for most SMEs.",
 
             "<b>241 days</b> — the average time to identify and contain a breach. For nearly 8 months, "
-            "attackers may have access to your systems, data, and client information before the breach "
+            "attackers may have access to systems, data, and client information before the breach "
             "is even discovered.",
 
             "<b>Only 35% of organisations fully recover</b> from a data breach. Of those that do recover, "
@@ -3175,7 +3449,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             "deadlines are missed, and contractual obligations go unmet.",
 
             "<b>24 days average downtime</b> following a ransomware attack. For nearly a month, "
-            "your business may be unable to operate while systems are restored, data is recovered, "
+            "operations may be unable to continue while systems are restored, data is recovered, "
             "and forensic investigations are conducted.",
         ]
         for stat in stats:
@@ -3184,7 +3458,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
 
         # Personalised risk context
         story.append(Paragraph(
-            f"<b>What This Means for Your Organisation</b>", S["cat_title"]))
+            "<b>What This Means for the Organisation</b>", S["cat_title"]))
         story.append(Spacer(1, 2 * mm))
 
         risk_paras = []
@@ -3192,18 +3466,18 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             risk_paras.append(
                 f"This assessment detected <b>active credential-stealing malware (infostealer)</b> on {hr_employees} employee "
                 f"device(s). This is not a historical finding — it means credentials are being stolen "
-                f"<b>right now</b> and sold to criminal buyers. Without immediate intervention, a breach "
+                f"<b>currently</b> and sold to criminal buyers. Without immediate intervention, a breach "
                 f"is not a matter of <i>if</i>, but <i>when</i>."
             )
         if ix_total > 0:
             risk_paras.append(
-                f"We found <b>{ix_total} references</b> to your organisation in criminal online marketplaces (dark web). "
-                f"This means stolen data associated with your business is circulating in criminal "
+                f"The assessment found <b>{ix_total} references</b> to the organisation in criminal online marketplaces (dark web). "
+                f"This means stolen data associated with the business is circulating in criminal "
                 f"networks where it can be purchased by anyone with malicious intent."
             )
         if dh_total > 0:
             risk_paras.append(
-                f"<b>{dh_total} credential records</b> linked to your domain were found in breach "
+                f"<b>{dh_total} credential records</b> linked to the domain were found in breach "
                 f"databases. These include email addresses and potentially passwords that attackers "
                 f"use for automated password attacks (credential stuffing) — systematically trying stolen passwords across "
                 f"multiple systems until they find one that works."
@@ -3213,13 +3487,13 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
                 f"<b>{hrp_critical} critical service(s)</b> (databases, remote access) are directly "
                 f"exposed to the internet. An attacker does not need sophisticated tools to exploit "
                 f"these — a simple connection attempt with stolen credentials could grant immediate "
-                f"access to your most sensitive business data."
+                f"access to sensitive business data."
             )
         if cred_risk in ("CRITICAL", "HIGH"):
             risk_paras.append(
-                f"Your overall credential risk is classified as <b>{cred_risk}</b>. "
+                f"Overall credential risk is classified as <b>{cred_risk}</b>. "
                 f"This means there is a significantly elevated probability of unauthorised access "
-                f"to your systems using compromised credentials."
+                f"to systems using compromised credentials."
             )
         if not risk_paras:
             risk_paras.append(
@@ -3234,31 +3508,30 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             story.append(Spacer(1, 2 * mm))
         story.append(Spacer(1, 4 * mm))
 
-        # Call to action
+        # Call to action - intentionally does NOT recommend a specific
+        # cover amount. Cover sizing is a broker / client decision informed
+        # by the Loss Exposure Scenarios shown above.
         story.append(Paragraph(
-            f"<b>Protect Your Business — Next Steps</b>", S["cat_title"]))
+            "<b>Next Steps</b>", S["cat_title"]))
         story.append(Spacer(1, 2 * mm))
 
         cta_style = S["cta"]
 
         cta_items = [
-            "<b>Cyber Insurance Coverage</b> — Speak to your Phishield broker about a tailored cyber "
-            "insurance policy that covers data breach response costs, ransomware negotiation and payment, "
-            "business interruption losses, regulatory fines (POPIA), and third-party liability. "
-            f"Based on this assessment, a minimum cover of <b>{cur_cta} {ins_rec.get('minimum_cover_zar', ins_rec.get('suggested_deductible', 0)):,.0f}</b> "
-            f"is recommended, with an optimal cover of <b>{cur_cta} {ins_rec.get('recommended_cover_zar', ins_rec.get('recommended_coverage', 0)):,.0f}</b>."
-            if ins_rec else
-            "<b>Cyber Insurance Coverage</b> — Speak to your Phishield broker about a tailored cyber "
-            "insurance policy that covers data breach response costs, ransomware negotiation, "
-            "business interruption losses, regulatory fines (POPIA), and third-party liability.",
+            "<b>Cyber Insurance Coverage</b> — The Phishield broker can structure a tailored cyber "
+            "insurance policy covering data breach response costs, ransomware negotiation and payment, "
+            "business interruption losses, regulatory fines (POPIA Section 109 and applicable sector "
+            "frameworks), and third-party liability. Selection of the appropriate cover limit should "
+            "be made by the insured with the broker, informed by the Loss Exposure Scenarios shown "
+            "above and the organisation's contractual exposure profile.",
 
             "<b>Vulnerability Remediation</b> — The vulnerabilities identified in this report can be "
             "addressed through professional remediation services. A qualified cybersecurity partner can "
-            "help secure exposed services, patch critical vulnerabilities, implement MFA, and strengthen "
-            "your overall security posture — often reducing your insurance premium in the process.",
+            "secure exposed services, patch critical vulnerabilities, implement MFA, and strengthen "
+            "the overall security posture — often reducing the insurance premium in the process.",
 
             "<b>Continuous Monitoring</b> — Cyber risk is not static. New vulnerabilities are discovered "
-            "daily, and your attack surface changes as your business evolves. Ongoing monitoring ensures "
+            "daily, and the attack surface changes as the business evolves. Ongoing monitoring ensures "
             "emerging threats are detected before they are exploited.",
         ]
         for item in cta_items:
@@ -3269,8 +3542,8 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         story.append(HRFlowable(width=INNER_W, thickness=0.5, color=C_BLUE))
         story.append(Spacer(1, 3 * mm))
         story.append(Paragraph(
-            "<b>To discuss your cyber insurance options or arrange a remediation assessment, "
-            "contact your Phishield broker or visit www.phishield.com</b>",
+            "<b>To discuss cyber insurance options or arrange a remediation assessment, "
+            "contact the Phishield broker or visit www.phishield.com</b>",
             S["contact"]
         ))
         story.append(Spacer(1, 3 * mm))
@@ -3287,8 +3560,19 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             story += section_with_first_card("INSURANCE ANALYTICS", S, cat_rsi(results, S))
             story += cat_dbi(results, S)
             story += cat_financial_impact(results.get("insurance", {}), S)
+            # Loss Exposure Scenarios - dedicated headline table replacing
+            # the previous Insurance Cover Recommendation card.
+            story += loss_exposure_scenarios_block(results.get("insurance", {}), S)
+            # Civil liability disclosure - required next to the cat-loss
+            # numbers per FAIS reasonable-advice / appropriate-disclosure rules.
+            story += civil_liability_disclosure(S)
+            # Regulatory flag audit panel - FAIS audit trail showing
+            # broker input vs auto-detection per flag.
+            story += flag_audit_panel(results.get("insurance", {}), S)
             story += cat_risk_mitigations(results.get("insurance", {}), S)
             story += cat_remediation(results, S)
+            # Scan duration profile - diagnostic primitive for SLA / quality.
+            story += scan_duration_profile(results, S)
 
         # ── Discovery ───────────────────────────────────────────────────────
         story += section_with_first_card("DISCOVERY", S, cat_web_ranking(cats, S))

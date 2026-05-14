@@ -1097,7 +1097,12 @@ class FinancialImpactCalculator:
     to produce statistically robust confidence intervals.
     Outputs P5/P25/P50/P75/P95 percentiles for insurance underwriting.
     """
-    MC_ITERATIONS = 10_000  # Number of Monte Carlo simulations
+    # MC iterations - 50,000 chosen for stable tail estimation at return
+    # periods 1-in-100 (P99, 500 samples), 1-in-200 (P99.5, 250 samples)
+    # and 1-in-250 (P99.6, 200 samples). Wall-time impact at the call site
+    # is ~400ms vs ~80s end-to-end scan - negligible. Reduce only if Render
+    # memory limit is breached during catastrophe-stack runs.
+    MC_ITERATIONS = 50_000
 
     @staticmethod
     def _pert_sample(low, mode, high, size=1):
@@ -1120,17 +1125,251 @@ class FinancialImpactCalculator:
         samples = np.random.beta(a, b, size=size) * (high - low) + low
         return samples
 
+    # Enterprise capacity factor used to scale statutory maxima for the
+    # catastrophe view. Reflects the SA Information Regulator's Section
+    # 109(3) "extent and ability to pay" considerations and equivalent
+    # enforcement-discretion patterns across other regulators. Sanlam at
+    # R200B revenue can realistically face the full statutory ceiling;
+    # a micro FSP at R5M cannot. Without this scaling every entity would
+    # face the same cat ceiling regardless of size - indefensible.
     @staticmethod
-    def _mc_percentiles(samples):
-        """Extract P5, P25, P50 (median), P75, P95 percentiles."""
+    def _capacity_factor(annual_revenue_zar: float) -> float:
+        rev = max(0, float(annual_revenue_zar or 0))
+        if rev >= 10_000_000_000:    return 1.00
+        if rev >=  1_000_000_000:    return 0.95
+        if rev >=    500_000_000:    return 0.80
+        if rev >=    200_000_000:    return 0.65
+        if rev >=     75_000_000:    return 0.45
+        if rev >=     25_000_000:    return 0.25
+        if rev >=     10_000_000:    return 0.15
+        return 0.10
+
+    # Sector framework statutory maxima (ZAR) used in catastrophe modelling.
+    # Each entry is (framework_name, statutory_max). Sources verified
+    # 2026-05-14 - see gap analysis v10 § 4 for citations. FSCA cat cap of
+    # R100M is a model assumption (FSRA s167 is uncapped statutorily; the
+    # largest historical SA penalty was R475M against AYO Technology 2024;
+    # R100M sits between median and worst-case for a 1-in-100 view).
+    SECTOR_FRAMEWORKS = {
+        # FS sub-industries (per _bi_factor_data.json hierarchy)
+        "Depository Institutions": [
+            ("FSRA Section 167 (FSCA)", 100_000_000),
+            ("FIC Act Section 45C",      50_000_000),
+        ],
+        "Non-depository Credit Institutions": [
+            ("FSRA Section 167 (FSCA)", 100_000_000),
+            ("FIC Act Section 45C",      50_000_000),
+            ("NCA / NCR",                 1_000_000),
+        ],
+        "Security And Commodity Brokers, Dealers, Exchanges, And Services": [
+            ("FSRA Section 167 (FSCA)", 100_000_000),
+            ("FIC Act Section 45C",      50_000_000),
+        ],
+        "Insurance Carriers": [
+            ("FSRA Section 167 (FSCA)", 100_000_000),
+            ("FIC Act Section 45C",      50_000_000),
+        ],
+        "Insurance Agents, Brokers, And Service": [
+            ("FSRA Section 167 (FAIS / FSCA)", 100_000_000),
+            ("FIC Act Section 45C",              50_000_000),
+        ],
+        "Real Estate": [
+            ("Property Practitioners Act",   500_000),
+            ("FIC Act Section 45C",       50_000_000),
+        ],
+        "Holding And Other Investment Offices": [
+            ("FSRA Section 167 (FSCA)", 100_000_000),
+            ("FIC Act Section 45C",      50_000_000),
+        ],
+        # Healthcare (default; sub-detail layered on top in compute step)
+        "Health Services": [
+            ("National Health Act Section 17(2)", 5_000_000),
+            ("Health Professions Act / HPCSA",    1_000_000),
+        ],
+        # Legal Services
+        "Legal Services": [
+            ("Legal Practice Act / LPC",  1_000_000),
+            ("FIC Act Section 45C",      50_000_000),
+        ],
+        # Telecoms
+        "Communications": [
+            ("Electronic Communications Act / ICASA", 50_000_000),
+        ],
+        # Mining (only data-relevant if breach impacts safety systems)
+        "Metal Mining":     [("Mine Health and Safety Act", 3_000_000)],
+        "Coal Mining":      [("Mine Health and Safety Act", 3_000_000)],
+        "Oil And Gas Extraction": [("Mine Health and Safety Act", 3_000_000)],
+        "Mining And Quarrying Of Nonmetallic Minerals, Except Fuels":
+                            [("Mine Health and Safety Act", 3_000_000)],
+    }
+    # All Public Sector SIC sub-industries map to PFMA.
+    PUBLIC_SECTOR_LABELS = {
+        "Executive, Legislative, And General Government, Except Finance",
+        "Justice, Public Order, And Safety",
+        "Public Finance, Taxation, And Monetary Policy",
+        "Administration Of Human Resource Programs",
+        "Administration Of Environmental Quality And Housing Programs",
+        "Administration Of Economic Programs",
+        "National Security And International Affairs",
+        "Nonclassifiable Establishments",
+    }
+    # Healthcare sub-detail add-ons keyed off the `sub_industry_detail` field.
+    # Adds to the base Health Services entries above.
+    HEALTHCARE_DETAIL_FRAMEWORKS = {
+        "medical_scheme": [("Medical Schemes Act Section 66", 10_000_000)],
+        "pharmacy":       [("Pharmacy Act / SAPC",                500_000)],
+        "pharma":         [("SAHPRA / Medicines Act",         2_000_000)],
+        # hospital_clinic is the default - no addition beyond base
+    }
+
+    @classmethod
+    def _sector_cat_stack(cls, sub_industry: str, sub_detail: str = None,
+                          regulatory_flags: dict = None) -> list:
+        """Resolve the sector-specific catastrophe framework list for a
+        given sub-industry, plus cross-industry flag-driven additions.
+
+        Returns a list of (framework_name, statutory_max_zar) tuples
+        BEFORE capacity scaling. The caller applies the capacity factor
+        to the sum."""
+        out = []
+        if sub_industry:
+            si = sub_industry.strip()
+            # Direct lookup
+            for label, frameworks in cls.SECTOR_FRAMEWORKS.items():
+                if label.lower() == si.lower():
+                    out.extend(frameworks)
+                    break
+            # Public Sector catch-all (PFMA on all public-sector sub-industries)
+            if si in cls.PUBLIC_SECTOR_LABELS:
+                out.append(("Public Finance Management Act Section 86", 5_000_000))
+            # Healthcare detail add-ons
+            if si.lower() == "health services" and sub_detail:
+                for k, v in cls.HEALTHCARE_DETAIL_FRAMEWORKS.items():
+                    if sub_detail.lower() == k:
+                        out.extend(v)
+                        break
+
+        # Cross-industry flag-driven additions
+        flags = regulatory_flags or {}
+        if flags.get("listed_company"):
+            out.append(("JSE Listings Requirements", 7_500_000))
+        if flags.get("accountable_institution") and not any(
+                "FIC Act" in name for name, _ in out):
+            # Only add FIC if the sub-industry path didn't already include it
+            # (e.g. an attorney firm flagged as AI separately from Legal Services)
+            out.append(("FIC Act Section 45C", 50_000_000))
+        # B2C trigger applies CPA Section 112 (10% turnover OR R1M, greater)
+        # This is computed in the caller because it depends on revenue.
+        return out
+
+    @staticmethod
+    def _gpd_tail_quantile(samples, target_q, threshold_q=0.95):
+        """Pure-numpy method-of-moments GPD tail estimator for catastrophe
+        return periods. Avoids scipy dependency to fit Render free-tier
+        constraints (SCN-GAP-011). Returns extrapolated quantile or the
+        raw percentile if the fit fails or fails sanity checks.
+
+        Peaks-Over-Threshold: fit a Generalised Pareto Distribution to
+        sample excesses above the threshold, then invert.
+
+        Method-of-moments GPD with location=0:
+            shape c   = 0.5 * (1 - m^2 / v)
+            scale sig = 0.5 * m * (1 + m^2 / v)
+        where m = mean(excesses), v = var(excesses).
+
+        Quantile function for u in [0, 1):
+            Y = (sig / c) * ((1 - u)^(-c) - 1)   for c != 0
+            Y = -sig * ln(1 - u)                  for c == 0
+
+        Conditional excess probability:
+            P(X > x | X > T) = (1 - target_q) / (1 - threshold_q)
+        """
         import numpy as np
-        p5, p25, p50, p75, p95 = np.percentile(samples, [5, 25, 50, 75, 95])
+        raw = float(np.percentile(samples, target_q * 100))
+        if target_q <= threshold_q:
+            return raw
+        try:
+            threshold = float(np.percentile(samples, threshold_q * 100))
+            excesses = samples[samples > threshold] - threshold
+            n = len(excesses)
+            if n < 50:
+                return raw  # too few tail samples for stable MOM fit
+            m = float(np.mean(excesses))
+            v = float(np.var(excesses))
+            if m <= 0 or v <= 0:
+                return raw
+            ratio = m * m / v
+            shape = 0.5 * (1.0 - ratio)
+            scale = 0.5 * m * (1.0 + ratio)
+            if scale <= 0:
+                return raw
+            cond_p = (1.0 - target_q) / (1.0 - threshold_q)
+            if abs(shape) < 1e-6:
+                excess_q = -scale * np.log(cond_p)
+            else:
+                # GPD with c >= 0 has unbounded upper tail; c < 0 has bound
+                # at -scale/shape. Guard against negative-shape overshoot.
+                if shape < 0:
+                    upper_bound = -scale / shape
+                    excess_q = (scale / shape) * (cond_p ** (-shape) - 1.0)
+                    if excess_q > upper_bound:
+                        return raw
+                else:
+                    excess_q = (scale / shape) * (cond_p ** (-shape) - 1.0)
+            fitted = threshold + float(excess_q)
+            # Sanity: fitted should be >= raw (we're refining the tail)
+            # and not absurdly larger (>10x raw indicates instability)
+            if not np.isfinite(fitted):
+                return raw
+            if fitted < raw:
+                return raw
+            if fitted > raw * 10:
+                return raw
+            return fitted
+        except Exception:
+            return raw
+
+    @classmethod
+    def _mc_percentiles(cls, samples):
+        """Extract P5/P25/P50/P75/P95 plus return-period percentiles P99
+        (1-in-100), P99.5 (1-in-200), P99.6 (1-in-250). At MC_ITERATIONS
+        = 50,000 the raw P99.6 has ~200 tail samples (stable); a GPD
+        Peaks-Over-Threshold fit above P95 is applied to P99 / P99.5 /
+        P99.6 for defensible extrapolation when raw and fitted disagree
+        materially. Both raw and fitted values are surfaced in the
+        output so consumers can audit the difference."""
+        import numpy as np
+        p5, p25, p50, p75, p95, p99, p99_5, p99_6 = np.percentile(
+            samples, [5, 25, 50, 75, 95, 99, 99.5, 99.6])
+        # GPD-fitted tail estimates (preferred for return-period display
+        # when the fit converges; falls back to raw if not).
+        p99_fitted   = cls._gpd_tail_quantile(samples, 0.99)
+        p99_5_fitted = cls._gpd_tail_quantile(samples, 0.995)
+        p99_6_fitted = cls._gpd_tail_quantile(samples, 0.996)
+        # Mode estimated from the densest histogram bin - gives a single
+        # "most likely" point that contrasts cleanly with the P50 median.
+        try:
+            hist, edges = np.histogram(samples, bins=50)
+            mode_bin = int(np.argmax(hist))
+            mode_estimate = float((edges[mode_bin] + edges[mode_bin + 1]) / 2)
+        except Exception:
+            mode_estimate = float(p50)
         return {
             "p5": round(float(p5)),
             "p25": round(float(p25)),
             "p50": round(float(p50)),
             "p75": round(float(p75)),
             "p95": round(float(p95)),
+            # Display values - prefer the GPD-fitted estimate; falls back
+            # to raw when fit is unstable. Both are stored for audit.
+            "p99": round(float(p99_fitted)),
+            "p99_5": round(float(p99_5_fitted)),
+            "p99_6": round(float(p99_6_fitted)),
+            "p99_raw": round(float(p99)),
+            "p99_5_raw": round(float(p99_5)),
+            "p99_6_raw": round(float(p99_6)),
+            "p99_fit_applied": abs(p99_fitted - float(p99)) > float(p99) * 0.01,
+            "mode": round(mode_estimate),
             "mean": round(float(np.mean(samples))),
             "std_dev": round(float(np.std(samples))),
         }
@@ -1637,8 +1876,16 @@ class FinancialImpactCalculator:
         # and summed. This replaces the previous multiplier approach.
         reg_flags = regulatory_flags or {}
 
-        # POPIA: 2% of turnover, capped at R10M (Section 107)
+        # POPIA: Administrative fine under Section 109 - statutory ceiling R10M.
+        # Section 109(3) factors (nature, duration, extent, number of subjects,
+        # public importance, prevention, risk assessment, prior offences) govern
+        # the actual amount imposed. The 2%-of-turnover figure used here is an
+        # internal capacity-scaling heuristic, NOT a statutory formula -
+        # POPIA does not specify a percentage-based trigger. Section 107 (the
+        # previous reference) is criminal penalties (court-imposed, post-conviction).
+        # For catastrophe-view modelling the full R10M statutory ceiling is used.
         c2_popia = min(10_000_000, annual_revenue_zar * 0.02)
+        c2_popia_statutory_max = 10_000_000  # used by cat-view modelling
 
         # GDPR: 4% of global turnover, uncapped (if EU data processed)
         c2_gdpr = annual_revenue_zar * 0.04 if reg_flags.get("gdpr") else 0
@@ -1662,7 +1909,58 @@ class FinancialImpactCalculator:
         extra_jurisdictions = reg_flags.get("other_jurisdictions", 0)
         c2_other = extra_jurisdictions * 2_000_000
 
+        # ECTA Section 89 - applies to any online business processing
+        # personal information. Conservative R1M cat estimate (court-
+        # discretionary fine + criminal). Included in cat stack only;
+        # excluded from the expected-loss heuristic (overlap with POPIA).
+        c2_ecta_cat = 1_000_000
+
+        # CPA Section 112 - B2C entities only. 10% of turnover OR R1M
+        # whichever is greater. Scales naturally; capacity factor NOT
+        # applied (the % already represents enforcement at scale).
+        if reg_flags.get("b2c"):
+            c2_cpa_cat = max(1_000_000, int(annual_revenue_zar * 0.10))
+        else:
+            c2_cpa_cat = 0
+
+        # Sector framework cat stack - capacity-scaled statutory maxima.
+        # Reflects how SA regulators actually behave: small entities
+        # face proportionally lower enforcement, not the full ceiling.
+        # Pattern A capacity factor (revenue band table) applied.
+        capacity_factor = self._capacity_factor(annual_revenue_zar)
+        sector_frameworks = self._sector_cat_stack(
+            sub_industry, reg_flags.get("sub_industry_detail"), reg_flags)
+        sector_cat_raw = sum(stat_max for _, stat_max in sector_frameworks)
+        sector_cat_scaled = int(round(sector_cat_raw * capacity_factor))
+        # Per-framework scaled breakdown for the audit panel in the PDF.
+        sector_cat_breakdown = [
+            {"framework": name,
+             "statutory_max_zar": stat_max,
+             "cat_scaled_zar": int(round(stat_max * capacity_factor))}
+            for name, stat_max in sector_frameworks
+        ]
+
+        # Expected (P50-anchor) regulatory total - drives the MC engine's
+        # mc_c2 sample. Conservative; uses heuristic POPIA scaling.
         c2_regulatory_fine = c2_popia + c2_gdpr + c2_pci + c2_other
+
+        # Catastrophe regulatory total - drives the MC engine's tail by
+        # widening the mc_c2 PERT upper bound. Stacks statutory maxima
+        # (capacity-scaled) across every applicable framework. Civil
+        # liability under POPIA Section 99 is excluded - covered by the
+        # qualitative Civil Liability Disclosure.
+        c2_cat_stack_total = int(round(
+            c2_popia_statutory_max * capacity_factor  # statutory POPIA at cat
+            + c2_gdpr                                  # already scales with rev
+            + c2_pci                                   # statutorily small
+            + c2_other                                 # already revenue-independent
+            + c2_ecta_cat * capacity_factor
+            + c2_cpa_cat                               # % of turnover, no factor
+            + sector_cat_scaled
+        ))
+        # Floor the cat total at the expected total - cat must never be
+        # less than expected (else the model is internally inconsistent).
+        c2_cat_stack_total = max(c2_cat_stack_total, int(c2_regulatory_fine))
 
         # ── Cost Component C3: Revenue loss from downtime ──
         # Calculated per-incident-type with specific duration and impact
@@ -1872,15 +2170,27 @@ class FinancialImpactCalculator:
         mc_p_breach = np.clip(self._pert_sample(p_breach * 0.5, p_breach, min(1.0, p_breach * 2.0), N), 0, 1)
         mc_p_int = np.clip(self._pert_sample(p_interruption * 0.3, p_interruption, min(0.8, p_interruption * 3.0), N), 0, 1)
 
-        # Total breach magnitude samples (IBM anchor with elasticity)
+        # Total breach magnitude samples (IBM anchor with elasticity).
+        # Upper bound widened 2.5x -> 5x (2026-05-15, Phase B3) for
+        # defensible 1-in-100 / 1-in-250 tail coverage. SA precedent
+        # for cat events: Transnet 2021, Life Healthcare 2020,
+        # Experian 2020 all materially exceeded the IBM anchor x 2.5
+        # ceiling. Mode anchored at IBM; lower band held at 0.5x.
         mc_total_breach = self._pert_sample(
-            total_breach_magnitude * 0.5, total_breach_magnitude, total_breach_magnitude * 2.5, N)
-        # Base total (without industry multiplier) for C4 ransom
+            total_breach_magnitude * 0.5, total_breach_magnitude, total_breach_magnitude * 5.0, N)
+        # Base total (without industry multiplier) for C4 ransom.
+        # Same widening rationale applies to ransom-proportional component.
         mc_total_base = self._pert_sample(
-            total_breach_base * 0.5, total_breach_base, total_breach_base * 2.5, N)
+            total_breach_base * 0.5, total_breach_base, total_breach_base * 5.0, N)
 
-        # Component samples
-        mc_c2 = self._pert_sample(c2_regulatory_fine * 0.5, c2_regulatory_fine, c2_regulatory_fine * 2.0, N)
+        # Component samples.
+        # mc_c2 PERT upper bound widened from c2_regulatory_fine * 2.0 to
+        # the catastrophe stack total. This makes P99 / P99.5 / P99.6
+        # naturally pull toward the stacked statutory exposure across
+        # every applicable framework (POPIA + sector + listed + B2C + ...).
+        # Lower bound preserved at 0.5x heuristic; mode at heuristic.
+        mc_c2_upper = max(c2_regulatory_fine * 2.0, float(c2_cat_stack_total))
+        mc_c2 = self._pert_sample(c2_regulatory_fine * 0.5, c2_regulatory_fine, mc_c2_upper, N)
         mc_c4 = mc_total_base * C4_PROPORTION  # Ransom NOT industry-scaled
         mc_c5 = self._pert_sample(c5_ir * 0.5, c5_ir, c5_ir * 2.5, N)
 
@@ -1922,9 +2232,11 @@ class FinancialImpactCalculator:
         mc_detection_total += mc_p * mc_c5 * 0.60
         mc_bi_total += mc_p * mc_c3_silent
 
-        # 5. Data extortion (C1+C2+C3_minimal+C4_reduced+C5)
+        # 5. Data extortion (C1+C2+C3_minimal+C4_reduced+C5).
+        # Downtime upper bound widened 7d -> 21d (2026-05-15, Phase B3)
+        # to cover extended negotiation cases observed in SA cat events.
         mc_p = mc_p_breach * R["data_extortion"]
-        mc_c3_extort = self._pert_sample(1, 3, 7, N) * daily_revenue * IMPACT_FACTOR * bi_factor
+        mc_c3_extort = self._pert_sample(1, 3, 21, N) * daily_revenue * IMPACT_FACTOR * bi_factor
         mc_breach_total += mc_p * (mc_c1 + mc_c2)
         mc_ransom_demand_total += mc_p * mc_c4 * 0.40
         mc_detection_total += mc_p * mc_c5
@@ -2089,7 +2401,39 @@ class FinancialImpactCalculator:
                 "c2_pci": round(c2_pci),
                 "c2_other": round(c2_other),
                 "c2_total": round(c2_regulatory_fine),
-                "note": "C2 = POPIA (2% capped R10M) + GDPR (4% uncapped) + PCI (R1M × non-compliance) + other jurisdictions (R2M each)",
+                "note": (
+                    "C2 = POPIA (Section 109; statutory ceiling R10M, 2% turnover used as "
+                    "internal capacity-scaling heuristic for s109(3) factors - not a statutory formula) "
+                    "+ GDPR (4% uncapped) + PCI (R1M x non-compliance) + other jurisdictions (R2M each)"
+                ),
+                "popia_statutory_max_zar": c2_popia_statutory_max,
+                # Catastrophe regulatory stack - drives the MC tail.
+                # Capacity-scaled statutory maxima across every applicable
+                # framework. Used for 1-in-100 / 1-in-200 / 1-in-250 views.
+                "catastrophe_stack": {
+                    "capacity_factor": round(capacity_factor, 3),
+                    "revenue_band_zar": int(annual_revenue_zar),
+                    "popia_statutory_scaled_zar":
+                        int(round(c2_popia_statutory_max * capacity_factor)),
+                    "ecta_cat_scaled_zar":
+                        int(round(c2_ecta_cat * capacity_factor)),
+                    "cpa_cat_zar":
+                        int(c2_cpa_cat),  # % already scales, no factor applied
+                    "gdpr_cat_zar":         int(c2_gdpr),
+                    "pci_cat_zar":          int(c2_pci),
+                    "other_jurisdictions_cat_zar": int(c2_other),
+                    "sector_frameworks":    sector_cat_breakdown,
+                    "sector_cat_total_zar": sector_cat_scaled,
+                    "total_cat_stack_zar":  c2_cat_stack_total,
+                    "note": (
+                        "Statutory maxima per applicable framework, scaled "
+                        "by the enterprise capacity factor for the entity's "
+                        "revenue band. Sanlam-scale (>= R10B) faces the full "
+                        "stack; a micro FSP (< R10M) faces 10% of the stack. "
+                        "Excludes uncapped POPIA Section 99 civil exposure - "
+                        "see Civil Liability Disclosure."
+                    ),
+                },
             },
             "monte_carlo": {
                 "iterations": N,
@@ -2104,7 +2448,45 @@ class FinancialImpactCalculator:
                     "upper": mc_stats["p75"],
                 },
             },
+            # Return-period loss exposure (FAIR catastrophe view).
+            # P99/P99.5/P99.6 correspond to 1-in-100 / 1-in-200 / 1-in-250 year
+            # exceedance probabilities. At N=10,000 the P99.6 sample count is
+            # ~40 - treat as indicative until B3 raises iterations.
+            "return_periods": {
+                "1_in_100": {"loss_zar": mc_stats["p99"],   "exceedance_prob": 0.01,  "percentile": "P99"},
+                "1_in_200": {"loss_zar": mc_stats["p99_5"], "exceedance_prob": 0.005, "percentile": "P99.5"},
+                "1_in_250": {"loss_zar": mc_stats["p99_6"], "exceedance_prob": 0.004, "percentile": "P99.6"},
+            },
+            # Loss exposure scenarios — informational presentation for broker
+            # / client cover-sizing decision. Phishield does not recommend a
+            # specific cover amount (FAIS reasonable-advice compliance).
+            "loss_exposure": {
+                "currency": "ZAR",
+                "scenarios": {
+                    "most_likely":  {"loss_zar": mc_stats["mode"],  "label": "Most likely (mode)", "annual_prob": None},
+                    "median":       {"loss_zar": mc_stats["p50"],   "label": "Median (P50)",      "annual_prob": 0.50},
+                    "return_1_100": {"loss_zar": mc_stats["p99"],   "label": "1-in-100 event",     "annual_prob": 0.01},
+                    "return_1_200": {"loss_zar": mc_stats["p99_5"], "label": "1-in-200 event",     "annual_prob": 0.005},
+                    "return_1_250": {"loss_zar": mc_stats["p99_6"], "label": "1-in-250 event",     "annual_prob": 0.004},
+                },
+                "disclaimer": (
+                    "Figures presented are statistical model output and exclude civil liability "
+                    "(see Civil Liability Disclosure). Selection of cover limit is the responsibility "
+                    "of the insured in consultation with the broker. Phishield does not recommend a "
+                    "specific cover amount."
+                ),
+            },
+            # DEPRECATED. Retained for backward compatibility only.
+            # Replaced by `loss_exposure.scenarios` above as of v10 / 2026-05-15.
+            # `recommended_cover_zar` and `minimum_cover_zar` are no longer
+            # surfaced in the PDF or HTML output (FAIS reasonable-advice
+            # compliance: Phishield does not recommend a specific cover
+            # amount). The field still feeds the internal deductible
+            # calculation. Downstream consumers must migrate to
+            # `loss_exposure.scenarios` for cover sizing.
             "insurance_recommendation": {
+                "_deprecated": True,
+                "_use_instead": "loss_exposure.scenarios",
                 "minimum_cover_zar": minimum_cover,
                 "recommended_cover_zar": recommended_cover,
                 "premium_risk_tier": premium_tier,

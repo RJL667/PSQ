@@ -883,50 +883,208 @@ def build(doc):
     add_h2(doc, "Monte Carlo simulation")
 
     add_body(doc,
-        "The model runs 10,000 Monte Carlo iterations using PERT "
+        "The model runs 50,000 Monte Carlo iterations using PERT "
         "distributions (lambda = 4) for all uncertain parameters. PERT "
         "distributions are preferred over triangular distributions because "
         "they concentrate more probability around the most likely value "
-        "while still allowing for tail events."
+        "while still allowing for tail events. The 50,000 iteration count "
+        "gives stable tail estimation at the longest return period (P99.6, "
+        "~200 tail samples) without breaching the Render free-tier memory "
+        "limit."
     )
 
     add_body(doc,
         "Key PERT parameters include SA recovery time PERT(3, 25, 120) "
         "days, cost-per-record ranges by industry, and ransom demand "
         "distributions calibrated to the Sophos SA 2025 median payment "
-        "data."
+        "data. Catastrophe-leg PERT upper bounds were widened 2.5x to 5x "
+        "for the total breach magnitude and from 7 days to 21 days for "
+        "extortion downtime, reflecting the empirical SA cat events of "
+        "the past five years (Transnet 2021, Life Healthcare 2020, "
+        "Experian 2020) that exceeded the previous 2.5x ceiling."
     )
 
     add_body(doc,
         "The simulation produces a full probability distribution from which "
-        "percentiles are extracted: P5 (optimistic), P25, P50 (median/most "
-        "likely), P75, and P95 (pessimistic). The 90% confidence interval "
-        "(P5 to P95) represents the range within which actual annual loss "
-        "is expected to fall with 90% confidence."
+        "percentiles are extracted at five reference percentiles (P5, P25, "
+        "P50, P75, P95) plus three return-period percentiles (P99 = 1-in-"
+        "100 year, P99.5 = 1-in-200, P99.6 = 1-in-250). A pure-numpy "
+        "Generalised Pareto Distribution Peaks-Over-Threshold fit is "
+        "applied above P95 for defensible extrapolation at the longest "
+        "return period; the fit falls back to raw percentiles if it fails "
+        "sanity checks. Both raw and fitted values are recorded in the "
+        "JSON output for audit."
     )
 
-    add_h2(doc, "Insurance recommendations")
+    add_h2(doc, "Loss Exposure Scenarios (FAIS-safe cover sizing)")
 
     add_body(doc,
-        "The model outputs three insurance-relevant figures derived from the "
-        "Monte Carlo distribution:"
+        "The financial impact card no longer presents a single Recommended "
+        "Cover Limit figure. Under FAIS reasonable-advice and appropriate-"
+        "disclosure obligations, a UMA recommending a specific cover amount "
+        "constitutes financial advice; the scanner provides analytical inputs "
+        "to support a broker / client cover-sizing decision rather than making "
+        "that decision on behalf of the insured. The output therefore presents "
+        "a Loss Exposure Scenarios table with five named figures:"
     )
     add_bullet(doc,
-        "Suggested deductible — calculated as a percentage of the recommended "
-        "coverage limit, scaled by the RSI score. The deductible percentage "
-        "ranges from 0.5% (low risk) to 20% (critical risk) on a non-linear "
-        "curve, with increments accelerating at higher risk levels. This "
-        "represents the amount the organisation can reasonably self-insure."
+        "Most Likely (mode) — the peak of the loss distribution; the single "
+        "most probable annual loss outcome."
     )
     add_bullet(doc,
-        "Expected annual loss — the P50 (median) total loss across all "
-        "incident types. This is the most likely annual cyber loss figure "
-        "and should be the baseline for premium calculations."
+        "Median (P50) — half of all simulated outcomes fall below this figure. "
+        "Reasonable anchor for premium-rating calculations."
     )
     add_bullet(doc,
-        "Recommended coverage limit — set at 120% of the P95 (pessimistic) "
-        "loss estimate. This provides a buffer above the worst-case-with-"
-        "confidence scenario to account for tail risk."
+        "1-in-100 event (P99) — the loss level expected to be exceeded once in "
+        "100 years (1% annual exceedance probability). Standard reinsurance / "
+        "underwriting convention for cover sizing."
+    )
+    add_bullet(doc,
+        "1-in-200 event (P99.5) — aligned with the FSCA SAM (Solvency Assessment "
+        "and Management) regime's catastrophe scenario."
+    )
+    add_bullet(doc,
+        "1-in-250 event (P99.6) — extreme tail view requested for catastrophe-"
+        "cover discussions. GPD-fitted from the right tail of the simulation."
+    )
+    add_body(doc,
+        "Selection of the appropriate cover limit from these scenarios is the "
+        "responsibility of the insured in consultation with the broker. The "
+        "report presents the analysis; the broker structures the cover."
+    )
+
+    add_h2(doc, "Suggested deductible")
+
+    add_body(doc,
+        "The model still surfaces a suggested deductible figure as operational "
+        "input for the broker, calculated as a percentage of the loss exposure "
+        "scaled by the RSI score. The deductible percentage ranges from 0.5% "
+        "(low risk) to 20% (critical risk) on a non-linear curve, with "
+        "increments accelerating at higher risk levels. This is not a cover-"
+        "limit recommendation - it is the amount the insured can reasonably "
+        "self-insure as the trade-off against premium."
+    )
+
+    add_h2(doc, "Catastrophe Regulatory Stack (C2 cost component)")
+
+    add_body(doc,
+        "The catastrophe-view C2 component sums applicable statutory maxima "
+        "across every regulatory framework that could impose a fine on the "
+        "scanned entity in a worst-case breach. Each statutory maximum is "
+        "scaled by an Enterprise Capacity Factor that reflects how SA "
+        "regulators actually behave: small entities face proportionally "
+        "lower enforcement than the full ceiling, while large entities can "
+        "realistically face the full statutory maximum. Without this "
+        "scaling a R10M FSP would face the same cat ceiling as Sanlam at "
+        "R200B - indefensible."
+    )
+
+    add_bullet(doc,
+        "Always-on: POPIA Section 109 (R10M ceiling) + ECTA Section 89 "
+        "(R1M cat estimate). POPIA Section 99 civil exposure is disclosed "
+        "qualitatively but NOT included in the quantitative stack - civil "
+        "exposure depends on contractual data invisible to an external scan."
+    )
+    add_bullet(doc,
+        "Flag-driven: CPA Section 112 (B2C flag, 10% turnover or R1M), "
+        "JSE Listings Requirements (listed_company flag, R7.5M), GDPR "
+        "(EU flag, 4% turnover), PCI DSS (card flag, R700K-R1M)."
+    )
+    add_bullet(doc,
+        "Industry-keyed (auto-applied from sub_industry): FSCA / FAIS "
+        "Section 167 (R100M cat assumption) for FS sub-industries, FIC "
+        "Section 45C (R50M legal-person cap) for accountable institutions, "
+        "NHA Section 17(2) + HPCSA for Health Services (R6M base; "
+        "Medical Schemes Act, Pharmacy Act, SAHPRA add-ons via "
+        "sub_industry_detail), Legal Practice Act / LPC for Legal "
+        "Services, Electronic Communications Act / ICASA for telecoms "
+        "(R50M cap), Mine Health and Safety Act (R3M) for mining sub-"
+        "industries, PFMA Section 86 (R5M) for all public sector sub-"
+        "industries."
+    )
+
+    add_body(doc,
+        "Enterprise Capacity Factor revenue-band table: < R10M = 0.10; "
+        "R10M-R25M = 0.15; R25M-R75M = 0.25; R75M-R200M = 0.45; "
+        "R200M-R500M = 0.65; R500M-R1B = 0.80; R1B-R10B = 0.95; "
+        ">= R10B = 1.00. Reflects the SA Information Regulator's Section "
+        "109(3) 'extent and ability' considerations and equivalent "
+        "enforcement-discretion patterns across other SA regulators."
+    )
+
+    add_body(doc,
+        "Worked example - R200M listed FS broker (B2C, accountable "
+        "institution), capacity factor 0.65: POPIA R10M x 0.65 = R6.5M; "
+        "ECTA R1M x 0.65 = R0.65M; CPA 10% x R200M = R20M (no factor - "
+        "percentage already scales); FSCA R100M x 0.65 = R65M; FIC R50M "
+        "x 0.65 = R32.5M; JSE R7.5M x 0.65 = R4.875M. Total cat stack: "
+        "approximately R129.5M. The same entity at R10M revenue "
+        "(capacity factor 0.15) would face approximately R24M total."
+    )
+
+    add_h2(doc, "Civil Liability Disclosure")
+
+    add_body(doc,
+        "The financial impact figures presented in this report exclude "
+        "civil liability arising from contractual or common-law "
+        "obligations - specifically POPIA Section 99 civil action, "
+        "common-law delict, contractual indemnities, master service "
+        "agreement penalties, and third-party claims. These exposures "
+        "cannot be quantified from an external security assessment "
+        "because they depend on contracts, customer terms, supplier "
+        "liabilities, and indemnity clauses held by the organisation "
+        "under assessment."
+    )
+    add_body(doc,
+        "Civil exposure is uncapped under POPIA Section 99 and South "
+        "African common law and can materially exceed the regulatory "
+        "fine figures shown. Section 99 explicitly permits a court to "
+        "award patrimonial loss, non-patrimonial loss, aggravated "
+        "damages, and costs - no statutory cap applies. The disclosure "
+        "paragraph in the report directs legal counsel and the "
+        "organisation's risk officer to review contractual exposures "
+        "alongside the report when determining appropriate cover."
+    )
+
+    add_h2(doc, "Regulatory Flag Audit (FAIS audit trail)")
+
+    add_body(doc,
+        "Every scan records both the broker's input on each regulatory "
+        "flag (listed_company / b2c / accountable_institution / GDPR / "
+        "PCI / healthcare sub-detail) AND what the pre-flight scan "
+        "auto-detected independently. The audit panel in the full PDF "
+        "and HTML report shows these side-by-side with the evidence "
+        "for each auto-detection. Broker input drives the catastrophe "
+        "stack calculation - the broker's value is authoritative - but "
+        "the auto-detected value remains visible as an independent "
+        "check for FAIS audit defensibility."
+    )
+    add_body(doc,
+        "Auto-detection sources: JSE-listed company is detected from a "
+        "curated list of ~50 JSE-listed entities plus a footer ticker "
+        "scrape ('JSE: TICKER' pattern). Accountable institution is "
+        "inferred from the FS / Legal Services / Real Estate sub-"
+        "industry mapping (per FIC Act Schedule 1). B2C is inferred "
+        "from consumer-facing sub-industry labels plus payment-form "
+        "signals from the homepage probe. Healthcare sub-detail is "
+        "keyword-classified from domain and page title (medical_scheme / "
+        "pharmacy / pharma / hospital_clinic)."
+    )
+
+    add_h2(doc, "Per-checker Scan Duration Profile")
+
+    add_body(doc,
+        "Each scan records per-checker wall-clock timing in a Scan "
+        "Duration Profile section in the full PDF. This serves both as "
+        "a quality signal for brokers (the report can demonstrate the "
+        "scan completed within agreed SLA) and as an operational "
+        "diagnostic primitive (the longest-running checkers can be "
+        "identified at a glance). The 'running' status emitted during "
+        "the scan is also corrected to indicate actual execution rather "
+        "than queue position - previously all queued checkers displayed "
+        "as 'running' regardless of whether a worker thread had picked "
+        "them up."
     )
 
     add_note(doc,

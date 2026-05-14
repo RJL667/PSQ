@@ -559,6 +559,48 @@
           <tr><td>Standard Deviation</td><td>R {{ '{:,.0f}'.format(mc_t.std_dev) }}</td></tr>
         </table>
 
+        {# Loss Exposure Scenarios — dedicated card block, schema-driven from loss_exposure.scenarios. #}
+        {# FAIS-safe replacement for Recommended Cover. #}
+        {% set le = fin.loss_exposure if fin.loss_exposure is defined else {} %}
+        {% set le_scenarios = le.scenarios if le.scenarios is defined else {} %}
+        {% if le_scenarios %}
+        <div style="background:linear-gradient(135deg, rgba(29,78,216,0.08), rgba(29,78,216,0.02));border:1px solid rgba(29,78,216,0.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:4px;">Loss Exposure Scenarios</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+            Modelled annual cyber loss across a range of severity scenarios. Cover sizing should reflect the insured's risk appetite, contractual exposures, balance sheet capacity, and existing risk transfer arrangements.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="background:rgba(29,78,216,0.15);">
+                <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Scenario</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);">Modelled Loss</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);">Annual Probability</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for key in ['most_likely', 'median', 'return_1_100', 'return_1_200', 'return_1_250'] %}
+              {% if le_scenarios[key] is defined %}
+              {% set sc_row = le_scenarios[key] %}
+              {% set row_color = 'var(--text)' %}
+              {% if key in ['return_1_100'] %}{% set row_color = 'var(--amber, #d97706)' %}{% endif %}
+              {% if key in ['return_1_200', 'return_1_250'] %}{% set row_color = 'var(--critical)' %}{% endif %}
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;color:{{ row_color }};{% if key in ['return_1_100','return_1_200','return_1_250'] %}font-weight:700;{% endif %}">{{ sc_row.label }}</td>
+                <td style="padding:8px 10px;text-align:right;color:{{ row_color }};font-weight:700;">R {{ '{:,.0f}'.format(sc_row.loss_zar | default(0)) }}</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">
+                  {% if sc_row.annual_prob is none %}Most likely (peak){% else %}{{ '%.1f'|format(sc_row.annual_prob * 100) if sc_row.annual_prob < 0.01 else '%.0f'|format(sc_row.annual_prob * 100) }}%{% endif %}
+                </td>
+              </tr>
+              {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+          <div style="font-size:.7rem;color:var(--muted);font-style:italic;margin-top:10px;line-height:1.5;">
+            Figures presented are statistical model output. Selection of cover limit is the responsibility of the insured in consultation with the broker. Phishield does not recommend a specific cover amount.
+          </div>
+        </div>
+        {% endif %}
+
         {# Per-scenario MC breakdown #}
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
           {% for name, label in [('data_breach', 'Data Breach'), ('ransomware', 'Ransomware'), ('business_interruption', 'Bus. Interruption')] %}
@@ -607,14 +649,76 @@
           </tr>
         </table>
 
-        {# Insurance Recommendation #}
+        {# Premium tier (operational only — no cover recommendation) #}
         {% if ins %}
-        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Insurance Cover Recommendation</div>
-        <table class="kv-table">
-          <tr><td style="width:180px;">Min. Insurance Cover</td><td>R {{ '{:,.0f}'.format(ins.minimum_cover_zar | default(0)) }}</td></tr>
-          <tr><td>Rec. Insurance Cover</td><td><strong>R {{ '{:,.0f}'.format(ins.recommended_cover_zar | default(0)) }}</strong></td></tr>
-          <tr><td>Premium Risk Tier</td><td><strong style="{% if ins.premium_risk_tier == 'High' %}color:var(--critical);{% elif ins.premium_risk_tier == 'Medium' %}color:var(--medium);{% else %}color:var(--low);{% endif %}">{{ ins.premium_risk_tier | default('N/A') }}</strong></td></tr>
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Premium Risk Indicator</div>
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:180px;">Premium Risk Tier</td><td><strong style="{% if ins.premium_risk_tier == 'High' %}color:var(--critical);{% elif ins.premium_risk_tier == 'Medium' %}color:var(--medium);{% else %}color:var(--low);{% endif %}">{{ ins.premium_risk_tier | default('N/A') }}</strong></td></tr>
+          <tr><td>Cover Sizing</td><td><span style="color:var(--muted);">See Loss Exposure Scenarios above</span></td></tr>
         </table>
+        {% endif %}
+
+        {# Civil Liability Disclosure — required next to financial impact figures #}
+        <div style="background:var(--surface2);border-left:3px solid var(--amber, #d97706);border-radius:6px;padding:12px 14px;margin-top:6px;font-size:.78rem;line-height:1.5;">
+          <div style="font-weight:700;color:var(--text);margin-bottom:6px;">Civil Liability Disclosure</div>
+          <div style="color:var(--muted);">
+            The financial impact figures presented in this report exclude civil liability arising from contractual or common-law obligations — specifically POPIA Section 99 civil action, common-law delict, contractual indemnities, master service agreement penalties, and third-party claims. These exposures cannot be quantified from an external security assessment because they depend on contracts, customer terms, supplier liabilities, and indemnity clauses held by the organisation under assessment. <strong>Civil exposure is uncapped under POPIA Section 99 and South African common law</strong> and can materially exceed the regulatory fine figures shown. Legal counsel and the organisation's risk officer should review contractual exposures alongside this report when determining appropriate cover.
+          </div>
+        </div>
+
+        {# Regulatory Flag Audit Panel — FAIS audit trail #}
+        {% set reg_exp = fin.regulatory_exposure if fin.regulatory_exposure is defined else {} %}
+        {% set fl = reg_exp.flags if reg_exp.flags is defined else {} %}
+        {% set auto = fl._auto_detected if fl._auto_detected is defined else {} %}
+        {% if fl %}
+        <div style="margin-top:14px;background:var(--surface2);border-radius:8px;padding:12px 14px;">
+          <div style="font-weight:700;color:var(--text);margin-bottom:4px;font-size:.85rem;">Regulatory Flag Audit</div>
+          <div style="font-size:.7rem;color:var(--muted);margin-bottom:10px;line-height:1.5;">
+            FAIS audit trail. Broker input drives the catastrophe stack calculation; auto-detected values from pre-flight are shown for independent verification. Discrepancies are not errors - they reflect broker knowledge of context the scanner cannot observe.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.74rem;">
+            <thead>
+              <tr style="background:rgba(255,255,255,0.04);">
+                <th style="text-align:left;padding:6px 8px;font-weight:600;">Flag</th>
+                <th style="text-align:center;padding:6px 8px;font-weight:600;">Broker Input</th>
+                <th style="text-align:center;padding:6px 8px;font-weight:600;">Auto-detected</th>
+                <th style="text-align:left;padding:6px 8px;font-weight:600;">Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% set flag_rows = [
+                ('listed_company',          'JSE-listed company',             'listed_company'),
+                ('accountable_institution', 'FIC accountable institution',    'accountable_institution'),
+                ('b2c',                     'Consumer-facing (B2C)',          'b2c'),
+                ('sub_industry_detail',     'Healthcare sub-detail',          'sub_industry_detail'),
+                ('gdpr',                    'GDPR applicable',                'gdpr_applicable'),
+                ('pci',                     'PCI DSS applicable',             'pci_applicable')
+              ] %}
+              {% for broker_key, label, auto_key in flag_rows %}
+              {% set broker_val = fl[broker_key] if fl[broker_key] is defined else None %}
+              {% set auto_entry = auto[auto_key] if auto[auto_key] is defined else {} %}
+              <tr style="border-top:1px solid rgba(255,255,255,0.04);">
+                <td style="padding:6px 8px;color:var(--text);">{{ label }}</td>
+                <td style="padding:6px 8px;text-align:center;color:{% if broker_val %}var(--low){% else %}var(--muted){% endif %};">
+                  {% if broker_key == 'sub_industry_detail' %}
+                    {{ broker_val if broker_val else '(not set)' }}
+                  {% else %}
+                    {{ 'Yes' if broker_val else 'No' }}
+                  {% endif %}
+                </td>
+                <td style="padding:6px 8px;text-align:center;color:{% if auto_entry.auto_detected %}var(--low){% else %}var(--muted){% endif %};">
+                  {% if broker_key == 'sub_industry_detail' and auto_entry.auto_detected %}
+                    {{ auto_entry.sub_industry_detail | default('Yes') }}
+                  {% else %}
+                    {{ 'Yes' if auto_entry.auto_detected else 'No' }}
+                  {% endif %}
+                </td>
+                <td style="padding:6px 8px;color:var(--muted);font-style:italic;">{{ auto_entry.evidence | default('—') }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
         {% endif %}
         {% else %}
         {# USD path #}
@@ -632,12 +736,21 @@
         </table>
         {% set ins = fin.insurance_recommendations %}
         {% if ins %}
-        <div style="margin-top:14px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Insurance Recommendations</div>
-        <table class="kv-table" style="margin-top:6px;">
+        <div style="margin-top:14px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Loss Exposure Scenarios</div>
+        {% set mc = fin.monte_carlo if fin.monte_carlo is defined else {} %}
+        {% set mc_t = mc.total if mc.total is defined else {} %}
+        <table class="kv-table" style="margin-top:6px;margin-bottom:8px;">
+          <tr><td style="width:220px;">Most Likely (mode)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.mode | default(mc_t.p50 | default(0))) }}</strong></td></tr>
+          <tr><td>Median (P50)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p50 | default(0)) }}</strong></td></tr>
+          <tr><td>1-in-100 event (P99)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p99 | default(0)) }}</strong></td></tr>
+          <tr><td>1-in-200 event (P99.5)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p99_5 | default(0)) }}</strong></td></tr>
+          <tr><td>1-in-250 event (P99.6)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p99_6 | default(0)) }}</strong></td></tr>
           <tr><td>Suggested Deductible</td><td>{{ cur }}{{ '{:,.0f}'.format(ins.suggested_deductible | default(0)) }}</td></tr>
-          <tr><td>Expected Annual Loss</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(ins.expected_annual_loss | default(0)) }}</strong></td></tr>
-          <tr><td>Recommended Coverage Limit</td><td>{{ cur }}{{ '{:,.0f}'.format(ins.recommended_coverage | default(0)) }}</td></tr>
+          <tr><td>Cover Sizing</td><td><span style="color:var(--muted);">See scenarios above</span></td></tr>
         </table>
+        <div style="font-size:.72rem;color:var(--muted);font-style:italic;margin-bottom:8px;line-height:1.5;">
+          Figures presented are statistical model output. Selection of cover limit is the responsibility of the insured in consultation with the broker. Phishield does not recommend a specific cover amount.
+        </div>
         {% endif %}
         {% endif %}
       </div>

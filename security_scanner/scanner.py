@@ -200,13 +200,31 @@ class SecurityScanner:
 
         cat_results = {}
         per_ip_results = {}  # {ip: {checker_name: result}}
+        # Per-checker wall-time, populated as each checker completes.
+        # Drives the Scan Duration Profile section in the full PDF.
+        checker_durations = {}
 
         # --- Run lightweight domain-level checkers concurrently ---
+        # Wrap each checker so "running" is emitted at execution start, not
+        # at submission. The previous behaviour marked all 21 lightweight
+        # checkers as "running" up front; with max_workers=6, 15 checkers
+        # appeared "running" while actually queued. UI showed glasswing
+        # (or any other late-pickup checker) running for minutes when its
+        # actual execution was under 5 seconds.
+        def _run_with_timing(name, fn, args, notify):
+            notify(on_progress, name, "running")
+            t0 = time.perf_counter()
+            try:
+                result = fn(*args)
+            except Exception as e:
+                result = {"status": "error", "error": str(e), "issues": []}
+            checker_durations[name] = round(time.perf_counter() - t0, 3)
+            return result
+
         with ThreadPoolExecutor(max_workers=6) as ex:
             futures = {}
             for name, (fn, args) in domain_checkers.items():
-                self._notify(on_progress, name, "running")
-                futures[ex.submit(fn, *args)] = name
+                futures[ex.submit(_run_with_timing, name, fn, args, self._notify)] = name
 
             try:
                 for future in as_completed(futures, timeout=180):
@@ -222,6 +240,7 @@ class SecurityScanner:
                     if name not in cat_results:
                         fut.cancel()
                         cat_results[name] = {"status": "timeout", "error": "Checker timed out after 180s", "issues": []}
+                        checker_durations.setdefault(name, 180.0)
                         self._notify(on_progress, name, "done", cat_results[name])
 
         # --- Run heavyweight checkers sequentially (memory-safe) ---
@@ -230,7 +249,9 @@ class SecurityScanner:
         # sslyze or crt.sh hung on unresponsive targets.
         for name, fn, args, timeout in heavy_checkers:
             self._notify(on_progress, name, "running")
+            t0 = time.perf_counter()
             cat_results[name] = run_with_timeout(fn, args=tuple(args), timeout=timeout)
+            checker_durations[name] = round(time.perf_counter() - t0, 3)
             self._notify(on_progress, name, "done", cat_results[name])
 
         # --- Expand IP pool with subdomain-resolved IPs ---
@@ -254,17 +275,30 @@ class SecurityScanner:
             })
 
         # --- Run IP-level checkers on ALL discovered IPs ---
+        # Same instrumentation pattern as the domain-level batch: emit
+        # "running" at execution start, not at submission, so per-IP UI
+        # status reflects actual execution rather than queue position.
+        def _run_ip_with_timing(label, fn, fn_args, notify):
+            notify(on_progress, label, "running")
+            t0 = time.perf_counter()
+            try:
+                result = fn(*fn_args)
+            except Exception as e:
+                result = {"status": "error", "error": str(e), "issues": []}
+            checker_durations[label] = round(time.perf_counter() - t0, 3)
+            return result
+
         with ThreadPoolExecutor(max_workers=4) as ex:
             futures = {}
             for ip in all_ips:
                 per_ip_results[ip] = {}
                 for checker_name, fn in ip_checkers_templates.items():
                     label = f"{checker_name}:{ip}"
-                    self._notify(on_progress, label, "running")
                     if checker_name == "shodan_vulns":
-                        futures[ex.submit(fn, domain, self.shodan_api_key, ip)] = label
+                        fn_args = (domain, self.shodan_api_key, ip)
                     else:
-                        futures[ex.submit(fn, domain, ip)] = label
+                        fn_args = (domain, ip)
+                    futures[ex.submit(_run_ip_with_timing, label, fn, fn_args, self._notify)] = label
 
             try:
                 for future in as_completed(futures, timeout=180):
@@ -283,6 +317,7 @@ class SecurityScanner:
                         fut.cancel()
                         per_ip_results.setdefault(ip, {})[checker_name] = {
                             "status": "timeout", "error": "Checker timed out", "issues": []}
+                        checker_durations.setdefault(lbl, 180.0)
                         self._notify(on_progress, lbl, "done", per_ip_results[ip][checker_name])
 
         # --- Phase 4: Aggregate IP-level results ---
@@ -557,6 +592,20 @@ class SecurityScanner:
         # Propagate scan completeness metadata to top level
         if "_scan_completeness" in cat_results:
             results["_scan_completeness"] = cat_results.pop("_scan_completeness")
+        else:
+            results["_scan_completeness"] = {}
+        # Attach per-checker wall-time profile. Drives the Scan Duration
+        # Profile section in the full PDF and the SLA diagnostic for slow
+        # scans. Sum is wall-clock approximate (concurrent checkers overlap).
+        results["_scan_completeness"]["per_checker_seconds"] = dict(
+            sorted(checker_durations.items(), key=lambda kv: kv[1], reverse=True)
+        )
+        results["_scan_completeness"]["checkers_observed"] = len(checker_durations)
+        if checker_durations:
+            durations = list(checker_durations.values())
+            results["_scan_completeness"]["slowest_checker"] = max(
+                checker_durations.items(), key=lambda kv: kv[1])
+            results["_scan_completeness"]["total_checker_seconds"] = round(sum(durations), 1)
         results["compliance"] = scorer.compliance_summary(cat_results)
 
         # --- Phase 6: Insurance Analytics ---

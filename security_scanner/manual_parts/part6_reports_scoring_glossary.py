@@ -104,11 +104,20 @@ def build(doc):
         "cyber-insurance underwriters and brokers. It includes the "
         "Ransomware Susceptibility Index (RSI) score, the Data Breach "
         "Impact (DBI) score, a hybrid-model financial impact estimate "
-        "using Monte Carlo simulation with PERT distributions, and a "
+        "using a 50,000-iteration Monte Carlo simulation with PERT "
+        "distributions and a Generalised Pareto tail fit for catastrophe "
+        "return periods, a Loss Exposure Scenarios table presenting "
+        "Most Likely / Median / 1-in-100 / 1-in-200 / 1-in-250 outcomes "
+        "for FAIS-compliant cover-sizing discussion, a Civil Liability "
+        "Disclosure flagging uncapped POPIA Section 99 / common-law "
+        "delict exposure, a Regulatory Flag Audit trail showing broker "
+        "input versus pre-flight auto-detection per flag, a Scan "
+        "Duration Profile showing per-checker wall-time, and a "
         "prioritised remediation roadmap showing which actions would "
-        "yield the greatest score improvement. Cost estimates are "
-        "presented as indicative ranges to account for organisational "
-        "differences in remediation complexity.",
+        "yield the greatest score improvement. The report intentionally "
+        "does NOT present a Recommended Cover Limit figure - cover "
+        "sizing is a broker / client decision informed by the Loss "
+        "Exposure Scenarios.",
     )
 
     add_bold_body(doc, "Checker Cards", "")
@@ -1108,6 +1117,158 @@ def build(doc):
             "for which no patch exists. Zero-day vulnerabilities are "
             "particularly dangerous because there is no available fix "
             "at the time of discovery or exploitation.",
+        ),
+        (
+            "Accountable Institution (FIC Act)",
+            "An entity listed in Schedule 1 of the Financial Intelligence "
+            "Centre Act 38 of 2001. Includes banks, brokers, attorneys, "
+            "estate agents, dealers in precious metals, casinos, motor "
+            "vehicle dealers, and crypto asset service providers. "
+            "Accountable institutions face FIC Section 45C administrative "
+            "penalties up to R50M for legal persons (R10M for natural "
+            "persons) for AML/CFT non-compliance.",
+        ),
+        (
+            "B2C (Business to Consumer)",
+            "An entity whose primary customer is an individual consumer "
+            "rather than another business. B2C trigger applies the "
+            "Consumer Protection Act Section 112 administrative fine: "
+            "10% of annual turnover or R1M, whichever is greater. Auto-"
+            "inferred from consumer-facing sub-industry labels (Retail, "
+            "Health Services, Personal Services, etc.) and supporting "
+            "payment-form signals.",
+        ),
+        (
+            "Capacity Factor (Enterprise)",
+            "A revenue-band scaling factor applied to all statutory "
+            "maxima in the catastrophe regulatory stack. Reflects the "
+            "Information Regulator's Section 109(3) 'extent and ability' "
+            "considerations and equivalent enforcement-discretion "
+            "patterns across other SA regulators. Range: 0.10 for "
+            "entities below R10M revenue to 1.00 for entities at or "
+            "above R10B. Ensures a small FSP does not face the same "
+            "cat ceiling as a major insurer.",
+        ),
+        (
+            "Catastrophe Regulatory Stack",
+            "The sum of every applicable regulatory framework's "
+            "statutory maximum (capacity-scaled) used for the 1-in-100, "
+            "1-in-200, and 1-in-250 catastrophe loss views. Includes "
+            "POPIA Section 109, ECTA Section 89, GDPR (if EU data), "
+            "PCI DSS (if card data), CPA Section 112 (if B2C), JSE "
+            "Listings Requirements (if listed), FIC Act Section 45C "
+            "(if accountable institution), and sector-specific "
+            "frameworks resolved from the sub-industry (FSCA, FAIS, "
+            "NHA, HPCSA, ICASA, MHSA, PFMA, etc.).",
+        ),
+        (
+            "Civil Liability Disclosure",
+            "A required disclosure in the financial impact section of "
+            "the report. States that the model's figures exclude civil "
+            "liability under POPIA Section 99 (uncapped), common-law "
+            "delict, contractual indemnities, master service agreement "
+            "penalties, and third-party claims. These exposures depend "
+            "on contractual data invisible to an external scan and can "
+            "materially exceed the regulatory fine figures shown.",
+        ),
+        (
+            "GPD (Generalised Pareto Distribution)",
+            "A statistical distribution used to model the tail of a "
+            "heavy-tailed distribution above a high threshold (Peaks "
+            "Over Threshold method). The scanner's Monte Carlo engine "
+            "fits a GPD above the P95 percentile using a pure-numpy "
+            "method-of-moments estimator, then extrapolates the P99, "
+            "P99.5, and P99.6 percentiles from the fitted tail. Falls "
+            "back to raw percentiles if the fit fails sanity checks.",
+        ),
+        (
+            "Loss Exposure Scenarios",
+            "A table presenting five modelled annual loss outcomes "
+            "(Most Likely / Median / 1-in-100 / 1-in-200 / 1-in-250) "
+            "in place of the previous Recommended Cover Limit figure. "
+            "Provides analytical inputs for a broker / client cover-"
+            "sizing decision without making that decision on behalf of "
+            "the insured. FAIS reasonable-advice compliance.",
+        ),
+        (
+            "POPIA Section 99 (Civil Action)",
+            "Section 99 of the Protection of Personal Information Act "
+            "4 of 2013. Permits a data subject (or the Information "
+            "Regulator on the subject's behalf) to institute civil "
+            "action against a responsible party for breach of the Act. "
+            "Damages can include patrimonial loss, non-patrimonial "
+            "loss, aggravated damages, interest, and costs. NO "
+            "STATUTORY CAP applies.",
+        ),
+        (
+            "POPIA Section 109 (Administrative Fine)",
+            "Section 109 of the Protection of Personal Information Act "
+            "4 of 2013. Empowers the Information Regulator to impose "
+            "an administrative fine not exceeding R10 million for "
+            "contravention of the Act. Section 109(3) lists eight "
+            "factors the Regulator must consider when determining the "
+            "fine amount: nature of the personal information; duration "
+            "and extent of the contravention; number of data subjects "
+            "affected; public-importance issues; likelihood of "
+            "substantial damage; prevention possibility; failure to "
+            "conduct risk assessments; previous offence history. "
+            "Note: the previous reference to 'Section 107' in earlier "
+            "versions of the report was incorrect - Section 107 "
+            "governs criminal penalties (court-imposed, post-"
+            "conviction).",
+        ),
+        (
+            "Pre-flight Auto-detection",
+            "A lightweight detection pass run by the /api/preflight "
+            "endpoint before the full scan starts. Resolves the "
+            "regulatory flags (listed_company, b2c, "
+            "accountable_institution, GDPR, PCI, healthcare sub-detail) "
+            "from a single HTTP fetch plus the sub-industry. Results "
+            "pre-fill the broker form with badge-marked suggestions "
+            "the broker can confirm or override before submitting the "
+            "full scan. Both broker input and auto-detected values "
+            "are recorded in the scan output for the FAIS audit trail.",
+        ),
+        (
+            "Regulatory Flag Audit",
+            "A panel in the report showing broker-input vs auto-"
+            "detected values for every regulatory flag, side-by-side "
+            "with the evidence supporting each auto-detection. Broker "
+            "input is authoritative (drives the catastrophe stack "
+            "calculation) but the auto-detected value remains visible "
+            "as an independent check. Discrepancies are not errors - "
+            "they reflect broker knowledge of context the scanner "
+            "cannot observe (e.g. unlisted contractual EU customer "
+            "relationships).",
+        ),
+        (
+            "Return Period",
+            "An actuarial / reinsurance term denoting the average "
+            "interval between events of a given severity. A 1-in-100 "
+            "year event has a 1% annual exceedance probability "
+            "(P99 percentile of the loss distribution); 1-in-200 = "
+            "0.5% (P99.5); 1-in-250 = 0.4% (P99.6). These figures "
+            "are surfaced as Loss Exposure Scenarios for catastrophe "
+            "cover-sizing discussion.",
+        ),
+        (
+            "Scan Duration Profile",
+            "A section in the full PDF report listing per-checker "
+            "wall-clock time for the scan. Both an SLA quality signal "
+            "for brokers and an operational diagnostic primitive for "
+            "identifying slow checkers. Recorded under "
+            "_scan_completeness.per_checker_seconds in the JSON output.",
+        ),
+        (
+            "Sector Framework Mapping",
+            "An auto-applied resolution from the entity's sub-industry "
+            "(SIC code) to the regulatory frameworks that could impose "
+            "fines on that sector. FS sub-industries map to FSCA + "
+            "FIC; Health Services maps to NHA + HPCSA (plus Medical "
+            "Schemes Act / Pharmacy Act / SAHPRA via sub-industry-"
+            "detail); telecoms maps to ECA / ICASA; mining maps to "
+            "MHSA; legal services maps to LPC + FIC; public sector "
+            "maps to PFMA.",
         ),
     ]
 

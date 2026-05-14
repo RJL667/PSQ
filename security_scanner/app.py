@@ -592,6 +592,30 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/preflight", methods=["POST"])
+def preflight():
+    """Run flag auto-detection BEFORE the full scan starts so the broker
+    form can pre-fill checkboxes with sensible defaults. Returns the
+    auto-detected flags + evidence per flag. Single HTTP fetch to the
+    target domain - typical wall time 3-8 seconds. The frontend posts
+    domain + sub_industry, then renders the returned flags as
+    pre-checked / pre-suggested options the broker can confirm or
+    override before submitting the full scan."""
+    from flag_inference import run_preflight
+    data = request.get_json(silent=True) or {}
+    domain = str(data.get("domain", "")).strip().lower()
+    domain = domain.removeprefix("https://").removeprefix("http://").split("/")[0]
+    if not domain or not valid_domain(domain):
+        return jsonify({"status": "invalid_domain", "error": "Invalid or missing domain"}), 400
+    sub_industry = str(data.get("sub_industry", "")).strip() or None
+    industry = str(data.get("industry", "")).strip() or None
+    try:
+        result = run_preflight(domain, sub_industry=sub_industry, industry=industry)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 @app.route("/api/dehashed/balance", methods=["GET"])
 def dehashed_balance():
     """Check Dehashed API credit balance without using a credit."""
@@ -665,18 +689,38 @@ def start_scan():
     skip_dehashed = bool(data.get("skip_dehashed", False))
     skip_intelx = bool(data.get("skip_intelx", False))
 
-    # Regulatory exposure flags (default: POPIA only)
+    # Regulatory exposure flags (default: POPIA only).
+    # Each flag also carries an audit-trail "auto_detected" dict from the
+    # pre-flight endpoint so the report can show both broker confirmation
+    # AND auto-detection independently (FAIS audit defensibility).
     regulatory_flags = {}
     if data.get("gdpr_applicable"):
         regulatory_flags["gdpr"] = True
     if data.get("pci_applicable"):
         regulatory_flags["pci"] = True
+    # New flags (broker-confirmed via form, optionally pre-filled from pre-flight)
+    if data.get("listed_company"):
+        regulatory_flags["listed_company"] = True
+    if data.get("b2c"):
+        regulatory_flags["b2c"] = True
+    if data.get("accountable_institution"):
+        regulatory_flags["accountable_institution"] = True
+    sub_industry_detail = str(data.get("sub_industry_detail", "")).strip() or None
+    if sub_industry_detail:
+        regulatory_flags["sub_industry_detail"] = sub_industry_detail
     try:
         other_j = int(data.get("other_jurisdictions", 0))
         if other_j > 0:
             regulatory_flags["other_jurisdictions"] = other_j
     except (ValueError, TypeError):
         pass
+    # Pre-flight auto-detected results - passed through verbatim from
+    # the broker's pre-flight call (or empty if no pre-flight ran).
+    # Used for the flag audit panel in the report; does NOT drive any
+    # calculation - broker's flags are authoritative.
+    auto_detected = data.get("auto_detected_flags") or {}
+    if isinstance(auto_detected, dict):
+        regulatory_flags["_auto_detected"] = auto_detected
 
     # Parse client-supplied IPs (optional)
     import ipaddress as _ipaddress

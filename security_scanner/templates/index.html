@@ -178,6 +178,7 @@
         </div>
 
         <div style="margin:10px 0 6px;font-size:.76rem;font-weight:600;color:var(--muted,#94a3b8);text-transform:uppercase;letter-spacing:.5px;">Regulatory Exposure</div>
+        <div id="preflight-banner" style="display:none;font-size:.76rem;color:#60a5fa;background:rgba(96,165,250,0.08);border-left:3px solid #60a5fa;padding:8px 12px;margin-bottom:10px;border-radius:4px;line-height:1.4;"></div>
 
         <div class="field">
           <div class="toggle-row">
@@ -186,7 +187,7 @@
               <span class="toggle-slider"></span>
             </label>
             <div>
-              <div class="toggle-label">Company processes EU personal data (GDPR)</div>
+              <div class="toggle-label">Company processes EU personal data (GDPR) <span class="auto-badge" id="gdpr-badge"></span></div>
               <div class="toggle-note">Increases regulatory/third-party liability exposure. Applies to companies with EU customers, subsidiaries, or data processing.</div>
             </div>
           </div>
@@ -199,11 +200,67 @@
               <span class="toggle-slider"></span>
             </label>
             <div>
-              <div class="toggle-label">Company processes card data (PCI DSS)</div>
+              <div class="toggle-label">Company processes card data (PCI DSS) <span class="auto-badge" id="pci-badge"></span></div>
               <div class="toggle-note">Adds PCI fine exposure + card reissue costs. Applies to companies storing/processing payment card data.</div>
             </div>
           </div>
         </div>
+
+        <div class="field">
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" id="listed-check" name="listed_company" />
+              <span class="toggle-slider"></span>
+            </label>
+            <div>
+              <div class="toggle-label">JSE-listed company <span class="auto-badge" id="listed-badge"></span></div>
+              <div class="toggle-note">Adds JSE Listings Requirements exposure (R7.5M cat) for disclosure breaches. Auto-detected from the JSE listed-companies list and homepage footer ticker scrape.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" id="b2c-check" name="b2c" />
+              <span class="toggle-slider"></span>
+            </label>
+            <div>
+              <div class="toggle-label">Consumer-facing (B2C) <span class="auto-badge" id="b2c-badge"></span></div>
+              <div class="toggle-note">Triggers Consumer Protection Act Section 112 (10% of turnover OR R1M, whichever greater). Auto-inferred from sub-industry and payment-form signals.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" id="ai-check" name="accountable_institution" />
+              <span class="toggle-slider"></span>
+            </label>
+            <div>
+              <div class="toggle-label">FIC Act accountable institution <span class="auto-badge" id="ai-badge"></span></div>
+              <div class="toggle-note">Triggers FIC Act Section 45C (R50M legal-person cap). Auto-applied for FS sub-industries, legal services, real estate. Tick manually for niche AI categories (precious metals dealers, casinos, crypto, motor vehicle dealers).</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field" id="health-detail-field" style="display:none;">
+          <label class="field-label" for="sub-industry-detail">Healthcare sub-type <span class="auto-badge" id="health-detail-badge"></span></label>
+          <select id="sub-industry-detail" name="sub_industry_detail" style="width:100%;background:var(--card-bg,#1a2332);color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;font-size:.9rem;">
+            <option value="hospital_clinic">Hospital / clinic (default)</option>
+            <option value="medical_scheme">Medical scheme</option>
+            <option value="pharmacy">Pharmacy</option>
+            <option value="pharma">Pharma / biotech</option>
+          </select>
+          <div class="field-hint">Used to layer Medical Schemes Act / Pharmacy Act / SAHPRA framework exposure on top of base NHA + HPCSA. Auto-inferred from domain and title keywords.</div>
+        </div>
+
+        <style>
+          .auto-badge { display:none; font-size:.65rem; color:#60a5fa; background:rgba(96,165,250,0.15); border:1px solid rgba(96,165,250,0.3); border-radius:4px; padding:1px 6px; margin-left:6px; font-weight:500; vertical-align:middle; }
+          .auto-badge.visible { display:inline-block; }
+          .auto-badge.suggestion { color:#fbbf24; background:rgba(251,191,36,0.12); border-color:rgba(251,191,36,0.3); }
+        </style>
 
         <div class="field">
           <label class="field-label" for="client-ips">Additional External IPs (optional)</label>
@@ -346,6 +403,123 @@ const submitBtn = document.getElementById('submit-btn');
   } catch (e) {}
 })();
 
+// Pre-flight auto-detection state. Populated by runPreflight() and
+// included verbatim in the scan submission as auto_detected_flags.
+// Drives the audit panel in the result PDF / HTML so the report can
+// show what the broker confirmed AND what was auto-detected, side-by-side.
+let preflightResult = null;
+let preflightInFlight = false;
+
+function setBadge(badgeId, autoDetected, evidence, isSuggestion) {
+  const el = document.getElementById(badgeId);
+  if (!el) return;
+  if (autoDetected) {
+    el.textContent = isSuggestion ? 'auto-suggested' : 'auto-detected';
+    el.classList.add('visible');
+    if (isSuggestion) el.classList.add('suggestion'); else el.classList.remove('suggestion');
+    el.title = evidence || '';
+  } else {
+    el.classList.remove('visible', 'suggestion');
+    el.textContent = '';
+    el.title = '';
+  }
+}
+
+async function runPreflight() {
+  if (preflightInFlight) return;
+  const domain = document.getElementById('domain').value.trim().toLowerCase()
+    .replace(/^https?:\/\//, '').split('/')[0];
+  if (!domain || !domain.includes('.')) return;
+  const sub = document.getElementById('sub-industry').value || '';
+  preflightInFlight = true;
+  const banner = document.getElementById('preflight-banner');
+  banner.style.display = 'block';
+  banner.textContent = 'Running pre-flight auto-detection for ' + domain + '…';
+  try {
+    const r = await fetch('/api/preflight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, sub_industry: sub })
+    });
+    const d = await r.json();
+    if (!r.ok || d.status !== 'ok') {
+      banner.textContent = 'Pre-flight could not run (' + (d.error || d.status) + '). Tick the flags below manually as needed.';
+      preflightResult = null;
+      return;
+    }
+    preflightResult = d;
+    const flags = d.flags || {};
+    // Listed company - pre-tick if detected
+    if (flags.listed_company && flags.listed_company.auto_detected) {
+      document.getElementById('listed-check').checked = true;
+      setBadge('listed-badge', true, flags.listed_company.evidence, false);
+    } else {
+      setBadge('listed-badge', false);
+    }
+    // Accountable institution - pre-tick if sub-industry matches
+    if (flags.accountable_institution && flags.accountable_institution.auto_detected) {
+      document.getElementById('ai-check').checked = true;
+      setBadge('ai-badge', true, flags.accountable_institution.evidence, false);
+    } else {
+      setBadge('ai-badge', false);
+    }
+    // B2C - pre-tick if sub-industry or payment-form signals match
+    if (flags.b2c && flags.b2c.auto_detected) {
+      document.getElementById('b2c-check').checked = true;
+      setBadge('b2c-badge', true, flags.b2c.evidence, false);
+    } else {
+      setBadge('b2c-badge', false);
+    }
+    // PCI - suggestion (not auto-tick - broker confirms)
+    if (flags.pci_applicable && flags.pci_applicable.auto_detected) {
+      setBadge('pci-badge', true, flags.pci_applicable.evidence, true);
+    } else {
+      setBadge('pci-badge', false);
+    }
+    // GDPR - suggestion (not auto-tick - broker confirms)
+    if (flags.gdpr_applicable && flags.gdpr_applicable.auto_detected) {
+      setBadge('gdpr-badge', true, flags.gdpr_applicable.evidence, true);
+    } else {
+      setBadge('gdpr-badge', false);
+    }
+    // Healthcare sub-detail - only show if sub-industry is Health Services
+    const isHealth = sub && sub.toLowerCase().includes('health service');
+    const healthField = document.getElementById('health-detail-field');
+    healthField.style.display = isHealth ? '' : 'none';
+    if (isHealth && flags.sub_industry_detail && flags.sub_industry_detail.auto_detected) {
+      const select = document.getElementById('sub-industry-detail');
+      select.value = flags.sub_industry_detail.sub_industry_detail || 'hospital_clinic';
+      setBadge('health-detail-badge', true, flags.sub_industry_detail.evidence, false);
+    } else {
+      setBadge('health-detail-badge', false);
+    }
+    const detectedCount = Object.values(flags).filter(f => f && f.auto_detected).length;
+    banner.textContent = detectedCount > 0
+      ? 'Pre-flight detected ' + detectedCount + ' flag(s) for ' + domain + '. Review and override below as needed.'
+      : 'Pre-flight ran for ' + domain + '. No flags auto-detected - tick manually as applicable.';
+  } catch (err) {
+    banner.textContent = 'Pre-flight network error: ' + err.message + '. Tick flags manually below.';
+    preflightResult = null;
+  } finally {
+    preflightInFlight = false;
+  }
+}
+
+// Debounced pre-flight trigger - fires when domain or sub-industry settles.
+let preflightTimer = null;
+function schedulePreflight() {
+  if (preflightTimer) clearTimeout(preflightTimer);
+  preflightTimer = setTimeout(runPreflight, 600);
+}
+document.getElementById('domain').addEventListener('blur', schedulePreflight);
+document.getElementById('sub-industry').addEventListener('change', schedulePreflight);
+document.getElementById('industry').addEventListener('change', () => {
+  // Hide healthcare detail field when industry changes away from a health context
+  const sub = document.getElementById('sub-industry').value || '';
+  const isHealth = sub && sub.toLowerCase().includes('health service');
+  document.getElementById('health-detail-field').style.display = isHealth ? '' : 'none';
+});
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   errorEl.style.display = 'none';
@@ -370,6 +544,18 @@ form.addEventListener('submit', async (e) => {
   if (subInd) body.sub_industry = subInd;
   if (document.getElementById('gdpr-check').checked) body.gdpr_applicable = true;
   if (document.getElementById('pci-check').checked) body.pci_applicable = true;
+  // New flags - broker confirmation is authoritative
+  if (document.getElementById('listed-check').checked) body.listed_company = true;
+  if (document.getElementById('b2c-check').checked) body.b2c = true;
+  if (document.getElementById('ai-check').checked) body.accountable_institution = true;
+  const healthDetail = document.getElementById('sub-industry-detail');
+  if (healthDetail && document.getElementById('health-detail-field').style.display !== 'none') {
+    body.sub_industry_detail = healthDetail.value;
+  }
+  // Pass pre-flight results through verbatim for the FAIS audit trail
+  if (preflightResult && preflightResult.flags) {
+    body.auto_detected_flags = preflightResult.flags;
+  }
 
   // Parse client-supplied IPs
   const ipText = document.getElementById('client-ips').value.trim();

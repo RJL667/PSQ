@@ -2206,7 +2206,14 @@ class PrivacyComplianceChecker:
 
     def _find_policy_url(self, domain: str) -> tuple:
         """Find privacy policy page. Crawls homepage first (1 request),
-        then falls back to common paths if no link found."""
+        then falls back to parallel probing of common paths if no link found.
+
+        Previous serial fallback (15s timeout x 30 candidate URLs) had a
+        ~450s worst case that dominated total scan wall time on domains
+        without a discoverable privacy link. Parallelised 2026-05-15 with
+        the same pattern as SCN-011 for InformationDisclosureChecker:
+        max_workers=8, 8s per-probe timeout, ~30s total wall ceiling.
+        First valid match short-circuits remaining futures."""
         import re as _re
 
         # --- Strategy 1: Crawl homepage for privacy links (fastest) ---
@@ -2214,7 +2221,7 @@ class PrivacyComplianceChecker:
         homepage_url = f"https://{domain}"
         try:
             r = requests.get(homepage_url, headers={"User-Agent": USER_AGENT},
-                             timeout=20, allow_redirects=True)
+                             timeout=12, allow_redirects=True)
             if r.status_code == 200:
                 text = r.text.lower()
                 # Match links by URL containing privacy keywords
@@ -2231,37 +2238,83 @@ class PrivacyComplianceChecker:
                     url_path = m.split("?")[0].lower()
                     if not url_path.endswith(skip_exts):
                         all_matches.append(m)
+                # Resolve candidate hrefs to absolute URLs, then probe them
+                # in parallel (max 5).
+                candidate_hrefs = []
                 for href in all_matches[:5]:
                     if href.startswith("/"):
                         href = f"https://{domain}{href}"
                     elif not href.startswith("http"):
                         href = f"https://{domain}/{href}"
-                    try:
-                        r2 = requests.get(href, headers={"User-Agent": USER_AGENT},
-                                          timeout=20, allow_redirects=True)
-                        if r2.status_code == 200 and len(r2.text) > 500:
-                            return href, r2.text.lower()
-                    except Exception:
-                        continue
+                    candidate_hrefs.append(href)
+                if candidate_hrefs:
+                    hit = self._probe_urls_concurrent(candidate_hrefs, timeout=10, max_workers=5)
+                    if hit:
+                        return hit
         except Exception:
             pass
 
-        # --- Strategy 2: Try common paths on both domain and www variant ---
+        # --- Strategy 2: Probe common paths concurrently across both
+        # the apex and www variants. Previously serial (450s worst case);
+        # now ~30s ceiling via parallel ThreadPoolExecutor.
         domains_to_try = [domain]
         if not domain.startswith("www."):
             domains_to_try.append(f"www.{domain}")
-        for d in domains_to_try:
-            for path in self.POLICY_PATHS:
-                url = f"https://{d}{path}"
-                try:
-                    r = requests.get(url, headers={"User-Agent": USER_AGENT},
-                                     timeout=15, allow_redirects=True)
-                    if r.status_code == 200 and len(r.text) > 500:
-                        return url, r.text.lower()
-                except Exception:
-                    continue
+        candidate_urls = [
+            f"https://{d}{path}"
+            for d in domains_to_try
+            for path in self.POLICY_PATHS
+        ]
+        hit = self._probe_urls_concurrent(candidate_urls, timeout=8, max_workers=8)
+        if hit:
+            return hit
 
         return None, None
+
+    @staticmethod
+    def _probe_urls_concurrent(urls, timeout=8, max_workers=8):
+        """Probe a list of candidate URLs concurrently. Returns the first
+        (url, text_lower) tuple that responds 200 with body > 500 bytes,
+        or None if no candidate matches.
+
+        Uses ThreadPoolExecutor + as_completed for first-match early-exit
+        semantics — matches the SCN-011 pattern in InformationDisclosureChecker.
+        Per-probe timeout is the requests.get timeout; the as_completed
+        wall ceiling acts as a global cap to avoid runaway accumulation."""
+        if not urls:
+            return None
+
+        def _probe(url):
+            try:
+                r = requests.get(url, headers={"User-Agent": USER_AGENT},
+                                 timeout=timeout, allow_redirects=True)
+                if r.status_code == 200 and len(r.text) > 500:
+                    return (url, r.text.lower())
+            except Exception:
+                pass
+            return None
+
+        # Global wall ceiling: timeout * (urls / workers) + slack, capped
+        # at 35s. Prevents pathological per-probe stalls from dragging
+        # the whole probe phase past ~30-35s.
+        import math
+        wall_ceiling = min(35, max(timeout * 2,
+                                    int(math.ceil(len(urls) / max_workers) * timeout) + 5))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(_probe, u): u for u in urls}
+            try:
+                for fut in as_completed(futures, timeout=wall_ceiling):
+                    result = fut.result()
+                    if result:
+                        # Short-circuit: cancel remaining futures so we
+                        # don't keep paying for slow probes once a hit lands.
+                        for f in futures:
+                            if f is not fut and not f.done():
+                                f.cancel()
+                        return result
+            except (TimeoutError, FuturesTimeoutError):
+                pass
+        return None
 
     def check(self, domain: str) -> dict:
         result = {
