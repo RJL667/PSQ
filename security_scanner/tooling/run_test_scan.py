@@ -5,7 +5,9 @@ Finance industry / R10M revenue / Insurance Agents sub-industry, plus
 the pre-flight auto-detection step the broker form would invoke.
 Caches the result JSON + generated PDF for further iteration.
 
-Usage: py -3 run_test_scan.py
+Lives in security_scanner/tooling/; runtime modules at parent level.
+
+Usage: py -3 tooling/run_test_scan.py  (from security_scanner/)
 """
 import json
 import os
@@ -13,6 +15,11 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+# Runtime modules (scanner, pdf_report, scoring_analytics, flag_inference)
+# live one level up from this tooling script.
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
 
 # Load .env from the main project (worktree has no separate .env)
 env_path = Path("C:/Users/sarel/Desktop/Sarel/SML Consulting/PSQ/security_scanner/.env")
@@ -23,8 +30,6 @@ if env_path.exists():
             continue
         k, v = line.split("=", 1)
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-sys.path.insert(0, str(Path(__file__).parent))
 
 from scanner import SecurityScanner
 from flag_inference import run_preflight
@@ -166,7 +171,8 @@ def main():
     print(f"      _auto_detected present: {auto is not None}")
 
     # --- Step 5: Cache result JSON + PDF for tinkering ---
-    cache_dir = Path("test_fixtures")
+    # test_fixtures lives at security_scanner/test_fixtures/ (parent of this tooling dir)
+    cache_dir = ROOT / "test_fixtures"
     cache_dir.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d")
     json_path = cache_dir / f"phishield_R10M_finance_{stamp}.json"

@@ -13,11 +13,14 @@ import json
 import sys
 from pathlib import Path
 
+# Script lives at security_scanner/tooling/; runtime modules + data
+# (test_fixtures, templates) are at the parent directory.
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
+ROOT = HERE.parent
+sys.path.insert(0, str(ROOT))
 
 # Locate the cached JSON (use today's if present, fall back to yesterday)
-fixtures = HERE / "test_fixtures"
+fixtures = ROOT / "test_fixtures"
 candidates = sorted(fixtures.glob("phishield_R10M_finance_*.json"), reverse=True)
 if not candidates:
     print("No cached phishield_R10M_finance_*.json found in test_fixtures/")
@@ -50,7 +53,7 @@ print(f"  -> {summary_path}  ({summary_path.stat().st_size // 1024} KB)")
 # --- HTML render via Jinja2 (offline; no Flask required) ---
 print("\n[3/3] Rendering HTML results page...")
 from jinja2 import Environment, FileSystemLoader
-templates = HERE / "templates"
+templates = ROOT / "templates"
 env = Environment(loader=FileSystemLoader(str(templates)),
                   autoescape=True)
 template = env.get_template("results.html")

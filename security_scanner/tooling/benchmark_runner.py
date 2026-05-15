@@ -43,9 +43,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Load .env from main project so API keys are available
+# Script lives at security_scanner/tooling/; runtime modules + .env +
+# scans.db live at the parent (security_scanner/).
 HERE = Path(__file__).parent
-env_path = HERE / ".env"
+ROOT = HERE.parent
+env_path = ROOT / ".env"
 if not env_path.exists():
     env_path = Path("C:/Users/sarel/Desktop/Sarel/SML Consulting/PSQ/security_scanner/.env")
 if env_path.exists():
@@ -56,7 +58,7 @@ if env_path.exists():
         k, v = line.split("=", 1)
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
-sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT))
 from scanner import SecurityScanner
 from peer_benchmarking import record_to_benchmark_pool, revenue_band
 
@@ -240,7 +242,7 @@ def main():
                              "~daily batch over 6-9 months). No limit if omitted.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show entries that would run, don't scan")
-    parser.add_argument("--db-path", default=str(HERE / "scans.db"),
+    parser.add_argument("--db-path", default=str(ROOT / "scans.db"),
                         help="Path to scans.db (default: ./scans.db)")
     args = parser.parse_args()
 
