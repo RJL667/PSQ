@@ -1,29 +1,38 @@
-"""Bi-weekly benchmark scan runner.
+"""Benchmark scan runner — Phase 1 (public reference) + Phase 2 (lower-tier upsell).
 
-Runs the security scanner against a curated list of SA reference
-companies and persists results into the `benchmark_scans` table for
-peer-rating percentile calculations (SCN-028).
+Two use modes (driven by --source flag):
 
-Usage:
-    py -3 benchmark_runner.py              # scan the full BENCHMARK_SEED list
-    py -3 benchmark_runner.py --cell finance/Insurance Agents,Brokers,And Service
-                                            # scan only entries in this cell
-    py -3 benchmark_runner.py --dry-run    # show what would run, no actual scans
+  PHASE 1 — Public reference scans (default; bi-weekly):
+      py -3 benchmark_runner.py
+      py -3 benchmark_runner.py --cell finance
+      py -3 benchmark_runner.py --dry-run
+    Runs against the curated BENCHMARK_SEED list of ~60 SA reference
+    companies and persists with source='benchmark_pool'.
 
-Cadence: invoke this every 2 weeks via cron / Render scheduled job /
-manual operations. Pool freshness window is 90 days (peer_benchmarking.
-FRESHNESS_DAYS) so a missed cycle does not break peer ratings.
+  PHASE 2 — Lower-tier upsell batch (from 1 Jul 2026, ~25-30/day for
+            6-9 months until the 4,000-cohort is processed):
+      py -3 benchmark_runner.py --source lower_tier_upsell \
+          --input-csv /path/to/upsell_batch.csv \
+          --limit 25
+    Reads scan targets from a CSV (one row per client) and processes
+    --limit entries per invocation. Schedule daily via cron or Render
+    scheduler. Persists with source='lower_tier_upsell'.
 
-Seed list curation: starts with JSE Top-40 + mid-market SA companies
-covering the most-scanned industries. Expand by hand as Phishield needs
-more peer cells. Each entry is (domain, industry, sub_industry,
-approx_revenue_zar) - the revenue estimate is rough; the model only uses
-it to assign a revenue_band so order-of-magnitude is sufficient.
+CSV format for --input-csv (header row required):
+    domain,industry,sub_industry,annual_revenue_zar
+    exampleclient.co.za,Finance,Insurance Agents Brokers And Service,15000000
+    ...
 
-Source classification: this script writes with source='benchmark_pool'
-- public-domain scans, no consent needed. The two other source classes
-('lower_tier_upsell' and 'client_optin') are written by the regular
-scan flow when triggered by the appropriate UI / API path.
+Cadence rules: pool freshness window is 90 days (peer_benchmarking.
+FRESHNESS_DAYS). The bi-weekly Phase 1 scans keep public references
+fresh; Phase 2 entries roll over the 90-day window naturally as the
+4,000 cohort is processed.
+
+Source classification:
+  benchmark_pool    public reference scans, no consent needed
+  lower_tier_upsell Phishield's existing client cohort, consent implicit
+                    in service agreement
+  client_optin      written by regular scan flow when broker opts in
 """
 
 import argparse
@@ -148,10 +157,11 @@ BENCHMARK_SEED = [
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_one_benchmark(entry, scanner, db_path):
-    """Scan one entry and persist to the benchmark pool."""
+def run_one_benchmark(entry, scanner, db_path, source):
+    """Scan one entry and persist to the benchmark pool under the given
+    source classification ('benchmark_pool' or 'lower_tier_upsell')."""
     domain, industry, sub_industry, revenue_zar, note = entry
-    print(f"\n--- {domain} ({industry} / {sub_industry}, rev~R{revenue_zar:,}) ---")
+    print(f"\n--- {domain} ({industry} / {sub_industry}, rev~R{revenue_zar:,}, source={source}) ---")
     t0 = time.perf_counter()
     try:
         scanner._regulatory_flags = None
@@ -169,10 +179,10 @@ def run_one_benchmark(entry, scanner, db_path):
         results.setdefault("scan_context", {})
         results["scan_context"]["sub_industry"] = sub_industry
         results["scan_context"]["annual_revenue_zar"] = revenue_zar
-        # Persist to benchmark pool
+        # Persist to benchmark pool with the requested source tag
         conn = sqlite3.connect(db_path)
         try:
-            row_id = record_to_benchmark_pool(results, conn, source="benchmark_pool")
+            row_id = record_to_benchmark_pool(results, conn, source=source)
         finally:
             conn.close()
         score = results.get("overall_risk_score", "?")
@@ -184,18 +194,64 @@ def run_one_benchmark(entry, scanner, db_path):
         return False
 
 
+def load_entries_from_csv(csv_path):
+    """Load scan targets from a CSV. Required header columns:
+    domain, industry, sub_industry, annual_revenue_zar. Returns the
+    same 5-tuple shape as BENCHMARK_SEED (note column derived from
+    'note' header if present, else empty)."""
+    import csv
+    rows = []
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            try:
+                domain = r["domain"].strip().lower()
+                industry = r["industry"].strip()
+                sub = r["sub_industry"].strip()
+                rev = int(r["annual_revenue_zar"] or 0)
+                note = (r.get("note") or "").strip()
+                if domain:
+                    rows.append((domain, industry, sub, rev, note))
+            except (KeyError, ValueError) as e:
+                print(f"  CSV row skipped (bad data): {r}  err={e}")
+    return rows
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Bi-weekly benchmark scan runner")
+    parser = argparse.ArgumentParser(
+        description="Benchmark scan runner — Phase 1 public reference (default) "
+                    "or Phase 2 lower-tier-upsell batch (via --source + --input-csv)")
     parser.add_argument("--cell", default=None,
-                        help="Restrict to entries matching industry or industry/sub_industry")
+                        help="Restrict to entries matching industry or industry/sub_industry "
+                             "(applies to BENCHMARK_SEED only)")
+    parser.add_argument("--source", default="benchmark_pool",
+                        choices=["benchmark_pool", "lower_tier_upsell"],
+                        help="Source classification for the benchmark pool. "
+                             "'benchmark_pool' (default) for public reference scans; "
+                             "'lower_tier_upsell' for the 4,000-client Phase 2 batch.")
+    parser.add_argument("--input-csv", default=None,
+                        help="CSV file with columns: domain,industry,sub_industry,"
+                             "annual_revenue_zar[,note]. When set, replaces the "
+                             "BENCHMARK_SEED list entirely. Use with --source lower_tier_upsell "
+                             "for Phase 2 batching.")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Maximum entries to process this invocation. Used for "
+                             "daily batching of the 4,000-cohort (e.g. --limit 25 for "
+                             "~daily batch over 6-9 months). No limit if omitted.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show entries that would run, don't scan")
     parser.add_argument("--db-path", default=str(HERE / "scans.db"),
                         help="Path to scans.db (default: ./scans.db)")
     args = parser.parse_args()
 
-    entries = list(BENCHMARK_SEED)
-    if args.cell:
+    # Pick entry source
+    if args.input_csv:
+        entries = load_entries_from_csv(args.input_csv)
+        print(f"Loaded {len(entries)} entries from {args.input_csv}")
+    else:
+        entries = list(BENCHMARK_SEED)
+
+    if args.cell and not args.input_csv:
         cell_q = args.cell.lower()
         filtered = []
         for e in entries:
@@ -205,13 +261,16 @@ def main():
                 filtered.append(e)
         entries = filtered
 
-    print(f"Benchmark runner: {len(entries)} entries to process")
+    if args.limit and args.limit > 0:
+        entries = entries[: args.limit]
+
+    print(f"Benchmark runner: {len(entries)} entries, source={args.source}")
     print(f"DB path: {args.db_path}")
     print(f"Started: {datetime.now(timezone.utc).isoformat()}")
 
     if args.dry_run:
         for e in entries:
-            print(f"  WOULD SCAN  {e[0]:30s}  ({e[1]} / {e[2]})  rev~R{e[3]:,}")
+            print(f"  WOULD SCAN  {e[0]:30s}  ({e[1]} / {e[2]})  rev~R{e[3]:,}  source={args.source}")
         return
 
     # Build scanner with available API keys
@@ -224,7 +283,7 @@ def main():
 
     success = fail = 0
     for entry in entries:
-        if run_one_benchmark(entry, scanner, args.db_path):
+        if run_one_benchmark(entry, scanner, args.db_path, args.source):
             success += 1
         else:
             fail += 1
