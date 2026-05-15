@@ -317,12 +317,13 @@ class HttpClient:
     """
 
     # NOTE: temporary direct-to-Render URL. The canonical brand URL is
-    # https://phishield.com/scanner-info but that requires a Cloudflare
-    # reverse-proxy rule to be configured on the phishield.com hosting
-    # side (scheduled for 2026-05-19 / Tuesday alongside the WordPress
-    # -> HTML conversion). Once that proxy is live, swap this back to
-    # the canonical phishield.com URL. See scanner_info_proxy_setup.md
-    # for the hosting-company handoff doc.
+    # https://phishield.com/scanner-info but that requires either a
+    # static copy of the page on the new HTML site (simplest) or an
+    # nginx reverse-proxy directive (single-source-of-truth) - both
+    # documented in scanner_info_proxy_setup.md as the handoff for the
+    # 2026-05-19 / Tuesday WordPress -> HTML conversion. Once
+    # phishield.com/scanner-info resolves, swap this back to the
+    # canonical URL.
     USER_AGENT = "Phishield-Scanner/1.0 (+https://phishield-scanner.onrender.com/scanner-info)"
 
     # Challenge HTML patterns. Conservative: only match strong signals so
