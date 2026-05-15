@@ -7,6 +7,13 @@ Consolidates open items from gap analysis SCN-* entries, memory files,
 and session-level decisions. Update this file whenever a new
 outstanding item lands.
 
+**File pair:**
+- `OUTSTANDING.md` (this file) is the live working version — edit here.
+- `OUTSTANDING.docx` is a polished read-only snapshot for easy reading.
+  Regenerate after each edit with `py -3 tooling/generate_outstanding_docx.py`
+  (from the `security_scanner/` directory). The script applies Phishield
+  branding and formats tables for printable / shareable output.
+
 ---
 
 ## 1. Hosting / infrastructure
