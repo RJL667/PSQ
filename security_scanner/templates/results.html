@@ -712,16 +712,20 @@
                 ('accountable_institution', 'FIC accountable institution',    'accountable_institution'),
                 ('b2c',                     'Consumer-facing (B2C)',          'b2c'),
                 ('sub_industry_detail',     'Healthcare sub-detail',          'sub_industry_detail'),
+                ('insurance_subtype',       'Insurance entity type',          'insurance_subtype'),
                 ('gdpr',                    'GDPR applicable',                'gdpr_applicable'),
                 ('pci',                     'PCI DSS applicable',             'pci_applicable')
               ] %}
+              {% set auto_only_flags = ['insurance_subtype'] %}
               {% for broker_key, label, auto_key in flag_rows %}
               {% set broker_val = fl[broker_key] if fl[broker_key] is defined else None %}
               {% set auto_entry = auto[auto_key] if auto[auto_key] is defined else {} %}
               <tr style="border-top:1px solid rgba(255,255,255,0.04);">
                 <td style="padding:6px 8px;color:var(--text);">{{ label }}</td>
                 <td style="padding:6px 8px;text-align:center;color:{% if broker_val %}var(--low){% else %}var(--muted){% endif %};">
-                  {% if broker_key == 'sub_industry_detail' %}
+                  {% if broker_key in auto_only_flags %}
+                    —
+                  {% elif broker_key == 'sub_industry_detail' %}
                     {{ broker_val if broker_val else '(not set)' }}
                   {% else %}
                     {{ 'Yes' if broker_val else 'No' }}
@@ -730,6 +734,8 @@
                 <td style="padding:6px 8px;text-align:center;color:{% if auto_entry.auto_detected %}var(--low){% else %}var(--muted){% endif %};">
                   {% if broker_key == 'sub_industry_detail' and auto_entry.auto_detected %}
                     {{ auto_entry.sub_industry_detail | default('Yes') }}
+                  {% elif broker_key == 'insurance_subtype' %}
+                    {{ auto_entry.insurance_subtype | upper if auto_entry.insurance_subtype else 'n/a' }}
                   {% else %}
                     {{ 'Yes' if auto_entry.auto_detected else 'No' }}
                   {% endif %}

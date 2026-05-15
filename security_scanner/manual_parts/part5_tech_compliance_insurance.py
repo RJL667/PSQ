@@ -1130,6 +1130,46 @@ def build(doc):
         "pharmacy / pharma / hospital_clinic)."
     )
 
+    add_body(doc,
+        "Insurance sub-type classifier: a separate keyword classifier "
+        "runs against insurance-related FS sub-industries to distinguish "
+        "the four entity types that SA FAIS / Insurance Act regulation "
+        "treats differently but the SIC code lumps together:"
+    )
+    add_bullet(doc,
+        "UMA (Underwriting Management Agent) - underwrites on behalf of "
+        "an insurer and reaches the market only via brokers. Cannot "
+        "transact directly with consumers under SA insurance "
+        "regulation. When detected, B2C is explicitly negated with the "
+        "evidence string 'Underwriting Management Agent - cannot sell "
+        "directly to consumers under SA insurance regulatory structure "
+        "(B2B only)'."
+    )
+    add_bullet(doc,
+        "Reinsurer - sells exclusively to other insurers. B2B by "
+        "definition. B2C is auto-negated when this pattern is detected."
+    )
+    add_bullet(doc,
+        "Insurance broker - serves a mix of consumers and businesses. "
+        "B2C status depends on the specific client; the classifier "
+        "leaves B2C unset and the broker confirms based on client "
+        "knowledge."
+    )
+    add_bullet(doc,
+        "Insurance carrier - direct insurer. B2C status depends on "
+        "the distribution model; broker confirms."
+    )
+
+    add_body(doc,
+        "This refinement was driven by the 2026-05-15 audit of Phishield's "
+        "own scan: the SIC sub-industry 'Insurance Agents, Brokers, And "
+        "Service' was previously auto-ticking B2C even for UMAs that are "
+        "B2B-only by regulation. The fix removes those FS sub-industries "
+        "from the default-B2C list and adds the keyword classifier so "
+        "UMAs and reinsurers are explicitly recognised and B2C is "
+        "correctly negated for them."
+    )
+
     add_h2(doc, "HTTP client architecture (rate limit, WAF detection, scanner identity)")
 
     add_body(doc,

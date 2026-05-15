@@ -226,9 +226,31 @@ ACCOUNTABLE_INSTITUTION_LABELS = {
 
 
 def infer_b2c(sub_industry: Optional[str], payment_form_detected: bool = False,
-              ecommerce_tech_detected: bool = False) -> dict:
-    """Infer B2C status from sub-industry + supporting signals."""
+              ecommerce_tech_detected: bool = False,
+              insurance_subtype: Optional[str] = None) -> dict:
+    """Infer B2C status from sub-industry + supporting signals.
+
+    Honours a regulatory-structure override via `insurance_subtype`:
+    UMAs (Underwriting Management Agents) and Reinsurers are B2B by
+    SA insurance regulation and cannot transact directly with consumers,
+    so when the insurance-subtype classifier detects either of those
+    the function returns B2C=False with explicit regulatory evidence,
+    regardless of other signals."""
     result = {"auto_detected": False, "evidence": "Sub-industry not flagged as B2C"}
+
+    # Strongest negative: SA insurance regulatory structure
+    if insurance_subtype == "uma":
+        result.update(auto_detected=False,
+                      evidence="Underwriting Management Agent - cannot sell "
+                              "directly to consumers under SA insurance "
+                              "regulatory structure (B2B only)")
+        return result
+    if insurance_subtype == "reinsurer":
+        result.update(auto_detected=False,
+                      evidence="Reinsurer - sells only to other insurers "
+                              "(B2B only)")
+        return result
+
     if sub_industry and sub_industry.strip() in B2C_SUB_INDUSTRY_LABELS:
         result.update(auto_detected=True,
                       evidence=f"Sub-industry '{sub_industry}' is consumer-facing")
@@ -252,6 +274,96 @@ def infer_accountable_institution(sub_industry: Optional[str]) -> dict:
     if sub_industry and sub_industry.strip() in ACCOUNTABLE_INSTITUTION_LABELS:
         result.update(auto_detected=True,
                       evidence=f"Sub-industry '{sub_industry}' is a FIC Act accountable institution")
+    return result
+
+
+# ----------------------------------------------------------------------
+# Insurance sub-type keyword classifier
+# ----------------------------------------------------------------------
+# The SIC bucket "Insurance Agents, Brokers, And Service" lumps together
+# several distinct entity types that SA FAIS / Insurance Act regulation
+# treats very differently:
+#
+#   - UMA (Underwriting Management Agent) - by SA regulatory structure
+#     CANNOT sell directly to consumers; underwrites on behalf of an
+#     insurer and reaches the market only through brokers. B2B only.
+#
+#   - Reinsurer - sells only to other insurers. B2B by definition.
+#
+#   - Insurance broker - sells to consumers and / or businesses.
+#     Mixed; broker confirms B2C status.
+#
+#   - Insurance carrier (direct insurer) - sells to consumers and / or
+#     businesses, sometimes via own sales channels. Often B2C.
+#
+# The classifier inspects domain + page title + page-body keywords to
+# decide which subtype the scanned entity is, then uses that result to
+# refine the B2C auto-detect (UMA / Reinsurer -> negate B2C with
+# evidence; Broker / Carrier -> leave B2C unset).
+
+_INSURANCE_UMA_RE = re.compile(
+    r"\b(underwriting[\s-]+manag(?:er|ing|ement)|underwriting[\s-]+agen|"
+    r"\bUMA\b|managing[\s-]+general[\s-]+agen|\bMGA\b)",
+    re.IGNORECASE)
+_INSURANCE_REINSURER_RE = re.compile(
+    r"\b(reinsur|re-insur)", re.IGNORECASE)
+_INSURANCE_BROKER_RE = re.compile(
+    r"\b(insurance[\s-]+broker|insurance[\s-]+brokerage|"
+    r"insurance[\s-]+intermediary|insurance[\s-]+advice)",
+    re.IGNORECASE)
+_INSURANCE_CARRIER_RE = re.compile(
+    r"\b(insurance[\s-]+company|insurance[\s-]+carrier|"
+    r"life[\s-]+insurance|short-term[\s-]+insur|long-term[\s-]+insur)",
+    re.IGNORECASE)
+
+
+def infer_insurance_subtype(sub_industry: Optional[str], domain: Optional[str],
+                             page_title: Optional[str] = None,
+                             page_text_sample: Optional[str] = None) -> dict:
+    """Classify FS-insurance entities into UMA / reinsurer / broker /
+    carrier from website content. Only runs when the SIC sub-industry
+    suggests an insurance-related entity. Returns subtype + evidence."""
+    result = {"auto_detected": False, "insurance_subtype": None,
+              "evidence": "Not an insurance-related sub-industry"}
+    if not sub_industry:
+        return result
+    sub_lower = sub_industry.strip().lower()
+    # Only relevant for FS sub-industries that include insurance entities
+    if "insurance" not in sub_lower:
+        return result
+
+    haystack = " ".join(filter(None, [
+        (domain or "").lower(),
+        (page_title or "").lower(),
+        (page_text_sample or "").lower()[:5000],
+    ]))
+
+    # Priority order: UMA -> Reinsurer -> Broker -> Carrier.
+    # Higher-specificity entity types match first; the catch-all
+    # 'carrier' regex would otherwise swallow UMAs that mention
+    # "insurance company" anywhere on the page.
+    if _INSURANCE_UMA_RE.search(haystack):
+        result.update(auto_detected=True, insurance_subtype="uma",
+                      evidence="Underwriting Management Agent (UMA) - "
+                              "sells only through brokers per SA insurance "
+                              "regulatory structure")
+        return result
+    if _INSURANCE_REINSURER_RE.search(haystack):
+        result.update(auto_detected=True, insurance_subtype="reinsurer",
+                      evidence="Reinsurer - sells only to other insurers")
+        return result
+    if _INSURANCE_BROKER_RE.search(haystack):
+        result.update(auto_detected=True, insurance_subtype="broker",
+                      evidence="Insurance broker / intermediary - "
+                              "B2C status depends on client mix; "
+                              "broker manually confirms")
+        return result
+    if _INSURANCE_CARRIER_RE.search(haystack):
+        result.update(auto_detected=True, insurance_subtype="carrier",
+                      evidence="Insurance carrier - "
+                              "B2C status depends on distribution model; "
+                              "broker manually confirms")
+        return result
     return result
 
 
@@ -385,8 +497,16 @@ def run_preflight(domain: str, sub_industry: Optional[str] = None,
             html_content = None
 
     listed = infer_listed_company(domain, html_content)
-    b2c = infer_b2c(sub_industry,
-                    payment_form_detected=bool(html_content and PAYMENT_FORM_HINTS.search(html_content)))
+    # Insurance-subtype classifier runs BEFORE B2C so the result can
+    # feed in as a regulatory-structure override for UMA / Reinsurer.
+    insurance_subtype = infer_insurance_subtype(sub_industry, domain,
+                                                page_title=page_title,
+                                                page_text_sample=html_content)
+    b2c = infer_b2c(
+        sub_industry,
+        payment_form_detected=bool(html_content and PAYMENT_FORM_HINTS.search(html_content)),
+        insurance_subtype=insurance_subtype.get("insurance_subtype"),
+    )
     ai = infer_accountable_institution(sub_industry)
     health_detail = infer_healthcare_subdetail(sub_industry, domain,
                                                 page_title=page_title,
@@ -405,6 +525,7 @@ def run_preflight(domain: str, sub_industry: Optional[str] = None,
             "b2c": b2c,
             "accountable_institution": ai,
             "sub_industry_detail": health_detail,
+            "insurance_subtype": insurance_subtype,
             "gdpr_applicable": gdpr,
             "pci_applicable": pci,
         },

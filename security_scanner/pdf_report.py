@@ -2588,6 +2588,7 @@ def flag_audit_panel(d, S):
         ("accountable_institution", "FIC Act accountable institution"),
         ("b2c",                     "Consumer-facing (B2C)"),
         ("sub_industry_detail",     "Healthcare sub-detail"),
+        ("insurance_subtype",       "Insurance entity type"),
         ("gdpr",                    "GDPR applicable"),
         ("pci",                     "PCI DSS applicable"),
     ]
@@ -2596,11 +2597,18 @@ def flag_audit_panel(d, S):
         "gdpr":                "gdpr_applicable",
         "pci":                 "pci_applicable",
         "sub_industry_detail": "sub_industry_detail",
+        "insurance_subtype":   "insurance_subtype",
     }
+    # Flags that are purely auto-detected (no broker-input column).
+    # Insurance subtype is detected from website content; the broker
+    # does not tick it - they tick B2C (which is informed by subtype).
+    AUTO_ONLY = {"insurance_subtype"}
     table_data = [["Flag", "Broker Input", "Auto-detected", "Evidence"]]
     for key, label in flag_specs:
         broker_value = flags.get(key)
-        if key == "sub_industry_detail":
+        if key in AUTO_ONLY:
+            broker_disp = "—"
+        elif key == "sub_industry_detail":
             broker_disp = str(broker_value) if broker_value else "(not set)"
         else:
             broker_disp = "Yes" if broker_value else "No"
@@ -2609,6 +2617,9 @@ def flag_audit_panel(d, S):
         auto_detected = bool(auto_entry.get("auto_detected"))
         if key == "sub_industry_detail" and auto_detected:
             auto_disp = str(auto_entry.get("sub_industry_detail", "Yes"))
+        elif key == "insurance_subtype":
+            subtype_val = auto_entry.get("insurance_subtype")
+            auto_disp = str(subtype_val).upper() if subtype_val else "n/a"
         else:
             auto_disp = "Yes" if auto_detected else "No"
         evidence = auto_entry.get("evidence", "")[:180] or "—"

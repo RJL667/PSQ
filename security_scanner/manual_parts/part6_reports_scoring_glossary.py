@@ -1332,6 +1332,23 @@ def build(doc):
             "User-Agent header so security teams investigating scanner "
             "traffic can verify legitimacy out-of-band.",
         ),
+        (
+            "Insurance Sub-type Classifier",
+            "A keyword classifier in flag_inference.py that distinguishes "
+            "Underwriting Management Agents (UMAs), reinsurers, "
+            "insurance brokers, and direct insurers from website "
+            "content (domain, page title, body keywords). The SIC "
+            "sub-industry code lumps all of these into 'Insurance "
+            "Agents, Brokers, And Service' / 'Insurance Carriers' but "
+            "SA FAIS / Insurance Act regulation treats them very "
+            "differently: UMAs cannot sell directly to consumers (B2B "
+            "only by regulatory structure), reinsurers sell only to "
+            "insurers (B2B by definition), brokers and direct insurers "
+            "can be either B2C or B2B. When UMA or reinsurer is "
+            "detected, B2C is explicitly negated in the audit panel "
+            "with evidence; for brokers and carriers, B2C is left "
+            "unset for broker confirmation.",
+        ),
     ]
 
     for term, definition in _glossary:
