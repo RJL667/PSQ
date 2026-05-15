@@ -177,10 +177,21 @@ def infer_listed_company(domain: str, html_content: Optional[str] = None) -> dic
 # ----------------------------------------------------------------------
 
 # B2C sub-industries (SIC labels from _bi_factor_data.json hierarchy).
-# Conservative default: only sub-industries with primarily consumer-facing
-# operations. B2B / wholesale / industrial categories return False.
+# Strict conservative default: only sub-industries that are UNAMBIGUOUSLY
+# consumer-facing get auto-ticked. Sub-industries that serve a mix of
+# consumers and businesses (FS brokers, commercial lenders, etc.) are
+# deliberately excluded - the broker must tick those manually if the
+# specific client serves consumers. Mis-classifying as B2C adds CPA
+# Section 112 (10% turnover or R1M) to the cat stack, which materially
+# inflates exposure for B2B entities.
+#
+# Specifically excluded (history: 2026-05-15):
+#   "Insurance Agents, Brokers, And Service" - insurance brokers can be
+#       B2B (Phishield case), B2C, or mixed; SIC code does not say which
+#   "Non-depository Credit Institutions" - commercial lenders are B2B;
+#       consumer credit / microlenders are B2C; SIC code does not say which
 B2C_SUB_INDUSTRY_LABELS = {
-    # All Retail sub-industries
+    # All Retail sub-industries - unambiguously consumer-facing
     "Building Materials, Hardware, Garden Supply, And Mobile Home Dealers",
     "General Merchandise Stores",
     "Food Stores",
@@ -189,7 +200,7 @@ B2C_SUB_INDUSTRY_LABELS = {
     "Home Furniture, Furnishings, And Equipment Stores",
     "Eating And Drinking Places",
     "Miscellaneous Retail",
-    # Consumer-facing Services
+    # Consumer-facing Services - unambiguous
     "Hotels, Rooming Houses, Camps, And Other Lodging Places",
     "Personal Services",
     "Amusement And Recreation Services",
@@ -198,9 +209,6 @@ B2C_SUB_INDUSTRY_LABELS = {
     "Social Services",
     "Motion Pictures",
     "Private Households",
-    # Consumer-facing FS
-    "Insurance Agents, Brokers, And Service",
-    "Non-depository Credit Institutions",
 }
 
 # Accountable institutions per FIC Act Schedule 1. Most map directly from
