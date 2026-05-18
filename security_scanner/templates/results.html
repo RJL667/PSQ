@@ -622,15 +622,15 @@
         {# Context strip #}
         <table class="kv-table" style="margin-bottom:14px;">
           <tr><td style="width:180px;">Industry</td><td><strong>{{ fin.industry | title }}</strong></td></tr>
-          <tr><td>Annual Revenue</td><td><strong>R {{ '{:,.0f}'.format(fin.annual_revenue_zar | default(0)) }}</strong></td></tr>
+          <tr><td>Annual Revenue</td><td><strong>R&nbsp;{{ '{:,.0f}'.format(fin.annual_revenue_zar | default(0)) }}</strong></td></tr>
         </table>
 
         {# Estimated Annual Loss range #}
         <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Estimated Annual Loss</div>
         <table class="kv-table" style="margin-bottom:14px;">
-          <tr><td style="width:180px;">Est. Annual Loss (Likely)</td><td><strong style="color:var(--critical);">R {{ '{:,.0f}'.format(fin.total.most_likely) }}</strong></td></tr>
-          <tr><td>Est. Annual Loss (Min)</td><td>R {{ '{:,.0f}'.format(fin.total.min) }}</td></tr>
-          <tr><td>Est. Annual Loss (Max)</td><td>R {{ '{:,.0f}'.format(fin.total.max) }}</td></tr>
+          <tr><td style="width:180px;">Est. Annual Loss (Likely)</td><td><strong style="color:var(--critical);">R&nbsp;{{ '{:,.0f}'.format(fin.total.most_likely) }}</strong></td></tr>
+          <tr><td>Est. Annual Loss (Min)</td><td>R&nbsp;{{ '{:,.0f}'.format(fin.total.min) }}</td></tr>
+          <tr><td>Est. Annual Loss (Max)</td><td>R&nbsp;{{ '{:,.0f}'.format(fin.total.max) }}</td></tr>
         </table>
 
         {# Monte Carlo Confidence Intervals #}
@@ -653,20 +653,20 @@
             <div style="position:absolute;left:{{ (mc_t.p50 / mc_max_val * 100) | round(1) }}%;top:0;bottom:0;width:3px;background:white;border-radius:2px;"></div>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);text-align:center;">
-            <span style="flex:1;">P5<br>R {{ '{:,.0f}'.format(mc_t.p5) }}</span>
-            <span style="flex:1;">P25<br>R {{ '{:,.0f}'.format(mc_t.p25) }}</span>
-            <span style="flex:1;color:white;font-weight:700;">P50<br>R {{ '{:,.0f}'.format(mc_t.p50) }}</span>
-            <span style="flex:1;">P75<br>R {{ '{:,.0f}'.format(mc_t.p75) }}</span>
-            <span style="flex:1;">P95<br>R {{ '{:,.0f}'.format(mc_t.p95) }}</span>
+            <span style="flex:1;">P5<br>R&nbsp;{{ '{:,.0f}'.format(mc_t.p5) }}</span>
+            <span style="flex:1;">P25<br>R&nbsp;{{ '{:,.0f}'.format(mc_t.p25) }}</span>
+            <span style="flex:1;color:white;font-weight:700;">P50<br>R&nbsp;{{ '{:,.0f}'.format(mc_t.p50) }}</span>
+            <span style="flex:1;">P75<br>R&nbsp;{{ '{:,.0f}'.format(mc_t.p75) }}</span>
+            <span style="flex:1;">P95<br>R&nbsp;{{ '{:,.0f}'.format(mc_t.p95) }}</span>
           </div>
         </div>
 
         <table class="kv-table" style="margin-bottom:14px;">
-          <tr><td style="width:220px;">90% Confidence Interval</td><td>R {{ '{:,.0f}'.format(mc.confidence_interval_90.lower) }} — R {{ '{:,.0f}'.format(mc.confidence_interval_90.upper) }}</td></tr>
-          <tr><td>50% Confidence Interval</td><td><strong>R {{ '{:,.0f}'.format(mc.confidence_interval_50.lower) }} — R {{ '{:,.0f}'.format(mc.confidence_interval_50.upper) }}</strong></td></tr>
-          <tr><td>Median (P50)</td><td><strong style="color:var(--critical);">R {{ '{:,.0f}'.format(mc_t.p50) }}</strong></td></tr>
-          <tr><td>Mean</td><td>R {{ '{:,.0f}'.format(mc_t.mean) }}</td></tr>
-          <tr><td>Standard Deviation</td><td>R {{ '{:,.0f}'.format(mc_t.std_dev) }}</td></tr>
+          <tr><td style="width:220px;">90% Confidence Interval</td><td>R&nbsp;{{ '{:,.0f}'.format(mc.confidence_interval_90.lower) }} — R&nbsp;{{ '{:,.0f}'.format(mc.confidence_interval_90.upper) }}</td></tr>
+          <tr><td>50% Confidence Interval</td><td><strong>R&nbsp;{{ '{:,.0f}'.format(mc.confidence_interval_50.lower) }} — R&nbsp;{{ '{:,.0f}'.format(mc.confidence_interval_50.upper) }}</strong></td></tr>
+          <tr><td>Median (P50)</td><td><strong style="color:var(--critical);">R&nbsp;{{ '{:,.0f}'.format(mc_t.p50) }}</strong></td></tr>
+          <tr><td>Mean</td><td>R&nbsp;{{ '{:,.0f}'.format(mc_t.mean) }}</td></tr>
+          <tr><td>Standard Deviation</td><td>R&nbsp;{{ '{:,.0f}'.format(mc_t.std_dev) }}</td></tr>
         </table>
 
         {# Loss Exposure Scenarios — dedicated card block, schema-driven from loss_exposure.scenarios. #}
@@ -683,8 +683,8 @@
             <thead>
               <tr style="background:rgba(29,78,216,0.15);">
                 <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Scenario</th>
-                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);">Modelled Loss</th>
-                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);">Annual Probability</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Modelled Loss</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Annual Probability</th>
               </tr>
             </thead>
             <tbody>
@@ -696,7 +696,7 @@
               {% if key in ['return_1_200', 'return_1_250'] %}{% set row_color = 'var(--critical)' %}{% endif %}
               <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
                 <td style="padding:8px 10px;color:{{ row_color }};{% if key in ['return_1_100','return_1_200','return_1_250'] %}font-weight:700;{% endif %}">{{ sc_row.label }}</td>
-                <td style="padding:8px 10px;text-align:right;color:{{ row_color }};font-weight:700;">R {{ '{:,.0f}'.format(sc_row.loss_zar | default(0)) }}</td>
+                <td style="padding:8px 10px;text-align:right;color:{{ row_color }};font-weight:700;white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(sc_row.loss_zar | default(0)) }}</td>
                 <td style="padding:8px 10px;text-align:right;color:var(--muted);">
                   {% if sc_row.annual_prob is none %}Most likely (peak){% else %}{{ '%.1f'|format(sc_row.annual_prob * 100) if sc_row.annual_prob < 0.01 else '%.0f'|format(sc_row.annual_prob * 100) }}%{% endif %}
                 </td>
@@ -712,14 +712,14 @@
         {% endif %}
 
         {# Per-scenario MC breakdown #}
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;">
           {% for name, label in [('data_breach', 'Data Breach'), ('ransomware', 'Ransomware'), ('business_interruption', 'Bus. Interruption')] %}
           {% set smc = fin.scenarios[name].monte_carlo if fin.scenarios[name].monte_carlo is defined else {} %}
           {% if smc %}
           <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;min-height:90px;">
             <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;white-space:nowrap;">{{ label }}</div>
-            <div style="font-size:1.05rem;font-weight:700;color:var(--critical);white-space:nowrap;">R {{ '{:,.0f}'.format(smc.p50) }}</div>
-            <div style="font-size:.65rem;color:var(--muted);margin-top:4px;line-height:1.4;">P5: R {{ '{:,.0f}'.format(smc.p5) }}<br>P95: R {{ '{:,.0f}'.format(smc.p95) }}</div>
+            <div style="font-size:1.05rem;font-weight:700;color:var(--critical);white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(smc.p50) }}</div>
+            <div style="font-size:.65rem;color:var(--muted);margin-top:4px;line-height:1.4;">P5: R&nbsp;{{ '{:,.0f}'.format(smc.p5) }}<br>P95: R&nbsp;{{ '{:,.0f}'.format(smc.p95) }}</div>
           </div>
           {% endif %}
           {% endfor %}
@@ -732,30 +732,30 @@
         <table class="kv-table" style="margin-bottom:14px;">
           <tr style="border-bottom:2px solid var(--border);">
             <td style="width:200px;font-weight:600;">Data Breach Exposure</td>
-            <td>R {{ '{:,.0f}'.format(db.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((db.probability | default(0)) * 100) }}%)</span></td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(db.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((db.probability | default(0)) * 100) }}%)</span></td>
           </tr>
           <tr>
             <td style="color:var(--muted);padding-left:20px;">POPIA regulatory</td>
-            <td>R {{ '{:,.0f}'.format(db.regulatory_fine | default(0)) }}</td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(db.regulatory_fine | default(0)) }}</td>
           </tr>
           {% if sc4 %}
           <tr style="border-bottom:2px solid var(--border);">
             <td style="font-weight:600;">Detection & Escalation</td>
-            <td>R {{ '{:,.0f}'.format(sc4.detection_escalation.estimated_loss | default(0)) }} <span style="color:var(--muted);">DFIR, forensics, triage</span></td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(sc4.detection_escalation.estimated_loss | default(0)) }} <span style="color:var(--muted);">DFIR, forensics, triage</span></td>
           </tr>
           <tr style="border-bottom:2px solid var(--border);">
             <td style="font-weight:600;">Ransom Demand</td>
-            <td>R {{ '{:,.0f}'.format(sc4.ransom_demand.estimated_loss | default(0)) }} <span style="color:var(--muted);">(RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }})</span></td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(sc4.ransom_demand.estimated_loss | default(0)) }} <span style="color:var(--muted);">(RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }})</span></td>
           </tr>
           {% else %}
           <tr style="border-bottom:2px solid var(--border);">
             <td style="font-weight:600;">Ransomware Loss</td>
-            <td>R {{ '{:,.0f}'.format(rw.estimated_loss | default(0)) }} <span style="color:var(--muted);">(RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }})</span></td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(rw.estimated_loss | default(0)) }} <span style="color:var(--muted);">(RSI={{ '%.2f'|format(rw.rsi_score | default(0)) }})</span></td>
           </tr>
           {% endif %}
           <tr style="border-bottom:2px solid var(--border);">
             <td style="font-weight:600;">Bus. Interruption</td>
-            <td>R {{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((bi.probability | default(0)) * 100) }}%)</span></td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((bi.probability | default(0)) * 100) }}%)</span></td>
           </tr>
         </table>
 
@@ -898,7 +898,7 @@
       <div class="cat-header" onclick="toggle(this)">
         <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Risk Mitigation Recommendations</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="cat-grade" style="color:var(--low);">Save R {{ '{:,.0f}'.format(mit.total_potential_savings) }}</span>
+          <span class="cat-grade" style="color:var(--low);">Save R&nbsp;{{ '{:,.0f}'.format(mit.total_potential_savings) }}</span>
           <span class="chevron">&#9660;</span>
         </div>
       </div>
@@ -907,25 +907,25 @@
         <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-top:10px;">
           <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;">
             <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Current Annual Loss</div>
-            <div style="font-size:1.2rem;font-weight:800;color:var(--critical);margin-top:4px;">R {{ '{:,.0f}'.format(mit.current_annual_loss) }}</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--critical);margin-top:4px;">R&nbsp;{{ '{:,.0f}'.format(mit.current_annual_loss) }}</div>
           </div>
           <div style="font-size:1.5rem;color:var(--low);">&#10132;</div>
           <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--low);">
             <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Mitigated Annual Loss</div>
-            <div style="font-size:1.2rem;font-weight:800;color:var(--low);margin-top:4px;">R {{ '{:,.0f}'.format(mit.mitigated_annual_loss) }}</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--low);margin-top:4px;">R&nbsp;{{ '{:,.0f}'.format(mit.mitigated_annual_loss) }}</div>
           </div>
         </div>
 
         <!-- Severity summary badges -->
         <div style="display:flex;gap:12px;margin-top:14px;">
           {% if mit.summary.critical.count > 0 %}
-          <span class="badge badge-red">{{ mit.summary.critical.count }} Critical &middot; R {{ '{:,.0f}'.format(mit.summary.critical.total_savings_zar) }}</span>
+          <span class="badge badge-red">{{ mit.summary.critical.count }} Critical &middot; R&nbsp;{{ '{:,.0f}'.format(mit.summary.critical.total_savings_zar) }}</span>
           {% endif %}
           {% if mit.summary.high.count > 0 %}
-          <span class="badge badge-amber">{{ mit.summary.high.count }} High &middot; R {{ '{:,.0f}'.format(mit.summary.high.total_savings_zar) }}</span>
+          <span class="badge badge-amber">{{ mit.summary.high.count }} High &middot; R&nbsp;{{ '{:,.0f}'.format(mit.summary.high.total_savings_zar) }}</span>
           {% endif %}
           {% if mit.summary.medium.count > 0 %}
-          <span class="badge" style="background:rgba(59,130,246,.15);color:var(--blue);">{{ mit.summary.medium.count }} Medium &middot; R {{ '{:,.0f}'.format(mit.summary.medium.total_savings_zar) }}</span>
+          <span class="badge" style="background:rgba(59,130,246,.15);color:var(--blue);">{{ mit.summary.medium.count }} Medium &middot; R&nbsp;{{ '{:,.0f}'.format(mit.summary.medium.total_savings_zar) }}</span>
           {% endif %}
         </div>
 
@@ -954,7 +954,7 @@
                 <div style="font-size:.84rem;font-weight:600;">{{ f.recommendation }}</div>
                 <div style="font-size:.74rem;color:var(--muted);margin-top:2px;">{{ f.finding }}</div>
               </td>
-              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R {{ '{:,.0f}'.format(f.estimated_annual_savings_zar) }}</td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(f.estimated_annual_savings_zar) }}</td>
             </tr>
             {% endfor %}
           </tbody>

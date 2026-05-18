@@ -2196,14 +2196,14 @@ def cat_remediation(results, S):
     rows = [
         ("Current RSI", f"{rem.get('current_rsi', 0):.3f}"),
         ("Projected RSI (after fixes)", f"{rem.get('simulated_rsi', 0):.3f}"),
-        ("Total Potential Savings", f"{cur} {savings:,.0f}/year"),
+        ("Total Potential Savings", f"{cur}&nbsp;{savings:,.0f}/year"),
         ("", ""),
     ]
     for i, step in enumerate(steps[:10], 1):
-        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves {cur} {step['annual_savings_estimate']:,.0f}/yr"))
-    fb = f"{len(steps)} prioritised remediation steps could reduce annual expected loss by {cur} {savings:,.0f}."
+        rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves {cur}&nbsp;{step['annual_savings_estimate']:,.0f}/yr"))
+    fb = f"{len(steps)} prioritised remediation steps could reduce annual expected loss by {cur}&nbsp;{savings:,.0f}."
     parts = build_cat_card("Remediation Roadmap — Before/After", col,
-                          f"{len(steps)} steps — {cur} {savings:,.0f} savings",
+                          f"{len(steps)} steps — {cur}&nbsp;{savings:,.0f} savings",
                           rows, [], S, fallback=fb)
     parts.append(Paragraph(
         "<i>Note: Estimated costs are indicative ranges based on typical SA market rates and are intended "
@@ -2227,7 +2227,7 @@ def cat_ransomware_risk(d, S):
         ("Industry",        rsi.get("industry", "Other")),
     ]
     if rsi.get("annual_revenue_zar"):
-        rows.append(("Annual Revenue", f"R {rsi['annual_revenue_zar']:,.0f}"))
+        rows.append(("Annual Revenue", f"R&nbsp;{rsi['annual_revenue_zar']:,.0f}"))
     for f in rsi.get("contributing_factors", [])[:5]:
         rows.append((f["factor"], f"+{f['impact']}"))
     fb = f"RSI {score}/1.0 — {'high susceptibility to ransomware attacks.' if score >= 0.5 else 'moderate ransomware risk.' if score >= 0.25 else 'low ransomware susceptibility.'}"
@@ -2283,11 +2283,11 @@ def cat_financial_impact(d, S):
         ci50   = mc.get("confidence_interval_50", {})
         rows = [
             ("Industry",              fin.get("industry", "Other")),
-            ("Annual Revenue",        f"{cur} {fin.get('annual_revenue_zar', 0):,.0f}"),
+            ("Annual Revenue",        f"{cur}&nbsp;{fin.get('annual_revenue_zar', 0):,.0f}"),
             ("",                      ""),
-            ("Est. Annual Loss (Min)",    f"{cur} {eal.get('minimum', 0):,.0f}"),
-            ("Est. Annual Loss (Likely)", f"{cur} {most_l:,.0f}"),
-            ("Est. Annual Loss (Max)",    f"{cur} {eal.get('maximum', 0):,.0f}"),
+            ("Est. Annual Loss (Min)",    f"{cur}&nbsp;{eal.get('minimum', 0):,.0f}"),
+            ("Est. Annual Loss (Likely)", f"{cur}&nbsp;{most_l:,.0f}"),
+            ("Est. Annual Loss (Max)",    f"{cur}&nbsp;{eal.get('maximum', 0):,.0f}"),
             ("",                      ""),
         ]
         # Monte Carlo section - supporting detail. Headline loss exposure
@@ -2296,36 +2296,39 @@ def cat_financial_impact(d, S):
         if mc_t:
             rows.extend([
                 ("MONTE CARLO ANALYSIS",  f"{mc.get('iterations', 10000):,} simulations — PERT distribution"),
-                ("  90% Confidence Interval", f"{cur} {ci90.get('lower', 0):,.0f} — {cur} {ci90.get('upper', 0):,.0f}"),
-                ("  50% Confidence Interval", f"{cur} {ci50.get('lower', 0):,.0f} — {cur} {ci50.get('upper', 0):,.0f}"),
+                ("  90% Confidence Interval", f"{cur}&nbsp;{ci90.get('lower', 0):,.0f} — {cur}&nbsp;{ci90.get('upper', 0):,.0f}"),
+                ("  50% Confidence Interval", f"{cur}&nbsp;{ci50.get('lower', 0):,.0f} — {cur}&nbsp;{ci50.get('upper', 0):,.0f}"),
                 ("",                      ""),
                 ("  Reference percentiles",      ""),
-                ("    P5  (low band)",           f"{cur} {mc_t.get('p5', 0):,.0f}"),
-                ("    P25 (lower quartile)",     f"{cur} {mc_t.get('p25', 0):,.0f}"),
-                ("    P75 (upper quartile)",     f"{cur} {mc_t.get('p75', 0):,.0f}"),
-                ("    P95 (severe)",             f"{cur} {mc_t.get('p95', 0):,.0f}"),
+                ("    P5  (low band)",           f"{cur}&nbsp;{mc_t.get('p5', 0):,.0f}"),
+                ("    P25 (lower quartile)",     f"{cur}&nbsp;{mc_t.get('p25', 0):,.0f}"),
+                ("    P75 (upper quartile)",     f"{cur}&nbsp;{mc_t.get('p75', 0):,.0f}"),
+                ("    P95 (severe)",             f"{cur}&nbsp;{mc_t.get('p95', 0):,.0f}"),
                 ("",                      ""),
-                ("  Mean",                f"{cur} {mc_t.get('mean', 0):,.0f}"),
-                ("  Std. Deviation",      f"{cur} {mc_t.get('std_dev', 0):,.0f}"),
+                ("  Mean",                f"{cur}&nbsp;{mc_t.get('mean', 0):,.0f}"),
+                ("  Std. Deviation",      f"{cur}&nbsp;{mc_t.get('std_dev', 0):,.0f}"),
                 ("",                      ""),
             ])
-            # Per-scenario MC breakdown - keep median + cat tail for context
+            # Per-scenario MC breakdown — one compact line per scenario
+            # (median + catastrophe tail). The headline aggregate scenarios
+            # are in the dedicated Loss Exposure Scenarios table that renders
+            # immediately after this card; per-scenario point losses appear
+            # in the cost rows below. This avoids triple-disclosing the same
+            # figures.
             for sname, slabel in [("data_breach", "Data Breach"), ("ransomware", "Ransomware"), ("business_interruption", "Bus. Interruption")]:
                 smc = sc.get(sname, {}).get("monte_carlo", {})
                 if smc:
-                    rows.append((f"  {slabel} (MC)", ""))
-                    rows.append((f"    P50",   f"{cur} {smc.get('p50', 0):,.0f}"))
-                    rows.append((f"    1-in-100", f"{cur} {smc.get('p99', 0):,.0f}"))
-                    rows.append((f"    1-in-250", f"{cur} {smc.get('p99_6', 0):,.0f}"))
-                    rows.append(("", ""))
+                    rows.append((f"  {slabel} (MC)",
+                                 f"P50 {cur}&nbsp;{smc.get('p50', 0):,.0f}"
+                                 f"  ·  1-in-250 {cur}&nbsp;{smc.get('p99_6', 0):,.0f}"))
             rows.append(("", ""))
 
         rows.extend([
-            ("Data Breach Loss",      f"{cur} {sc.get('data_breach', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('data_breach', {}).get('probability', 0)})"),
-            ("  POPIA regulatory",    f"{cur} {sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
-            ("Detection & Escalation", f"{cur} {sc4.get('detection_escalation', {}).get('estimated_loss', 0):,.0f}") if sc4 else ("", ""),
-            ("Ransom Demand",         f"{cur} {sc4.get('ransom_demand', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})") if sc4 else ("Ransomware Loss", f"{cur} {sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
-            ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
+            ("Data Breach Loss",      f"{cur}&nbsp;{sc.get('data_breach', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('data_breach', {}).get('probability', 0)})"),
+            ("  POPIA regulatory",    f"{cur}&nbsp;{sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
+            ("Detection & Escalation", f"{cur}&nbsp;{sc4.get('detection_escalation', {}).get('estimated_loss', 0):,.0f}") if sc4 else ("", ""),
+            ("Ransom Demand",         f"{cur}&nbsp;{sc4.get('ransom_demand', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})") if sc4 else ("Ransomware Loss", f"{cur}&nbsp;{sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
+            ("Bus. Interruption",     f"{cur}&nbsp;{sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
             ("",                      ""),
             ("Premium Risk Tier",     ins.get("premium_risk_tier", "N/A")),
             ("Cover Sizing",          "See Loss Exposure Scenarios above"),
@@ -2341,9 +2344,9 @@ def cat_financial_impact(d, S):
         rows = [
             ("Industry",              fin.get("industry", "Other")),
             ("",                      ""),
-            ("Est. Annual Loss (Min)",    f"{cur} {total.get('min', 0):,.0f}"),
-            ("Est. Annual Loss (Likely)", f"{cur} {most_l:,.0f}"),
-            ("Est. Annual Loss (Max)",    f"{cur} {total.get('max', 0):,.0f}"),
+            ("Est. Annual Loss (Min)",    f"{cur}&nbsp;{total.get('min', 0):,.0f}"),
+            ("Est. Annual Loss (Likely)", f"{cur}&nbsp;{most_l:,.0f}"),
+            ("Est. Annual Loss (Max)",    f"{cur}&nbsp;{total.get('max', 0):,.0f}"),
             ("",                      ""),
         ]
         if mc_t:
@@ -2351,31 +2354,31 @@ def cat_financial_impact(d, S):
             # this section keeps the supporting MC reference detail only.
             rows.extend([
                 ("MONTE CARLO ANALYSIS",  f"{mc.get('iterations', 10000):,} simulations — PERT distribution"),
-                ("  90% Confidence Interval", f"{cur} {ci90.get('lower', 0):,.0f} — {cur} {ci90.get('upper', 0):,.0f}"),
-                ("  50% Confidence Interval", f"{cur} {ci50.get('lower', 0):,.0f} — {cur} {ci50.get('upper', 0):,.0f}"),
+                ("  90% Confidence Interval", f"{cur}&nbsp;{ci90.get('lower', 0):,.0f} — {cur}&nbsp;{ci90.get('upper', 0):,.0f}"),
+                ("  50% Confidence Interval", f"{cur}&nbsp;{ci50.get('lower', 0):,.0f} — {cur}&nbsp;{ci50.get('upper', 0):,.0f}"),
                 ("",                      ""),
                 ("  Reference percentiles",      ""),
-                ("    P5  (low band)",           f"{cur} {mc_t.get('p5', 0):,.0f}"),
-                ("    P25 (lower quartile)",     f"{cur} {mc_t.get('p25', 0):,.0f}"),
-                ("    P75 (upper quartile)",     f"{cur} {mc_t.get('p75', 0):,.0f}"),
-                ("    P95 (severe)",             f"{cur} {mc_t.get('p95', 0):,.0f}"),
+                ("    P5  (low band)",           f"{cur}&nbsp;{mc_t.get('p5', 0):,.0f}"),
+                ("    P25 (lower quartile)",     f"{cur}&nbsp;{mc_t.get('p25', 0):,.0f}"),
+                ("    P75 (upper quartile)",     f"{cur}&nbsp;{mc_t.get('p75', 0):,.0f}"),
+                ("    P95 (severe)",             f"{cur}&nbsp;{mc_t.get('p95', 0):,.0f}"),
                 ("",                      ""),
-                ("  Mean",                f"{cur} {mc_t.get('mean', 0):,.0f}"),
-                ("  Std. Deviation",      f"{cur} {mc_t.get('std_dev', 0):,.0f}"),
+                ("  Mean",                f"{cur}&nbsp;{mc_t.get('mean', 0):,.0f}"),
+                ("  Std. Deviation",      f"{cur}&nbsp;{mc_t.get('std_dev', 0):,.0f}"),
                 ("",                      ""),
             ])
         rows.extend([
-            ("Data Breach",           f"{cur} {sc.get('data_breach', {}).get('most_likely', 0):,.0f}"),
-            ("Ransomware",            f"{cur} {sc.get('ransomware', {}).get('most_likely', 0):,.0f}"),
-            ("Bus. Interruption",     f"{cur} {sc.get('business_interruption', {}).get('most_likely', 0):,.0f}"),
+            ("Data Breach",           f"{cur}&nbsp;{sc.get('data_breach', {}).get('most_likely', 0):,.0f}"),
+            ("Ransomware",            f"{cur}&nbsp;{sc.get('ransomware', {}).get('most_likely', 0):,.0f}"),
+            ("Bus. Interruption",     f"{cur}&nbsp;{sc.get('business_interruption', {}).get('most_likely', 0):,.0f}"),
             ("",                      ""),
-            ("Suggested Deductible",  f"{cur} {ins.get('suggested_deductible', 0):,.0f}"),
+            ("Suggested Deductible",  f"{cur}&nbsp;{ins.get('suggested_deductible', 0):,.0f}"),
             ("Cover Sizing",          "See Loss Exposure Scenarios above"),
         ])
 
-    fb = f"Estimated most likely annual loss of {cur} {most_l:,.0f} based on hybrid quantitative risk model with Monte Carlo simulation."
+    fb = f"Estimated most likely annual loss of {cur}&nbsp;{most_l:,.0f} based on hybrid quantitative risk model with Monte Carlo simulation."
     return build_cat_card("Financial Impact Analysis", col,
-                          f"{cur} {most_l:,.0f}", rows, fin.get("issues", []), S, fallback=fb)
+                          f"{cur}&nbsp;{most_l:,.0f}", rows, fin.get("issues", []), S, fallback=fb)
 
 
 def loss_exposure_scenarios_block(d, S):
@@ -2566,11 +2569,13 @@ def civil_liability_disclosure(S):
     )
     return [
         Spacer(1, 3 * mm),
-        Paragraph(disclosure_title, S["cat_title"]),
-        Spacer(1, 2 * mm),
-        Paragraph(disclosure_body, S["body"]),
-        Spacer(1, 2 * mm),
-        Paragraph(cover_note, S["body"]),
+        KeepTogether([
+            Paragraph(disclosure_title, S["cat_title"]),
+            Spacer(1, 2 * mm),
+            Paragraph(disclosure_body, S["body"]),
+            Spacer(1, 2 * mm),
+            Paragraph(cover_note, S["body"]),
+        ]),
         Spacer(1, 4 * mm),
     ]
 
@@ -2990,9 +2995,9 @@ def cat_risk_mitigations(d, S):
     reduction_pct = round((total_savings / current * 100) if current > 0 else 0, 1)
 
     rows = [
-        ("Current Annual Loss",    f"{cur} {current:,.0f}"),
-        ("Mitigated Annual Loss",  f"{cur} {mitigated:,.0f}"),
-        ("Total Potential Savings", f"{cur} {total_savings:,.0f} ({reduction_pct}%)"),
+        ("Current Annual Loss",    f"{cur}&nbsp;{current:,.0f}"),
+        ("Mitigated Annual Loss",  f"{cur}&nbsp;{mitigated:,.0f}"),
+        ("Total Potential Savings", f"{cur}&nbsp;{total_savings:,.0f} ({reduction_pct}%)"),
         ("", ""),
     ]
 
@@ -3001,7 +3006,7 @@ def cat_risk_mitigations(d, S):
     for sev in ("critical", "high", "medium"):
         s = summary.get(sev, {})
         if s.get("count", 0) > 0:
-            rows.append((f"{sev.title()} Findings", f"{s['count']} — {cur} {s['total_savings_zar']:,.0f} savings"))
+            rows.append((f"{sev.title()} Findings", f"{s['count']} — {cur}&nbsp;{s['total_savings_zar']:,.0f} savings"))
 
     rows.append(("", ""))
 
@@ -3010,14 +3015,14 @@ def cat_risk_mitigations(d, S):
         sev = f.get("severity", "Medium")
         savings = f.get("estimated_annual_savings_zar", 0)
         rows.append((f"[{sev}] {f.get('recommendation', '')}",
-                      f"{cur} {savings:,.0f}"))
+                      f"{cur}&nbsp;{savings:,.0f}"))
 
     rows.append(("", ""))
     rows.append(("Note", "Savings are modelled projections based on hybrid financial impact methodology. Cost estimates are indicative SA market ranges for prioritisation, not project quotes."))
 
-    fb = f"Implementing all recommendations could reduce annual expected loss by {cur} {total_savings:,.0f} ({reduction_pct}%)."
+    fb = f"Implementing all recommendations could reduce annual expected loss by {cur}&nbsp;{total_savings:,.0f} ({reduction_pct}%)."
     return build_cat_card("Risk Mitigation Recommendations", C_GREEN,
-                          f"Save {cur} {total_savings:,.0f}", rows, [], S, fallback=fb)
+                          f"Save {cur}&nbsp;{total_savings:,.0f}", rows, [], S, fallback=fb)
 
 
 # ---------------------------------------------------------------------------
@@ -3549,7 +3554,7 @@ def _build_attackers_view(results: dict, S) -> list:
     if rsi > 0.5: data_findings.append(f"Ransomware susceptibility {rsi:.0%} — high probability of ransomware deployment after access is gained")
     if fin_most_likely:
         cur = "R" if ins.get("financial_impact", {}).get("currency") == "ZAR" else "$"
-        data_findings.append(f"Estimated financial impact: {cur} {fin_most_likely:,.0f} (Monte Carlo P50 median)")
+        data_findings.append(f"Estimated financial impact: {cur}&nbsp;{fin_most_likely:,.0f} (Monte Carlo P50 median)")
     if not data_findings: data_findings.append("Limited external data access vectors identified")
 
     rows.append([Paragraph(f"<b><font color='{_PHASE_FG[data_risk]}'>Phase 4: DATA ACCESS & IMPACT [{data_risk}]</font></b>", S["kv_key"]),
@@ -3694,9 +3699,9 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             # No "Recommended Cover" string - cover sizing is a broker /
             # client decision (FAIS reasonable-advice compliance).
             mc_mode = mc_t.get("mode", most_likely)
-            fin_text = f"Most likely annual loss: <b>{cur} {mc_mode:,.0f}</b>"
+            fin_text = f"Most likely annual loss: <b>{cur}&nbsp;{mc_mode:,.0f}</b>"
             if mc_p50:
-                fin_text += f"  |  Median (P50): <b>{cur} {mc_p50:,.0f}</b>"
+                fin_text += f"  |  Median (P50): <b>{cur}&nbsp;{mc_p50:,.0f}</b>"
             # Wrap header + financial text as atomic block
             story.append(KeepTogether([
                 Spacer(1, 4 * mm), fin_banner, Spacer(1, 3 * mm),
@@ -4102,8 +4107,8 @@ def generate_invoice_pdf(invoice: dict, line_items: list, client: dict) -> bytes
         rows.append([
             Paragraph(item.get("description", ""), S["normal"]),
             Paragraph(f"{item.get('quantity', 1):.0f}", S["right"]),
-            Paragraph(f"R {item.get('unit_price', 0):,.2f}", S["right"]),
-            Paragraph(f"R {item.get('line_total', 0):,.2f}", S["right"]),
+            Paragraph(f"R&nbsp;{item.get('unit_price', 0):,.2f}", S["right"]),
+            Paragraph(f"R&nbsp;{item.get('line_total', 0):,.2f}", S["right"]),
         ])
 
     col_widths = [INNER_W * 0.50, INNER_W * 0.12, INNER_W * 0.19, INNER_W * 0.19]
@@ -4137,9 +4142,9 @@ def generate_invoice_pdf(invoice: dict, line_items: list, client: dict) -> bytes
     total = invoice.get("total", 0)
 
     totals_data = [
-        ["", Paragraph("Subtotal", S["right"]), Paragraph(f"R {subtotal:,.2f}", S["right_bold"])],
-        ["", Paragraph(f"VAT ({vat_rate}%)", S["right"]), Paragraph(f"R {vat_amount:,.2f}", S["right_bold"])],
-        ["", Paragraph("<b>TOTAL DUE</b>", S["right_bold"]), Paragraph(f"R {total:,.2f}", S["total"])],
+        ["", Paragraph("Subtotal", S["right"]), Paragraph(f"R&nbsp;{subtotal:,.2f}", S["right_bold"])],
+        ["", Paragraph(f"VAT ({vat_rate}%)", S["right"]), Paragraph(f"R&nbsp;{vat_amount:,.2f}", S["right_bold"])],
+        ["", Paragraph("<b>TOTAL DUE</b>", S["right_bold"]), Paragraph(f"R&nbsp;{total:,.2f}", S["total"])],
     ]
     totals_table = Table(totals_data, colWidths=[INNER_W * 0.50, INNER_W * 0.25, INNER_W * 0.25])
     totals_table.setStyle(TableStyle([
