@@ -64,6 +64,7 @@
 
 <div class="card">
   <p>If the scanner detects WAF / bot-manager intervention (challenge pages, 403 / 429 / 503 response patterns, consistent timeouts), the affected sections of the report are explicitly flagged as <strong>partial coverage</strong>. The scanner does NOT attempt to evade WAF rules.</p>
+  <p>Partial coverage also propagates into the financial model. Because a blocked checker can only conceal loss-bearing findings (never create favourable ones), the catastrophe percentiles (1-in-100 / 1-in-200 / 1-in-250 and the P95 upper bound) are conservatively widened in proportion to the lost coverage, while the most-likely and median figures stay anchored. The web-application-firewall credit applied to the overall score is also reduced when the WAF is what blinded the scan, so the blindness is not banked as measured security posture. The report states the numeric adjustment alongside the Loss Exposure Scenarios.</p>
 </div>
 
 <h2>How to verify a request is from this scanner</h2>
@@ -100,7 +101,7 @@ Rate limit:
   <tr><td>Web</td><td><a href="https://phishield.com/">phishield.com</a></td></tr>
 </table>
 
-<p class="meta" style="margin-top:40px;border-top:1px solid #cbd5e1;padding-top:12px;">Page last updated 2026-05-15. The request profile and contact details on this page are authoritative.</p>
+<p class="meta" style="margin-top:40px;border-top:1px solid #cbd5e1;padding-top:12px;">Page last updated 2026-05-18. The request profile and contact details on this page are authoritative.</p>
 
 </body>
 </html>

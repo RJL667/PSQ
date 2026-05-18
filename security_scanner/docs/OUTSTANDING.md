@@ -81,6 +81,7 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 | Enforcement-discount % calibration per regulator | Statutory maxima used everywhere in cat stack. Expected-loss view uses heuristic. Compliance officer should set per-regulator discount %. |
 | Civil exposure quantification (POPIA s99 / common-law delict) | Currently qualitative disclosure only. Quantification requires internal-contract data. |
 | Tail recalibration with empirical SA cat data | 5× PERT upper bound on `mc_total_breach` is conservative. Calibrate against SABRIC + CISA + IBM SA-specific incident-type data when available. |
+| WAF coverage-loading constant calibration (SCN-029) | `K_TAIL=1.20` in `_calculate_zar` sets how aggressively the catastrophe tail widens per unit of lost scan coverage. Heuristic — calibrate against rescan deltas (blinded scan vs allow-listed rescan of the same target) once continuous monitoring provides paired observations. Only the ZAR path is loaded; the dead USD path is not. |
 | Bias correction on `lower_tier_upsell` benchmark cohort | Cohort may not be SA median; pool composition disclosed in report. Future: source-class weighting in percentile calculation. |
 | GPD tail fit MLE upgrade (currently method-of-moments + pure numpy) | scipy.stats.genpareto provides MLE fit but adds dependency. Defer until scipy is acceptable on Render. |
 
@@ -88,7 +89,7 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 
 | Item | Status |
 |---|---|
-| User Manual docx regeneration | Auto-regenerated via `py -3 generate_manual.py` whenever `manual_parts/` changes |
+| User Manual docx regeneration | `py -3 generate_manual.py` — **monolithic generator with all content inline**; writes `Phishield_Cyber_Risk_Scanner_User_Manual.docx`. ⚠ `manual_parts/` (part1-6 + `helpers.py`, each with a `build(doc)`) is a separate, **not-yet-wired** refactor — editing it does NOT affect the deliverable. Edit `generate_manual.py` directly until the refactor is adopted (then this note must change). |
 | Gap Analysis v10 regeneration | Auto-regenerated via `node generators/gen_gap_v10.cjs` (or root `gen_gap_v10.cjs` if not moved). Outputs to main project path: `C:/.../security_scanner/Phishield_Scanner_Gap_Analysis_v10.docx` |
 | FAIR Model Gap Analysis (legacy) | `generators/generate_gap_analysis.cjs` produces `Phishield_FAIR_Model_Gap_Analysis.docx`. Pre-v10 artifact; check if still needed before next regeneration |
 | Sensitivity analysis docs | `tooling/sensitivity/sensitivity_analysis*.py` + JSONs + `generators/gen_sensitivity_doc.cjs`. Pre-v10 calibration analysis; verify relevance before next regeneration |

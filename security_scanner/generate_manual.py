@@ -395,7 +395,9 @@ add_table(
 add_body(
     "The score is calculated by converting each checker\u2019s result to a 0\u2013100 risk value (higher = riskier), "
     "multiplying by the checker\u2019s weight, summing all weighted risks, and scaling to 0\u20131000. "
-    "A WAF bonus of up to 50 points is subtracted if a web application firewall is detected."
+    "A WAF bonus of up to 50 points is subtracted if a web application firewall is detected; "
+    "this is reduced to 25 points when the same WAF actively blocked the scan "
+    "(see WAF / DDoS Protection)."
 )
 add_callout("NOTE", "The risk score should be interpreted in context. A score of 350 for a small retail business "
             "has different underwriting implications than the same score for a financial services firm handling "
@@ -535,9 +537,25 @@ add_body(
     "and fingerprinting of WAF-specific behaviours."
 )
 add_body(
-    "A detected WAF provides a 50-point bonus reduction to the overall risk score (capped). "
+    "A detected WAF provides a bonus reduction of up to 50 points on the overall risk score (capped). "
     "This reflects the significant protection WAFs provide against automated attacks, SQL injection, XSS, "
     "and volumetric DDoS."
+)
+add_body(
+    "When the same WAF or bot-manager actively blinded the scan — sustained 403/406/451 blocking, "
+    "a challenge page, or probe timeouts — the bonus is discounted to 25 points. Otherwise the target "
+    "would be credited twice: once for the genuine control, and again because the blinded path-prober "
+    "checkers return falsely clean results. The blindness is a property of the defensive posture, not "
+    "measured security."
+)
+add_body(
+    "Partial coverage also propagates into the financial model. Because a blocked checker can only "
+    "conceal loss-bearing findings, the catastrophe percentiles (1-in-100 / 1-in-200 / 1-in-250 and the "
+    "P95 upper bound) are conservatively widened in proportion to the lost coverage, while the most-likely "
+    "and median figures and the suggested cover stay anchored — uncertainty is increased, the expected "
+    "loss is not pulled down. The report states the numeric adjustment alongside the Loss Exposure "
+    "Scenarios and records it under financial_impact.coverage_adjustment in the JSON output. "
+    "Rate-limiting alone, which still returns data, does not trigger the adjustment."
 )
 add_body("Weight: WAF bonus applied separately (not a weighted category). Detection is binary: detected or not detected.")
 
@@ -1024,7 +1042,7 @@ add_body(
 
 add_h3("Monte Carlo simulation")
 add_body(
-    "The model runs 10,000 Monte Carlo iterations using PERT distributions (lambda=4). Key PERT parameters "
+    "The model runs 50,000 Monte Carlo iterations using PERT distributions (lambda=4). Key PERT parameters "
     "include SA recovery time PERT(3, 25, 120) days, cost-per-record ranges by industry, and ransom demand "
     "distributions calibrated to Sophos SA 2025 median payment data. The output includes:"
 )
@@ -1033,6 +1051,14 @@ add_bullet("P25 (25th percentile) \u2014 lower quartile.")
 add_bullet("P50 (50th percentile / median) \u2014 most likely loss, used as the primary estimate.")
 add_bullet("P75 (75th percentile) \u2014 upper quartile.")
 add_bullet("P95 (95th percentile) \u2014 pessimistic scenario, only 5% chance the actual loss exceeds this. Used for recommended coverage limit.")
+add_body(
+    "Coverage-adjusted tail: when a WAF or bot-manager blocked the scan, the catastrophe percentiles "
+    "(P75 through P99.6 \u2014 the 1-in-100 / 1-in-200 / 1-in-250 and P95 views) are widened in proportion "
+    "to the lost scan coverage, reflecting findings the scanner could not verify. The mode, median and "
+    "expected loss are restored from the pre-adjustment distribution, so the central estimate and the "
+    "suggested cover are unchanged. The adjustment is disclosed in the Loss Exposure Scenarios section "
+    "of the report; rate-limiting alone does not trigger it."
+)
 add_body("Insurance recommendations derived from the simulation:")
 add_bullet("Suggested deductible: RSI-scaled percentage (0.5%\u201320%) of the recommended coverage limit.")
 add_bullet("Expected annual loss: P50 (median).")
