@@ -386,11 +386,22 @@ def build(doc):
     add_body(
         doc,
         "If the scanner detects that the target domain is protected by a "
-        "Web Application Firewall (WAF), a bonus of -50 points is applied "
-        "to the overall score. This reflects the significant risk reduction "
-        "provided by a WAF in mitigating web application attacks. The bonus "
-        "is only applied when the WAF checker completes successfully and "
-        "positively identifies WAF presence.",
+        "Web Application Firewall (WAF), a bonus of up to -50 points is "
+        "applied to the overall score. This reflects the significant risk "
+        "reduction provided by a WAF in mitigating web application attacks. "
+        "The bonus is only applied when the WAF checker completes "
+        "successfully and positively identifies WAF presence.",
+    )
+    add_body(
+        doc,
+        "The bonus is discounted to -25 points when the same WAF / "
+        "bot-manager actively blinded the scan (sustained 403 / 406 / 451 "
+        "blocking, a challenge page, or probe timeouts). In that case the "
+        "target would otherwise be credited twice: once for the genuine "
+        "web-layer control, and again because the blinded path-prober "
+        "checkers return falsely clean results. The blindness is an "
+        "artefact of the defensive posture, not measured security, so only "
+        "half the credit is banked.",
     )
 
     add_note(

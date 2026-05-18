@@ -6,6 +6,11 @@ Requires helpers: add_h1, add_h2, add_body, add_bold_body, add_bullet,
                   add_tip, add_warning, add_note
 """
 
+from manual_helpers import (
+    add_h1, add_h2, add_h3, add_body, add_bold_body, add_bullet,
+    add_tip, add_warning, add_note,
+)
+
 
 def build(doc):
     """Append sections 4.1 (Discovery) and 4.2 (Core Security) to *doc*."""

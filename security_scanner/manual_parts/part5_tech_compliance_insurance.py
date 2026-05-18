@@ -954,6 +954,37 @@ def build(doc):
         "report presents the analysis; the broker structures the cover."
     )
 
+    add_h2(doc, "Coverage-adjusted tail (WAF blind-spot)")
+
+    add_body(doc,
+        "When a WAF / bot-manager blocks the scan, the path-prober checkers "
+        "(exposed admin panels, information disclosure, technology stack, "
+        "website security, HTTP headers) return no findings. Treated naively "
+        "this reads as 'clean' and would price the target as lower risk, even "
+        "though the scanner simply could not see those sections. A blind spot "
+        "is downside-only: a hidden finding can only make the loss worse, "
+        "never better."
+    )
+    add_body(doc,
+        "The model therefore widens the catastrophe percentiles "
+        "(1-in-100 / 1-in-200 / 1-in-250 and the P95 upper bound) in "
+        "proportion to the lost scan coverage, while leaving the most-likely "
+        "and median figures, and the suggested deductible, anchored to the "
+        "pre-adjustment distribution. Uncertainty is increased; the expected "
+        "loss is not pulled down. Rate-limiting alone (which still returns "
+        "data) does not trigger the adjustment."
+    )
+    add_body(doc,
+        "When the adjustment is active, the Loss Exposure Scenarios section "
+        "of the report states the WAF intervention type, the number and "
+        "names of the unverified checkers, the scan coverage percentage, and "
+        "the approximate percentage by which the catastrophe rows were "
+        "widened. This closes the loop between the qualitative Partial "
+        "Coverage Notice and the figures, and is recorded under "
+        "financial_impact.coverage_adjustment in the JSON output for the "
+        "FAIS audit trail."
+    )
+
     add_h2(doc, "Suggested deductible")
 
     add_body(doc,

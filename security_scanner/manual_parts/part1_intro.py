@@ -175,6 +175,7 @@ def _build_toc(doc):
         ("  2.3", "Screen Layout"),
         ("  2.4", "Starting a Scan"),
         ("  2.5", "Scan Progress"),
+        ("  2.6", "Reading the Dashboard Cards"),
         ("3", "Understanding Scan Results"),
         ("  3.1", "Risk Score Overview"),
         ("  3.2", "Category Breakdown"),
@@ -834,6 +835,34 @@ def _build_section_2(doc):
         "external APIs are experiencing issues. You can check the scan status via the API "
         "endpoint GET /api/scan/<id> or simply start a new scan. Stalled scans do not "
         "consume ongoing resources."
+    )
+
+    # --- 2.6 Reading the Dashboard Cards ---
+    _h("add_h2")(doc, "2.6 Reading the Dashboard Cards")
+    _h("add_body")(doc,
+        "When a scan completes, the results dashboard opens with a risk-score gauge "
+        "(0-1000, colour-graded green through red) and a row of at-a-glance summary "
+        "cards. Each card shows one key indicator with a traffic-light colour "
+        "(green / amber / red) based on severity:"
+    )
+    for _b in [
+        "SSL Grade - letter grade (A+ to F) for TLS configuration quality. A/A+ is green, B/C is amber, D/F is red.",
+        "Email Score - score out of 10 for SPF/DKIM/DMARC configuration. 8+ is green, 5-7 is amber, below 5 is red.",
+        "Headers % - percentage of recommended HTTP security headers present. 70%+ is green, 40-69% is amber, below 40% is red.",
+        "WAF - whether a Web Application Firewall was detected. Detected is green, not detected is red.",
+        "Breaches - number of known data breaches from HIBP. 0 is green, 1-3 is amber, 4+ is red.",
+        "Admin Panels - number of exposed administrative interfaces found. 0 is green, any found is red.",
+        "DB Exposure - whether database ports (MongoDB, Redis, PostgreSQL, MySQL, etc.) are publicly accessible. None is green, any is red (critical).",
+        "Blacklisting - whether the domain or IP appears on DNS blacklists. Clean is green, listed is red.",
+        "RDP - whether Remote Desktop Protocol (port 3389) is exposed to the internet. Not exposed is green, exposed is red (critical).",
+        "Annual Loss - estimated probable annual loss from the hybrid model (median / P50 value in ZAR).",
+        "Web Ranking - Tranco list ranking indicating the domain's relative popularity and visibility.",
+    ]:
+        _h("add_bullet")(doc, _b)
+    _h("add_body")(doc,
+        "The gauge and cards summarise the detailed findings that follow. The risk "
+        "score itself is explained in Section 7 (Scoring Methodology); each indicator "
+        "is covered in depth in its checker section under Section 4."
     )
 
     doc.add_page_break()
