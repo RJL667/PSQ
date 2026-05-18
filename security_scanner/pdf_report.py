@@ -2447,7 +2447,7 @@ def loss_exposure_scenarios_block(d, S):
         ("FONTNAME",      (0, 3), (-1, 5),   "Helvetica-Bold"),
     ]))
 
-    return [
+    blocks = [
         Spacer(1, 3 * mm),
         Paragraph("<b>Loss Exposure Scenarios</b>", S["cat_title"]),
         Spacer(1, 2 * mm),
@@ -2459,8 +2459,33 @@ def loss_exposure_scenarios_block(d, S):
             S["body"]),
         Spacer(1, 2 * mm),
         table,
-        Spacer(1, 3 * mm),
     ]
+
+    # Coverage-adjusted tail disclosure — closes the loop between the
+    # qualitative Partial Coverage Notice and the numeric loading applied
+    # to the catastrophe percentiles when a WAF blinded the scan.
+    cov = fin.get("coverage_adjustment", {}) or {}
+    if cov.get("applied"):
+        infl_pct = round((cov.get("tail_inflation_factor", 1.0) - 1.0) * 100)
+        affected = cov.get("affected_checkers", []) or []
+        names = ", ".join(a.replace("_", " ") for a in affected) if affected \
+            else "several path-prober checkers"
+        cov_txt = (
+            f"<b>Coverage-adjusted tail.</b> The target's WAF / bot-manager "
+            f"({cov.get('waf_kind', '').replace('_', ' ')}) prevented this scan "
+            f"from verifying {len(affected)} checker(s) ({names}); scan coverage "
+            f"was {cov.get('coverage_pct', 100)}%. Because an unverified checker "
+            f"can only conceal loss-bearing findings, the catastrophe percentiles "
+            f"above (1-in-100 / 1-in-200 / 1-in-250 and the P95 upper bound) have "
+            f"been widened by approximately {infl_pct}% to reflect this "
+            f"uncertainty. The most-likely and median figures are unchanged. "
+            f"Absence of a finding in the affected checkers does not confirm "
+            f"absence of the underlying risk — see the Partial Coverage Notice."
+        )
+        blocks += [Spacer(1, 2 * mm), Paragraph(cov_txt, S["body_muted"])]
+
+    blocks.append(Spacer(1, 3 * mm))
+    return blocks
 
 
 def records_assumption_disclosure(d, S):

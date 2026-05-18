@@ -705,6 +705,20 @@
               {% endfor %}
             </tbody>
           </table>
+          {% set cov = fin.coverage_adjustment if fin.coverage_adjustment is defined else {} %}
+          {% if cov.applied %}
+          <div style="background:rgba(217,119,6,0.08);border-left:3px solid #d97706;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:.72rem;color:var(--text);line-height:1.5;">
+            <strong style="color:#fbbf24;">Coverage-adjusted tail.</strong>
+            The target's WAF / bot-manager ({{ cov.waf_kind | default('') | replace('_', ' ') }}) prevented this scan from verifying
+            {{ (cov.affected_checkers | default([])) | length }} checker(s)
+            ({{ (cov.affected_checkers | default([])) | map('replace', '_', ' ') | join(', ') }}); scan coverage was
+            <strong>{{ cov.coverage_pct | default(100) }}%</strong>. Because an unverified checker can only conceal
+            loss-bearing findings, the catastrophe rows above (1-in-100 / 1-in-200 / 1-in-250 and the P95 upper bound)
+            have been widened by approximately <strong>{{ (((cov.tail_inflation_factor | default(1.0)) - 1) * 100) | round | int }}%</strong>
+            to reflect this uncertainty. The most-likely and median figures are unchanged. Absence of a finding in the
+            affected checkers does not confirm absence of the underlying risk — see the Partial Coverage notice above.
+          </div>
+          {% endif %}
           <div style="font-size:.7rem;color:var(--muted);font-style:italic;margin-top:10px;line-height:1.5;">
             Figures presented are statistical model output. Selection of cover limit is the responsibility of the insured in consultation with the broker. Phishield does not recommend a specific cover amount.
           </div>
