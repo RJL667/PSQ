@@ -35,6 +35,38 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from docx import Document
 from docx.shared import Pt
+from docx.oxml.ns import qn
+
+
+def _assert_no_blank_pages(doc):
+    """Fail the build if any blank page exists (two page breaks with no
+    intervening text). python-docx has no pagination model, so a content
+    grep cannot see this — this structural check is the layout gate that a
+    'spot check' previously missed. Parts must not emit trailing page
+    breaks; the orchestrator owns inter-part pagination."""
+    seq = []
+    for p in doc.paragraphs:
+        has_pb = False
+        for r in p.runs:
+            for br in r._r.findall(qn("w:br")):
+                if br.get(qn("w:type")) == "page":
+                    has_pb = True
+        ppr = p._p.find(qn("w:pPr"))
+        if ppr is not None and ppr.find(qn("w:pageBreakBefore")) is not None:
+            has_pb = True
+        seq.append((p.text.strip(), has_pb))
+    pb = [i for i, (_, b) in enumerate(seq) if b]
+    blanks = []
+    for a, c in zip(pb, pb[1:]):
+        if not any(seq[k][0] for k in range(a + 1, c + 1)):
+            ctx = next((seq[k][0][:60] for k in range(a, -1, -1)
+                        if seq[k][0]), "")
+            blanks.append((a, c, ctx))
+    if blanks:
+        raise AssertionError(
+            "Blank page(s) detected — consecutive page breaks with no text "
+            "between:\n" + "\n".join(
+                f"  para {a}->{c} after: {ctx!r}" for a, c, ctx in blanks))
 
 from manual_parts import helpers as H
 from manual_parts import (
@@ -77,6 +109,7 @@ def main():
             doc.add_page_break()
         part.build(doc)
 
+    _assert_no_blank_pages(doc)
     doc.save(OUTPUT)
     print(f"Manual saved to: {OUTPUT}")
 

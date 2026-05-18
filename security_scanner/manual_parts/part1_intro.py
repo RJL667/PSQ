@@ -864,8 +864,9 @@ def _build_section_2(doc):
         "score itself is explained in Section 7 (Scoring Methodology); each indicator "
         "is covered in depth in its checker section under Section 4."
     )
-
-    doc.add_page_break()
+    # No trailing page break here: the orchestrator owns inter-part
+    # pagination (one break between parts). A trailing break here would
+    # stack with the orchestrator's, producing a blank page.
 
 
 # ---------------------------------------------------------------------------
