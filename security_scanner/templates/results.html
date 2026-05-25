@@ -76,7 +76,7 @@
     .section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 20px 0 10px; }
 
     /* Category cards */
-    .categories { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .categories { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 20px; align-items: start; }
     .cat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
     .cat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; cursor: pointer; user-select: none; transition: background 0.15s; }
     .cat-header:hover { background: var(--surface2); }
@@ -550,7 +550,7 @@
           <span class="chevron">&#9660;</span>
         </div>
       </div>
-      <div class="cat-body open">
+      <div class="cat-body">
         <table class="kv-table">
           <tr><td>Risk Level</td><td><span class="badge {% if rsi.risk_label == 'Critical' %}badge-red{% elif rsi.risk_label == 'High' %}badge-red{% elif rsi.risk_label == 'Medium' %}badge-amber{% else %}badge-green{% endif %}" style="font-size:1rem;">{{ rsi.risk_label }}</span></td></tr>
           <tr><td>RSI Score</td><td>{{ '%.3f'|format(rsi.rsi_score) }} / 1.000</td></tr>
@@ -612,7 +612,7 @@
           <span class="chevron">&#9660;</span>
         </div>
       </div>
-      <div class="cat-body open">
+      <div class="cat-body">
         {% if is_zar %}
         {# ── ZAR Financial Impact — full granularity ── #}
         {% set db = fin.scenarios.data_breach %}
@@ -991,7 +991,7 @@
           <span class="chevron">&#9660;</span>
         </div>
       </div>
-      <div class="cat-body open">
+      <div class="cat-body">
         <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:16px;">
           <div style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;">
             <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Current State</div>
