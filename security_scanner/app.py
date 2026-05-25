@@ -924,8 +924,14 @@ def download_pdf(scan_id: str):
     report_type = request.args.get("type", "full")
     pdf_bytes = generate_pdf(results, report_type=report_type)
 
-    type_suffix = "-summary" if report_type == "summary" else ""
-    filename = f"cyber-risk-{row['domain']}-{results.get('scan_timestamp','')[:10]}{type_suffix}.pdf"
+    date_str = results.get('scan_timestamp', '')[:10]
+    if report_type == "assessment":
+        # Executive Summary Deck — sold to brokers/clients as "Cyber Security Assessment"
+        filename = f"Cyber_Security_Assessment-{row['domain']}-{date_str}.pdf"
+    elif report_type == "summary":
+        filename = f"cyber-risk-{row['domain']}-{date_str}-summary.pdf"
+    else:
+        filename = f"cyber-risk-{row['domain']}-{date_str}.pdf"
     return send_file(
         io.BytesIO(pdf_bytes),
         mimetype="application/pdf",

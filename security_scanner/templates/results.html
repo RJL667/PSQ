@@ -167,6 +167,7 @@
     {% if status == 'completed' %}
     <div class="pdf-btn-group">
       <a href="/api/scan/{{ scan_id }}/pdf?type=summary" class="pdf-btn-outline">&#128203; Broker Summary</a>
+      <a href="/api/scan/{{ scan_id }}/pdf?type=assessment" class="pdf-btn-outline">&#128202; Executive Summary Deck</a>
       <a href="/api/scan/{{ scan_id }}/pdf" class="pdf-btn">&#128196; Full Technical Report</a>
     </div>
     {% endif %}

@@ -1,0 +1,19 @@
+{
+  "_comment": "Brand configuration for the Cyber Security Assessment deck. Edit this file to swap the company that issues the report. Do not edit pdf_report.py for re-branding — change values here and replace the asset files alongside.",
+  "version": "1.0",
+  "last_reviewed": "2026-05-22",
+  "company_name": "Phishield",
+  "legal_entity": "Phishield UMA (Pty) Ltd",
+  "regulatory_text": "Authorised Financial Services Provider FSP 46418",
+  "broker_label": "Phishield broker",
+  "primary_navy_hex": "#0a1f3d",
+  "accent_blue_hex": "#1f5a8a",
+  "logo_file": "logo.png",
+  "cover_hero_file": "cover_hero.jpg",
+  "findings_hero_file": "findings_hero.jpg",
+  "_asset_notes": {
+    "logo_file": "Used as corner wordmark on every slide. Best at ~200x60 px, transparent background.",
+    "cover_hero_file": "Slide 1 right-side hero image. Best landscape, ~960x540 source (will be placed in right half of slide). Kaizen used a cyber-ops command-centre photo.",
+    "findings_hero_file": "Slide 6 right-side hero image. Best portrait or square, ~600x800 source. Kaizen used an office workers in motion photo."
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "_comment": "Industry stats shown on the 'Why This Matters' page of the Cyber Security Assessment (Executive Summary Deck). Update quarterly/semi-annually/annually as the source reports refresh. Order is preserved on the page (left-to-right, top-to-bottom in a 3-column grid).",
+  "version": "1.0",
+  "last_reviewed": "2026-05-22",
+  "next_review_due": "2026-11-22",
+  "stats": [
+    {
+      "value": "R44.1m",
+      "label": "average cost of a SA data breach in 2025",
+      "description": "A business-ending event for most SMEs.",
+      "source": "IBM Cost of a Data Breach Report 2025 — South Africa"
+    },
+    {
+      "value": "241 days",
+      "label": "average time to identify and contain a breach",
+      "description": "Attackers may have access for nearly 8 months.",
+      "source": "IBM Cost of a Data Breach Report 2025"
+    },
+    {
+      "value": "Only 35%",
+      "label": "of organisations fully recover from a breach",
+      "description": "Of those, 76% take more than 100 days.",
+      "source": "Sophos State of Ransomware South Africa 2025"
+    },
+    {
+      "value": "60%+",
+      "label": "of SMBs with severe data loss shut within 6 months",
+      "description": "A single event can be existential.",
+      "source": "Industry composite — US CISA / various SMB cyber-resilience studies"
+    },
+    {
+      "value": "86%",
+      "label": "of breached organisations face operational disruption",
+      "description": "Staff cannot work; obligations go unmet.",
+      "source": "Sophos State of Ransomware South Africa 2025"
+    },
+    {
+      "value": "24 days",
+      "label": "average downtime following a ransomware attack",
+      "description": "Nearly a month of halted operations.",
+      "source": "Sophos State of Ransomware South Africa 2025"
+    }
+  ],
+  "sources": {
+    "ibm": {
+      "name": "IBM Cost of a Data Breach Report",
+      "year": 2025,
+      "url": "https://www.ibm.com/reports/data-breach"
+    },
+    "sophos": {
+      "name": "Sophos State of Ransomware",
+      "year": 2025,
+      "url": "https://www.sophos.com/state-of-ransomware"
+    }
+  }
+}

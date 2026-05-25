@@ -3595,7 +3595,1194 @@ def _build_attackers_view(results: dict, S) -> list:
     return parts
 
 
+# ===========================================================================
+# CYBER SECURITY ASSESSMENT — Executive Summary Deck (compact 2-page layout)
+#
+# A self-contained alternative output (report_type="assessment") that mirrors
+# an external executive-deck template. Bypasses the standard cover / exec
+# table / vulnerability posture / attacker's view machinery and produces a
+# tight broker/client-facing summary with 8 sections.
+# Field paths reused from build_summary_table + _build_attackers_view.
+# ===========================================================================
+
+# Fallback used only if assessment_industry_stats.json is missing or malformed.
+_ASSESSMENT_STATS_DEFAULT = [
+    {"value": "R44.1m",   "label": "average cost of a SA data breach in 2025",       "description": "A business-ending event for most SMEs."},
+    {"value": "241 days", "label": "average time to identify and contain a breach",  "description": "Attackers may have access for nearly 8 months."},
+    {"value": "Only 35%", "label": "of organisations fully recover from a breach",   "description": "Of those, 76% take more than 100 days."},
+    {"value": "60%+",     "label": "of SMBs with severe data loss shut within 6 months", "description": "A single event can be existential."},
+    {"value": "86%",      "label": "of breached organisations face operational disruption", "description": "Staff cannot work; obligations go unmet."},
+    {"value": "24 days",  "label": "average downtime following a ransomware attack",  "description": "Nearly a month of halted operations."},
+]
+
+
+def _load_assessment_industry_stats() -> list:
+    import json as _json
+    from pathlib import Path as _Path
+    p = _Path(__file__).parent / "assessment_industry_stats.json"
+    try:
+        if p.exists():
+            with open(p, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+                stats = data.get("stats", [])
+                if isinstance(stats, list) and len(stats) >= 6:
+                    return stats[:6]
+    except Exception:
+        pass
+    return _ASSESSMENT_STATS_DEFAULT
+
+def _load_assessment_brand() -> dict:
+    """Load brand config from brand_assets/brand.json with safe Phishield fallbacks.
+    Image paths in the result are absolute and only present if the file exists
+    on disk; slide renderers should treat them as optional."""
+    import json as _json
+    from pathlib import Path as _Path
+    base = _Path(__file__).parent / "brand_assets"
+    cfg_path = base / "brand.json"
+    fallback = {
+        "company_name": "Phishield",
+        "legal_entity": "Phishield UMA (Pty) Ltd",
+        "regulatory_text": "Authorised Financial Services Provider FSP 46418",
+        "broker_label": "Phishield broker",
+        "logo_file": "logo.png",
+        "cover_hero_file": "cover_hero.jpg",
+        "findings_hero_file": "findings_hero.jpg",
+    }
+    cfg = dict(fallback)
+    try:
+        if cfg_path.exists():
+            data = _json.loads(cfg_path.read_text(encoding="utf-8"))
+            for k in fallback:
+                if data.get(k):
+                    cfg[k] = data[k]
+    except Exception:
+        pass
+
+    def _resolve(filename):
+        p = base / filename
+        return str(p) if p.exists() else None
+
+    cfg["logo_path"]          = _resolve(cfg["logo_file"])
+    cfg["cover_hero_path"]    = _resolve(cfg["cover_hero_file"])
+    cfg["findings_hero_path"] = _resolve(cfg["findings_hero_file"])
+    return cfg
+
+
+# Module-level cache for the current PDF render. Set by _build_assessment_pdf
+# so the page-painter callback (which can't take extra args) can read it.
+_ASX_CURRENT_BRAND = None
+
+
+def _asx_image_or_none(image_path, max_width, max_height):
+    """Return a ReportLab Image flowable sized to fit (max_width, max_height)
+    preserving aspect ratio, or None if the file is missing/unreadable."""
+    if not image_path:
+        return None
+    try:
+        from reportlab.platypus import Image as RLImage
+        from PIL import Image as PILImage
+        with PILImage.open(image_path) as im:
+            iw, ih = im.size
+        scale = min(max_width / iw, max_height / ih)
+        return RLImage(image_path, width=iw * scale, height=ih * scale)
+    except Exception:
+        return None
+
+
+
+# ---------- Data extractors ----------
+
+def _assessment_extract_kpis(results: dict) -> list:
+    """6 KPI tiles for the Executive Summary block. Returns list of
+    {value, label, description, severity in {ok,warn,bad}}."""
+    cats = results.get("categories", {})
+    ssl_grade = cats.get("ssl", {}).get("grade", "?")
+    em_score  = cats.get("email_security", {}).get("score", 0)
+    hh_score  = cats.get("http_headers", {}).get("score", 0)
+    adm_total = (cats.get("exposed_admin", {}).get("critical_count", 0)
+                 + cats.get("exposed_admin", {}).get("high_count", 0))
+    hrp_services = cats.get("high_risk_protocols", {}).get("exposed_services", [])
+    db_ports = {3306, 5432, 27017, 6379, 9200, 1433}
+    db_count = sum(1 for s in hrp_services if s.get("port") in db_ports)
+    rdp_exposed = cats.get("vpn_remote", {}).get("rdp_exposed", False)
+
+    def ssl_sev(g):
+        if g in ("A+", "A"): return "ok"
+        if g in ("B", "C"):  return "warn"
+        return "bad"
+
+    return [
+        {"value": ssl_grade,           "label": "SSL / TLS Grade",       "description": "Encryption quality",         "severity": ssl_sev(ssl_grade)},
+        {"value": f"{em_score}/10",    "label": "Email Security",        "description": "Phishing exposure",          "severity": "ok" if em_score >= 8 else "warn" if em_score >= 5 else "bad"},
+        {"value": f"{hh_score}%",      "label": "HTTP Sec. Headers",     "description": "Web app exposure",           "severity": "ok" if hh_score >= 80 else "warn" if hh_score >= 50 else "bad"},
+        {"value": str(adm_total),     "label": "Exposed Admin Panels", "description": "Direct entry points",        "severity": "bad" if adm_total > 0 else "ok"},
+        {"value": str(db_count),      "label": "Critical DB Exposed",  "description": "Database internet-facing",   "severity": "bad" if db_count > 0 else "ok"},
+        {"value": "Yes" if rdp_exposed else "No", "label": "RDP Exposed", "description": "Top ransomware vector",    "severity": "bad" if rdp_exposed else "ok"},
+    ]
+
+
+def _assessment_kill_chain(results: dict) -> list:
+    """Compact 4-phase kill chain. Each: {name, severity, headline, findings[<=3]}."""
+    cats = results.get("categories", {})
+    ins  = results.get("insurance", {})
+
+    # Phase 1: Reconnaissance
+    ip_count  = cats.get("external_ips", {}).get("total_unique_ips", 0)
+    sub_count = cats.get("subdomains", {}).get("total_count", 0)
+    dh = cats.get("dehashed", {})
+    emails = dh.get("unique_emails", 0)
+    p1_sev = "HIGH" if (ip_count > 5 or emails > 3) else ("MEDIUM" if (ip_count > 1 or emails > 0) else "LOW")
+    p1f = []
+    if ip_count:  p1f.append(f"{ip_count} external IP addresses discoverable")
+    if sub_count: p1f.append(f"{sub_count} subdomains can be enumerated")
+    if emails:    p1f.append(f"{emails} staff emails found in breach data")
+    if not p1f:   p1f = ["No significant reconnaissance signals"]
+
+    # Phase 2: Initial Access
+    rdp = cats.get("vpn_remote", {}).get("rdp_exposed", False)
+    hrp = cats.get("high_risk_protocols", {}).get("exposed_services", [])
+    cred_leaks = dh.get("total_entries", 0)
+    infostealers = cats.get("hudson_rock", {}).get("compromised_employees", 0)
+    p2_sev = ("CRITICAL" if (rdp or infostealers > 0)
+              else "HIGH" if (len(hrp) > 0 or cred_leaks > 5)
+              else "MEDIUM" if cred_leaks > 0 else "LOW")
+    p2f = []
+    if rdp: p2f.append("RDP exposed on port 3389")
+    elif hrp:
+        svc = hrp[0]
+        p2f.append(f"{(svc.get('service') or 'service').capitalize()} open on port {svc.get('port', '?')}")
+    if cred_leaks: p2f.append(f"{cred_leaks} stolen credentials available to reuse")
+    if cred_leaks > 0 and len(p2f) < 3: p2f.append("Enables automated credential stuffing")
+    if infostealers and len(p2f) < 3:   p2f.append(f"{infostealers} infostealer-infected device(s)")
+    if not p2f: p2f = ["No clear initial-access vectors identified"]
+
+    # Phase 3: Exploitation
+    ssl_grade = cats.get("ssl", {}).get("grade", "A")
+    hh_score  = cats.get("http_headers", {}).get("score", 100)
+    osv_crit  = cats.get("osv_vulns", {}).get("critical_count", 0)
+    osv_high  = cats.get("osv_vulns", {}).get("high_count", 0)
+    p3_sev = ("CRITICAL" if osv_crit > 0
+              else "HIGH" if (osv_high > 0 or ssl_grade in ("D", "E", "F"))
+              else "MEDIUM" if hh_score < 50 else "LOW")
+    p3f = []
+    if ssl_grade in ("D", "E", "F"): p3f.append(f"SSL grade {ssl_grade} enables interception")
+    if hh_score < 50: p3f.append(f"Security headers at {hh_score}% only")
+    if osv_crit: p3f.append(f"{osv_crit} critical CVE(s) with known exploits")
+    if hh_score < 50 and len(p3f) < 3: p3f.append("Exposed to XSS & clickjacking")
+    if not p3f: p3f = ["No critical exploitation vectors identified"]
+
+    # Phase 4: Data & Impact
+    # RSI bands match the scanner's canonical thresholds in scoring_analytics.py:1078:
+    #   < 0.25 = Low | 0.25-0.50 = Medium | 0.50-0.75 = High | >= 0.75 = Critical
+    # DB exposure forces CRITICAL regardless of RSI.
+    db_ports = {3306, 5432, 27017, 6379, 9200, 1433}
+    db_exposed = any(s.get("port") in db_ports for s in hrp)
+    rsi = ins.get("rsi", {}).get("rsi_score", 0)
+    fin = ins.get("financial_impact", {})
+    fin_mc_p50 = fin.get("monte_carlo", {}).get("total", {}).get("p50", 0)
+    cur_sym = "R" if fin.get("currency") == "ZAR" else "$"
+    p4_sev = ("CRITICAL" if (db_exposed or rsi >= 0.75)
+              else "HIGH"   if rsi >= 0.50
+              else "MEDIUM" if rsi >= 0.25
+              else "LOW")
+    p4f = []
+    if db_exposed: p4f.append("Databases directly internet-facing")
+    if rsi:        p4f.append(f"{int(round(rsi*100))}% ransomware susceptibility")
+    if fin_mc_p50: p4f.append(f"Est. impact: {cur_sym} {fin_mc_p50/1_000_000:.2f}m (median)")
+    if not p4f:    p4f = ["Limited data exfiltration paths visible"]
+
+    return [
+        {"name": "RECONNAISSANCE", "severity": p1_sev, "headline": "What an attacker can learn",       "findings": p1f[:3]},
+        {"name": "INITIAL ACCESS", "severity": p2_sev, "headline": "How they would break in",          "findings": p2f[:3]},
+        {"name": "EXPLOITATION",   "severity": p3_sev, "headline": "What they would exploit",          "findings": p3f[:3]},
+        {"name": "DATA & IMPACT",  "severity": p4_sev, "headline": "What they would steal or destroy", "findings": p4f[:3]},
+    ]
+
+
+def _assessment_top_findings(results: dict) -> list:
+    """Top 3 highest-severity plain-language findings.
+    Each: {level, headline, summary, detail}."""
+    cats = results.get("categories", {})
+    ins  = results.get("insurance", {})
+    weight = {"CRITICAL": 100, "HIGH": 80, "MEDIUM": 50, "LOW": 20}
+    cands = []  # tuples of (priority, dict)
+
+    # RDP exposed — extreme priority
+    if cats.get("vpn_remote", {}).get("rdp_exposed"):
+        cands.append((100, {
+            "level": "CRITICAL",
+            "headline": "RDP is exposed to the internet",
+            "summary": "Remote Desktop is the #1 entry vector for ransomware.",
+            "detail": "Port 3389 (Remote Desktop) is reachable from the internet. A single weak or stolen password could allow an attacker to log in interactively to a workstation or server."
+        }))
+
+    # Credential risk
+    cr_score = (ins.get("credential_risk", {}) or cats.get("credential_risk", {})).get("risk_score", 0)
+    cred_total = cats.get("dehashed", {}).get("total_entries", 0)
+    if cred_total > 0 or cr_score >= 50:
+        level = ("CRITICAL" if (cred_total >= 20 or cr_score >= 80)
+                 else "HIGH" if (cred_total >= 5 or cr_score >= 50) else "MEDIUM")
+        cands.append((weight[level], {
+            "level": level,
+            "headline": f"Overall credential risk is classified as {level}",
+            "summary": "Significantly elevated probability of unauthorised access via compromised credentials.",
+            "detail": f"{cred_total} credential records found — staff email addresses and possibly passwords are circulating in breach databases, the fuel for automated password-guessing attacks."
+        }))
+
+    # DB / critical service exposure
+    hrp = cats.get("high_risk_protocols", {}).get("exposed_services", [])
+    db_ports = {3306, 5432, 27017, 6379, 9200, 1433}
+    db_count = sum(1 for s in hrp if s.get("port") in db_ports)
+    crit_count = cats.get("high_risk_protocols", {}).get("critical_count", 0)
+    if db_count > 0:
+        cands.append((95, {
+            "level": "CRITICAL",
+            "headline": f"{db_count} critical service exposed",
+            "summary": "A database is reachable directly from the internet.",
+            "detail": "A simple connection with a stolen password could grant immediate access to business data without any further hop or exploit."
+        }))
+    elif crit_count > 0:
+        cands.append((90, {
+            "level": "CRITICAL",
+            "headline": f"{crit_count} high-risk service exposed",
+            "summary": "Critical service(s) reachable directly from the internet.",
+            "detail": "Direct attack surface that should normally sit behind a VPN or be allow-listed to specific source IPs."
+        }))
+
+    # SSL weak
+    ssl_grade = cats.get("ssl", {}).get("grade", "?")
+    if ssl_grade in ("D", "E", "F"):
+        cands.append((65, {
+            "level": "HIGH",
+            "headline": f"Weak SSL/TLS encryption ({ssl_grade})",
+            "summary": "Web traffic can be intercepted or downgraded.",
+            "detail": f"SSL grade {ssl_grade} — outdated or weak ciphers allow attackers to intercept connections via man-in-the-middle attacks."
+        }))
+
+    # Email weak
+    em_score = cats.get("email_security", {}).get("score", 10)
+    if em_score < 5:
+        cands.append((60, {
+            "level": "HIGH",
+            "headline": f"Weak email authentication ({em_score}/10)",
+            "summary": "Domain can be spoofed for phishing attacks.",
+            "detail": "Without proper SPF/DKIM/DMARC, attackers can impersonate this domain to phish staff, customers, and suppliers."
+        }))
+
+    # WAF missing
+    if not cats.get("waf", {}).get("detected"):
+        cands.append((55, {
+            "level": "MEDIUM",
+            "headline": "No web application firewall",
+            "summary": "Web traffic is not filtered for malicious patterns.",
+            "detail": "The website has no protective filter, leaving it directly exposed to automated attacks and traffic floods."
+        }))
+
+    # HTTP headers weak
+    hh = cats.get("http_headers", {}).get("score", 100)
+    if hh < 40:
+        cands.append((50, {
+            "level": "MEDIUM",
+            "headline": f"Web application headers misconfigured ({hh}%)",
+            "summary": "Common web attacks are not blocked at the browser.",
+            "detail": f"Security headers at {hh}% — site is exposed to XSS, clickjacking, and content injection that modern headers would block."
+        }))
+
+    cands.sort(key=lambda x: -x[0])
+    return [c[1] for c in cands[:4]]
+
+
+# ---------- Slide deck renderers (Kaizen-fidelity 16:9 widescreen) ----------
+
+# PowerPoint widescreen: 960 x 540 pt = 10 x 5.625 in @ 96dpi.
+ASX_PAGE_W = 960
+ASX_PAGE_H = 540
+ASX_MARGIN = 50
+ASX_INNER_W = ASX_PAGE_W - 2 * ASX_MARGIN  # 860pt usable width
+
+# Brand palette — modelled on the Kaizen executive deck. Adjust if Phishield
+# brand colours diverge.
+ASX_NAVY_DEEP  = colors.HexColor("#0a1f3d")   # full navy panels / slide 7 bg
+ASX_NAVY       = colors.HexColor("#0f2744")   # standard heading text
+ASX_NAVY_2     = colors.HexColor("#11304f")   # card body on navy slides
+ASX_BLUE_LINK  = colors.HexColor("#1f5a8a")   # section labels / accent text
+ASX_BLUE_BAR   = colors.HexColor("#2f6e9c")   # most-likely scenario bar
+ASX_AMBER      = colors.HexColor("#d97706")
+ASX_RED        = colors.HexColor("#dc2626")
+ASX_CRITICAL   = colors.HexColor("#a32f25")   # slightly redder than C_CRITICAL
+ASX_GREEN      = colors.HexColor("#16a34a")
+ASX_TILE_BG    = colors.HexColor("#eef2f7")   # light blue-grey card fill
+ASX_GREY_BODY  = colors.HexColor("#475569")
+ASX_GREY_MUTED = colors.HexColor("#94a3b8")
+ASX_WHITE      = colors.white
+
+# Built-in PostScript serif fonts (no registration needed).
+ASX_SERIF       = "Times-Roman"
+ASX_SERIF_BOLD  = "Times-Bold"
+ASX_SERIF_ITAL  = "Times-Italic"
+ASX_SANS        = "Helvetica"
+ASX_SANS_BOLD   = "Helvetica-Bold"
+ASX_SANS_ITAL   = "Helvetica-Oblique"
+
+_ASX_SEV_COLOR = {"CRITICAL": ASX_CRITICAL, "HIGH": ASX_AMBER, "MEDIUM": ASX_AMBER, "LOW": ASX_GREEN}
+_ASX_SEV_HEX   = {"CRITICAL": "#a32f25", "HIGH": "#d97706", "MEDIUM": "#d97706", "LOW": "#16a34a"}
+_KPI_COLOR     = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED}
+
+
+# --- Drawing primitives --------------------------------------------------
+
+def _asx_pill(text, bg_hex, fg_hex="#ffffff", font_size=11, padding_x=18):
+    """Rounded pill badge as a Drawing flowable."""
+    from reportlab.graphics.shapes import Drawing, Rect, String
+    w = max(96, len(text) * font_size * 0.62 + 2 * padding_x)
+    h = font_size + 14
+    d = Drawing(w, h)
+    d.add(Rect(0, 0, w, h, rx=h / 2, ry=h / 2,
+                strokeColor=None, fillColor=colors.HexColor(bg_hex)))
+    d.add(String(w / 2, (h - font_size) / 2 + 2, text,
+                  fontName=ASX_SANS_BOLD, fontSize=font_size,
+                  fillColor=colors.HexColor(fg_hex), textAnchor="middle"))
+    return d
+
+
+def _asx_bar(width_pt, color, height=22):
+    """Horizontal coloured rounded bar (for scenario bar chart)."""
+    from reportlab.graphics.shapes import Drawing, Rect
+    d = Drawing(max(8, width_pt), height)
+    d.add(Rect(0, 0, max(8, width_pt), height, rx=height / 2, ry=height / 2,
+                strokeColor=None, fillColor=color))
+    return d
+
+
+def _asx_circle_number(num, diameter=36):
+    """Filled blue circle with a centred white number (Slide 7 step markers)."""
+    from reportlab.graphics.shapes import Drawing, Circle, String
+    d = Drawing(diameter, diameter)
+    d.add(Circle(diameter / 2, diameter / 2, diameter / 2,
+                  strokeColor=None, fillColor=ASX_BLUE_LINK))
+    d.add(String(diameter / 2, diameter / 2 - 7, str(num),
+                  fontName=ASX_SERIF_BOLD, fontSize=18,
+                  fillColor=ASX_WHITE, textAnchor="middle"))
+    return d
+
+
+# --- Reusable text styles ------------------------------------------------
+
+def _style_section_label():
+    return ParagraphStyle("asx_sect_lbl", fontSize=10, fontName=ASX_SANS_BOLD,
+                           textColor=ASX_BLUE_LINK, leading=12, alignment=TA_LEFT,
+                           spaceAfter=4)
+
+def _style_slide_title(size=30):
+    return ParagraphStyle("asx_sl_title", fontSize=size, fontName=ASX_SERIF_BOLD,
+                           textColor=ASX_NAVY, leading=size + 4, alignment=TA_LEFT,
+                           spaceAfter=4)
+
+def _style_intro():
+    return ParagraphStyle("asx_intro", fontSize=11, fontName=ASX_SANS,
+                           textColor=ASX_GREY_MUTED, leading=15, alignment=TA_LEFT,
+                           spaceAfter=10)
+
+
+# --- Per-page background painter (called by SimpleDocTemplate) ----------
+
+def _asx_draw_corner_mark(canvas, brand, x_right, y_baseline, max_w=110, max_h=32, light=False):
+    """Draw the company logo if available, otherwise a serif wordmark."""
+    logo = brand.get("logo_path") if brand else None
+    if logo:
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(logo) as im:
+                iw, ih = im.size
+            scale = min(max_w / iw, max_h / ih)
+            w, h = iw * scale, ih * scale
+            canvas.drawImage(logo, x_right - w, y_baseline - h * 0.15,
+                             width=w, height=h, mask="auto")
+            return
+        except Exception:
+            pass
+    # Fallback wordmark
+    canvas.setFont(ASX_SERIF_BOLD, 13 if light else 11)
+    canvas.setFillColor(ASX_WHITE if light else ASX_NAVY)
+    canvas.drawRightString(x_right, y_baseline,
+        (brand.get("company_name", "Phishield") if brand else "Phishield").upper())
+
+
+def _asx_page_painter(canvas, doc):
+    """Slide-aware background + corner brand mark.
+
+    Slide 7 (Next Steps) is full-bleed navy; everything else is white.
+    Brand mark = logo image if brand_assets/<logo_file> exists, otherwise a
+    serif wordmark from brand.company_name."""
+    canvas.saveState()
+    page = doc.page
+    brand = _ASX_CURRENT_BRAND or {}
+
+    if page == 7:
+        canvas.setFillColor(ASX_NAVY_DEEP)
+        canvas.rect(0, 0, ASX_PAGE_W, ASX_PAGE_H, stroke=0, fill=1)
+        _asx_draw_corner_mark(canvas, brand, ASX_PAGE_W - ASX_MARGIN,
+                              ASX_PAGE_H - 40, light=True)
+    else:
+        _asx_draw_corner_mark(canvas, brand, ASX_PAGE_W - ASX_MARGIN,
+                              22, light=False)
+
+    canvas.restoreState()
+
+
+# === SLIDE 1: Cover ======================================================
+
+def _assessment_slide_cover(domain, timestamp, brand):
+    """Cover: title left, optional hero image right (if brand asset exists)."""
+    sub_st = ParagraphStyle("c_sub", fontSize=11, fontName=ASX_SANS,
+                              textColor=ASX_GREY_BODY, leading=15)
+    meta_st = ParagraphStyle("c_meta", fontSize=10, fontName=ASX_SANS_BOLD,
+                               textColor=ASX_GREY_BODY, leading=14,
+                               spaceAfter=0)
+    title_st = ParagraphStyle("c_title", fontSize=60, fontName=ASX_SERIF,
+                                textColor=ASX_NAVY, leading=66)
+
+    title_block = [
+        Paragraph(f"External Passive Security Evaluation &mdash; {domain}", sub_st),
+        Paragraph(f"Executive Summary  |  Assessment date: {timestamp[:10]}", meta_st),
+        Spacer(1, 140),
+        Paragraph("Cyber Security", title_st),
+        Paragraph("Assessment", title_st),
+    ]
+
+    hero = _asx_image_or_none(brand.get("cover_hero_path"), max_width=440, max_height=430)
+    if hero is None:
+        return title_block
+
+    # Two-column layout: text left, hero right
+    container = Table([[title_block, hero]],
+                       colWidths=[440, ASX_INNER_W - 440])
+    container.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (0, 0), "TOP"),
+        ("VALIGN", (1, 0), (1, 0), "MIDDLE"),
+        ("ALIGN",  (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return [container]
+
+
+# === SLIDE 2: Overall Risk Score + Executive Summary (KPIs) ==============
+
+def _assessment_slide_score_and_kpis(results):
+    """Two-panel: dark navy left (~38% wide) with score; white right with 6 KPIs."""
+    risk_score = results.get("overall_risk_score", 0)
+    risk_level = results.get("risk_level", "Unknown")
+    rc = risk_color(risk_level)
+
+    # --- LEFT NAVY PANEL ---
+    # Built as a single Table cell with navy fill, full-bleed height of slide.
+    label_st = ParagraphStyle("p_lbl", fontSize=11, fontName=ASX_SANS,
+                                textColor=ASX_GREY_MUTED, leading=14)
+    big_score_st = ParagraphStyle("p_score", fontSize=100, fontName=ASX_SERIF,
+                                    textColor=ASX_WHITE, leading=100)
+    out_of_st = ParagraphStyle("p_out", fontSize=11, fontName=ASX_SANS,
+                                 textColor=ASX_GREY_MUTED, leading=14)
+    where_lbl_st = ParagraphStyle("p_where", fontSize=10, fontName=ASX_SANS_BOLD,
+                                    textColor=colors.HexColor("#7ba0c4"),
+                                    leading=14, spaceAfter=8)
+    band_normal_st = ParagraphStyle("p_band_n", fontSize=11, fontName=ASX_SANS,
+                                      textColor=ASX_GREY_MUTED, leading=20,
+                                      spaceAfter=2)
+    band_active_st = ParagraphStyle("p_band_a", fontSize=11, fontName=ASX_SANS_BOLD,
+                                      textColor=ASX_AMBER, leading=20,
+                                      spaceAfter=2)
+
+    # Severity-pill colour for the risk-level badge
+    pill_bg_hex = {"Low": "#16a34a", "Medium": "#d97706",
+                    "High": "#dc2626", "Critical": "#a32f25"}.get(risk_level, "#94a3b8")
+
+    # Highlight active band
+    def _band(label, rng, active):
+        st = band_active_st if active else band_normal_st
+        return Paragraph(f"<b>{label}</b>      {rng}", st)
+
+    bands = [
+        ("Low Risk", "0 – 199", 0, 199),
+        ("Medium Risk", "200 – 399", 200, 399),
+        ("High Risk", "400 – 599", 400, 599),
+        ("Critical Risk", "600 – 1000", 600, 1000),
+    ]
+    band_paras = []
+    for label, rng, lo, hi in bands:
+        active = (lo <= risk_score <= hi)
+        band_paras.append(_band(label, rng, active))
+
+    navy_inner = [
+        Paragraph("Overall Risk Score", label_st),
+        Spacer(1, 10),
+        Paragraph(f"{risk_score}", big_score_st),
+        Paragraph("out of 1000", out_of_st),
+        Spacer(1, 16),
+        _asx_pill(f"{risk_level.upper()} RISK", pill_bg_hex, font_size=14, padding_x=22),
+        Spacer(1, 28),
+        Paragraph(f"WHERE {risk_score} SITS", where_lbl_st),
+    ] + band_paras
+
+    # Wrap in a navy Table cell (fixed height = slide minus top/bottom margin)
+    navy_panel = Table(
+        [[navy_inner]],
+        colWidths=[330], rowHeights=[440]
+    )
+    navy_panel.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), ASX_NAVY_DEEP),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 36),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 24),
+        ("TOPPADDING", (0, 0), (-1, -1), 36),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 36),
+    ]))
+
+    # --- RIGHT WHITE PANEL: heading + 6 KPI tiles with coloured left border ---
+    kpis = _assessment_extract_kpis(results)
+    val_styles = {sev: ParagraphStyle(f"k_v_{sev}", fontSize=48, fontName=ASX_SERIF,
+                                       textColor=_KPI_COLOR[sev], leading=52)
+                  for sev in _KPI_COLOR}
+    lab_st = ParagraphStyle("k_l", fontSize=11, fontName=ASX_SANS_BOLD,
+                              textColor=ASX_NAVY, leading=14, spaceBefore=4)
+    desc_st = ParagraphStyle("k_d", fontSize=9, fontName=ASX_SANS,
+                               textColor=ASX_GREY_MUTED, leading=12)
+
+    def kpi_cell(k):
+        return [
+            Paragraph(k["value"], val_styles[k["severity"]]),
+            Spacer(1, 4),
+            Paragraph(k["label"], lab_st),
+            Paragraph(k["description"], desc_st),
+        ]
+
+    # Build a 2x3 grid. Each cell gets a coloured LEFT line via per-cell style.
+    cell_contents = [
+        [kpi_cell(kpis[0]), kpi_cell(kpis[1]), kpi_cell(kpis[2])],
+        [kpi_cell(kpis[3]), kpi_cell(kpis[4]), kpi_cell(kpis[5])],
+    ]
+
+    right_inner_w = ASX_INNER_W + ASX_MARGIN - 330 - 50  # post-navy width
+    kpi_grid = Table(cell_contents,
+                      colWidths=[right_inner_w / 3] * 3,
+                      rowHeights=[160, 160])
+
+    style_cmds = [
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (-1, -1), ASX_TILE_BG),
+        ("LEFTPADDING", (0, 0), (-1, -1), 18),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+        ("TOPPADDING", (0, 0), (-1, -1), 14),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+        # Outer white gutter between cells
+        ("INNERGRID", (0, 0), (-1, -1), 6, ASX_WHITE),
+    ]
+    # Coloured LEFT bar per cell — paint via LINEBEFORE with thick line
+    sev_to_color = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED}
+    flat = [kpis[0], kpis[1], kpis[2], kpis[3], kpis[4], kpis[5]]
+    for idx in range(6):
+        col = idx % 3
+        row = idx // 3
+        bar_col = sev_to_color[flat[idx]["severity"]]
+        style_cmds.append(("LINEBEFORE", (col, row), (col, row), 4, bar_col))
+
+    kpi_grid.setStyle(TableStyle(style_cmds))
+
+    right_col = [
+        Paragraph("Executive Summary", _style_slide_title(30)),
+        Paragraph("The findings that most influence cyber insurance pricing for this organisation.",
+                   _style_intro()),
+        Spacer(1, 8),
+        kpi_grid,
+    ]
+
+    # The navy panel needs to bleed to the left edge — use a 2-column container
+    # with no padding on the left side.
+    container = Table([[navy_panel, right_col]],
+                       colWidths=[330, ASX_PAGE_W - 330 - 50])
+    container.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (0, 0), 36),
+        ("RIGHTPADDING", (1, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return [container]
+
+
+# === SLIDE 3: Attacker's View (4 phase cards) ===========================
+
+def _assessment_slide_attackers_view(results):
+    phases = _assessment_kill_chain(results)
+
+    parts = [
+        Paragraph("ATTACKER'S VIEW", _style_section_label()),
+        Paragraph("How an Attacker Would Approach This Target", _style_slide_title(30)),
+        Paragraph("The same findings, mapped to the four stages of a real-world cyber attack.",
+                   _style_intro()),
+        Spacer(1, 6),
+    ]
+
+    phase_lbl = ParagraphStyle("ph_lbl", fontSize=9, fontName=ASX_SANS_BOLD,
+                                 textColor=colors.HexColor("#7ba0c4"), leading=11)
+    phase_name = ParagraphStyle("ph_name", fontSize=17, fontName=ASX_SANS_BOLD,
+                                  textColor=ASX_WHITE, leading=20)
+    headline_st = ParagraphStyle("ph_head", fontSize=11, fontName=ASX_SANS_ITAL,
+                                   textColor=ASX_BLUE_LINK, leading=14)
+    bullet_st = ParagraphStyle("ph_b", fontSize=10, fontName=ASX_SANS,
+                                 textColor=ASX_NAVY, leading=14,
+                                 leftIndent=10, firstLineIndent=-10)
+
+    def phase_card(i, ph):
+        # Header band cell
+        header_cell = [
+            Paragraph(f"PHASE {i + 1}", phase_lbl),
+            Spacer(1, 4),
+            Paragraph(ph["name"], phase_name),
+        ]
+        # Body cell
+        body_cell = [_asx_pill(ph["severity"], _ASX_SEV_HEX[ph["severity"]], font_size=11)]
+        body_cell += [Spacer(1, 12), Paragraph(ph["headline"], headline_st), Spacer(1, 8)]
+        for f in ph["findings"]:
+            body_cell.append(Paragraph(f"&ndash;&nbsp;&nbsp;{f}", bullet_st))
+            body_cell.append(Spacer(1, 4))
+        # Stack header+body via inner table
+        card = Table([[header_cell], [body_cell]],
+                      colWidths=[(ASX_INNER_W - 24) / 4],
+                      rowHeights=[80, 230])
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), ASX_NAVY_DEEP),
+            ("BACKGROUND", (0, 1), (0, 1), ASX_WHITE),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 18),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 18),
+            ("TOPPADDING", (0, 0), (0, 0), 18),
+            ("BOTTOMPADDING", (0, 0), (0, 0), 14),
+            ("TOPPADDING", (0, 1), (0, 1), 18),
+            ("BOTTOMPADDING", (0, 1), (0, 1), 18),
+            ("BOX", (0, 1), (0, 1), 0.4, colors.HexColor("#cbd5e1")),
+        ]))
+        return card
+
+    row_cells = [phase_card(i, ph) for i, ph in enumerate(phases)]
+    grid = Table([row_cells], colWidths=[(ASX_INNER_W - 24) / 4] * 4)
+    grid.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    parts.append(grid)
+    return parts
+
+
+# === SLIDE 4: Financial Impact (navy card + bar chart) ==================
+
+def _assessment_slide_financial_impact(results):
+    ins = results.get("insurance", {})
+    fin = ins.get("financial_impact", {})
+    cur_sym = "R" if fin.get("currency") == "ZAR" else "$"
+
+    mc = fin.get("monte_carlo", {})
+    mc_total = mc.get("total", {})
+    mc_p50 = mc_total.get("p50", 0)
+    mc_mode = mc_total.get("mode", 0) or fin.get("estimated_annual_loss", {}).get("most_likely", 0)
+
+    def fmt(v):
+        if not v or v == 0: return "&mdash;"
+        if v >= 1_000_000:
+            return f"{cur_sym}&nbsp;{v / 1_000_000:.2f}m"
+        return f"{cur_sym}&nbsp;{v:,.0f}"
+
+    le_scn = (fin.get("loss_exposure", {}) or {}).get("scenarios", {})
+
+    # Build (label, sub, value, bar_color) — ordered, color-graded.
+    BAR_COLORS = {
+        "most_likely":  ASX_BLUE_BAR,
+        "median":       ASX_NAVY_DEEP,
+        "return_1_100": ASX_AMBER,
+        "return_1_200": ASX_RED,
+        "return_1_250": ASX_CRITICAL,
+    }
+    rows = []
+    if isinstance(le_scn, dict) and le_scn:
+        for key in ("most_likely", "median", "return_1_100", "return_1_200", "return_1_250"):
+            sc = le_scn.get(key)
+            if not sc: continue
+            # Match Kaizen wording exactly
+            label_map = {
+                "most_likely": "Most likely outcome",
+                "median": "Median (P50)",
+                "return_1_100": "1-in-100 year event",
+                "return_1_200": "1-in-200 year event",
+                "return_1_250": "1-in-250 year event",
+            }
+            sub_map = {
+                "most_likely": "Most likely (peak)",
+                "median": "50% annual probability",
+                "return_1_100": "1% annual probability",
+                "return_1_200": "0.5% annual probability",
+                "return_1_250": "0.4% annual probability",
+            }
+            rows.append((label_map[key], sub_map[key], sc.get("loss_zar", 0), BAR_COLORS[key]))
+    else:
+        if mc_mode: rows.append(("Most likely outcome", "Most likely (peak)", mc_mode, BAR_COLORS["most_likely"]))
+        if mc_p50:  rows.append(("Median (P50)", "50% annual probability", mc_p50, BAR_COLORS["median"]))
+
+    # --- LEFT NAVY CARD with median --------------------------------------
+    eal_lbl_st = ParagraphStyle("eal_l", fontSize=11, fontName=ASX_SANS_BOLD,
+                                  textColor=colors.HexColor("#7ba0c4"), leading=14)
+    eal_val_st = ParagraphStyle("eal_v", fontSize=52, fontName=ASX_SERIF,
+                                  textColor=ASX_WHITE, leading=58)
+    eal_sub_st = ParagraphStyle("eal_s", fontSize=12, fontName=ASX_SANS,
+                                  textColor=ASX_GREY_MUTED, leading=16)
+    eal_note_st = ParagraphStyle("eal_n", fontSize=10, fontName=ASX_SANS,
+                                   textColor=ASX_GREY_MUTED, leading=14)
+
+    navy_inner = [
+        Paragraph("ESTIMATED ANNUAL LOSS", eal_lbl_st),
+        Spacer(1, 22),
+        Paragraph(fmt(mc_p50), eal_val_st),
+        Spacer(1, 6),
+        Paragraph("Median (P50) modelled outcome", eal_sub_st),
+        Spacer(1, 18),
+        Paragraph("Modelled with a Monte Carlo simulation calibrated to South African breach and ransomware data for this industry and size.",
+                   eal_note_st),
+    ]
+
+    navy_card = Table([[navy_inner]],
+                       colWidths=[290], rowHeights=[330])
+    navy_card.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), ASX_NAVY_DEEP),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 28),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 22),
+        ("TOPPADDING", (0, 0), (-1, -1), 28),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 28),
+        ("ROUNDEDCORNERS", (0, 0), (-1, -1), [12, 12, 12, 12]),
+    ]))
+
+    # --- RIGHT BAR CHART -------------------------------------------------
+    scn_lbl_st = ParagraphStyle("sn_l", fontSize=11, fontName=ASX_SANS_BOLD,
+                                  textColor=ASX_NAVY, leading=14)
+    scn_sub_st = ParagraphStyle("sn_s", fontSize=10, fontName=ASX_SANS,
+                                  textColor=ASX_GREY_MUTED, leading=13)
+    scn_val_st = ParagraphStyle("sn_v", fontSize=14, fontName=ASX_SANS_BOLD,
+                                  textColor=ASX_NAVY, leading=18)
+
+    bar_area_w = ASX_INNER_W - 290 - 30  # right column width minus padding
+    max_val = max((v for _, _, v, _ in rows), default=1) or 1
+
+    bar_chart_rows = []
+    for label, sub, val, bar_color in rows:
+        # Label + sub on one line: "Label  ·  sub"
+        title_para = Paragraph(
+            f"<b><font color='#0f2744'>{label}</font></b>"
+            f"  <font color='#94a3b8' size='10'>&middot;  {sub}</font>",
+            scn_lbl_st)
+        # Bar width proportional to value (min 30pt for visibility)
+        bw = max(30, (val / max_val) * (bar_area_w - 130))
+        bar = _asx_bar(bw, bar_color, height=20)
+        # Bar + value side by side
+        bar_row = Table([[bar, Paragraph(fmt(val), ParagraphStyle(
+            "v", fontSize=15, fontName=ASX_SANS_BOLD,
+            textColor=bar_color, leading=18, alignment=TA_LEFT))]],
+            colWidths=[bw + 6, 130])
+        bar_row.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (1, 0), (1, 0), 10),
+        ]))
+        bar_chart_rows.append([title_para])
+        bar_chart_rows.append([Spacer(1, 3)])
+        bar_chart_rows.append([bar_row])
+        bar_chart_rows.append([Spacer(1, 12)])
+
+    bar_chart = Table(bar_chart_rows, colWidths=[bar_area_w])
+    bar_chart.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    if not rows:
+        bar_chart = Paragraph("Financial model not available for this scan.", scn_sub_st)
+
+    body = Table([[navy_card, "", bar_chart]],
+                  colWidths=[290, 30, ASX_INNER_W - 290 - 30])
+    body.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (0, 0), 0),
+        ("RIGHTPADDING", (1, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    caveat_st = ParagraphStyle("cv", fontSize=9, fontName=ASX_SANS,
+                                 textColor=ASX_GREY_MUTED, leading=12,
+                                 backColor=ASX_TILE_BG, borderPadding=8)
+    return [
+        Paragraph("FINANCIAL IMPACT", _style_section_label()),
+        Paragraph("What a Breach Could Cost", _style_slide_title(30)),
+        Paragraph("Modelled annual cyber loss across a range of severity scenarios, from the most likely outcome to a rare catastrophe.",
+                   _style_intro()),
+        body,
+        Spacer(1, 10),
+        Paragraph("Figures are statistical model output. Selecting the appropriate cover limit is a decision for the insured in consultation with the broker.",
+                   caveat_st),
+    ]
+
+
+# === SLIDE 5: Why This Matters (6 stat tiles, no borders) ===============
+
+def _assessment_slide_why_this_matters():
+    stats = _load_assessment_industry_stats()
+
+    # Color emphasis on the "existential" stat (index 3, "60%+ SMB shut")
+    EMPH_INDEX = 3
+    val_navy_st = ParagraphStyle("st_v_n", fontSize=42, fontName=ASX_SERIF,
+                                   textColor=ASX_NAVY, leading=48)
+    val_red_st  = ParagraphStyle("st_v_r", fontSize=42, fontName=ASX_SERIF,
+                                   textColor=ASX_RED, leading=48)
+    lab_st = ParagraphStyle("st_l", fontSize=11, fontName=ASX_SANS_BOLD,
+                              textColor=ASX_NAVY, leading=14)
+    desc_st = ParagraphStyle("st_d", fontSize=10, fontName=ASX_SANS,
+                               textColor=ASX_GREY_MUTED, leading=13)
+
+    def stat_cell(s, emphasised=False):
+        val_st = val_red_st if emphasised else val_navy_st
+        return [
+            Paragraph(s.get("value", "&mdash;"), val_st),
+            Spacer(1, 8),
+            Paragraph(s.get("label", ""), lab_st),
+            Spacer(1, 3),
+            Paragraph(s.get("description", ""), desc_st),
+        ]
+
+    grid = Table(
+        [[stat_cell(stats[0]), stat_cell(stats[1]), stat_cell(stats[2])],
+         [stat_cell(stats[3], emphasised=True), stat_cell(stats[4]), stat_cell(stats[5])]],
+        colWidths=[ASX_INNER_W / 3] * 3,
+        rowHeights=[170, 170],
+    )
+    grid.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (-1, -1), ASX_TILE_BG),
+        ("LEFTPADDING", (0, 0), (-1, -1), 22),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 22),
+        ("TOPPADDING", (0, 0), (-1, -1), 22),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 22),
+        # White gutters between cards (no inner grid; cards separated by white space)
+        ("INNERGRID", (0, 0), (-1, -1), 10, ASX_WHITE),
+    ]))
+
+    return [
+        Paragraph("THE REALITY OF A CYBER BREACH", _style_section_label()),
+        Paragraph("Why This Matters", _style_slide_title(30)),
+        Paragraph("The financial estimate is only part of the story. A breach disrupts an entire business.",
+                   _style_intro()),
+        Spacer(1, 8),
+        grid,
+    ]
+
+
+# === SLIDE 6: Plain-Language Summary (1 banner + 3 supports) ============
+
+def _assessment_slide_plain_language(results):
+    findings = _assessment_top_findings(results)
+
+    # Reserve right-column width if a hero asset is present so the banner /
+    # supporting findings table do not overflow under the image.
+    _hero_path = (_ASX_CURRENT_BRAND or {}).get("findings_hero_path")
+    _text_w = ASX_INNER_W - 320 if _hero_path else ASX_INNER_W
+
+    parts = [
+        Paragraph("PLAIN-LANGUAGE SUMMARY", _style_section_label()),
+        Paragraph("What This Means for the Organisation", _style_slide_title(30)),
+        Paragraph("Three findings, explained in plain language.", _style_intro()),
+    ]
+
+    if not findings:
+        parts.append(Paragraph("No significant external exposure surfaced in this scan. Continue monitoring for new threats.",
+                                ParagraphStyle("pl_n", fontSize=11, fontName=ASX_SANS,
+                                                textColor=ASX_GREY_BODY, leading=15)))
+        return parts
+
+    # ----- Primary banner (top finding) -----
+    primary = findings[0]
+    banner_head_st = ParagraphStyle("pl_b_h", fontSize=14, fontName=ASX_SANS_BOLD,
+                                      textColor=ASX_WHITE, leading=18)
+    banner_sub_st = ParagraphStyle("pl_b_s", fontSize=10, fontName=ASX_SANS,
+                                     textColor=colors.HexColor("#cbd5e1"), leading=13)
+
+    banner_inner = [
+        _asx_pill(primary["level"], _ASX_SEV_HEX[primary["level"]], font_size=11),
+    ]
+    banner_text = [
+        Paragraph(primary["headline"], banner_head_st),
+        Spacer(1, 3),
+        Paragraph(primary["summary"], banner_sub_st),
+    ]
+    banner = Table([[banner_inner, banner_text]],
+                    colWidths=[140, _text_w - 140])
+    banner.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), ASX_NAVY_DEEP),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 20),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 20),
+        ("TOPPADDING", (0, 0), (-1, -1), 18),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 18),
+        ("ROUNDEDCORNERS", (0, 0), (-1, -1), [8, 8, 8, 8]),
+    ]))
+    parts.append(banner)
+    parts.append(Spacer(1, 14))
+
+    # ----- 3 supporting findings (max 3 — primary + 2 others) -----
+    sup_head_st = ParagraphStyle("pl_s_h", fontSize=12, fontName=ASX_SANS_BOLD,
+                                   textColor=ASX_NAVY, leading=15)
+    sup_body_st = ParagraphStyle("pl_s_b", fontSize=10, fontName=ASX_SANS,
+                                   textColor=ASX_GREY_BODY, leading=14)
+
+    # Use findings 1..3 as supports if available; if only 1 finding, use its
+    # own headline as a single support entry to keep visual rhythm.
+    supports = findings[1:] if len(findings) > 1 else [findings[0]]
+    while len(supports) < 3:
+        supports.append(None)
+
+    rows = []
+    for sup in supports:
+        if sup is None:
+            rows.append([Spacer(1, 4), Spacer(1, 4)])
+            continue
+        color = _ASX_SEV_COLOR[sup["level"]]
+        rows.append([
+            "",  # left coloured rule (drawn via LINEBEFORE)
+            [
+                Paragraph(sup["headline"], sup_head_st),
+                Spacer(1, 3),
+                Paragraph(sup["detail"], sup_body_st),
+            ],
+        ])
+
+    sup_tbl = Table(rows, colWidths=[14, _text_w - 14])
+    style = [
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (1, 0), (1, -1), 14),
+    ]
+    for i, sup in enumerate(supports):
+        if sup is None: continue
+        style.append(("LINEBEFORE", (0, i), (0, i), 3, _ASX_SEV_COLOR[sup["level"]]))
+    sup_tbl.setStyle(TableStyle(style))
+    parts.append(sup_tbl)
+
+    # Optional hero on the right (Kaizen-style office workers photo)
+    hero = _asx_image_or_none(
+        (_ASX_CURRENT_BRAND or {}).get("findings_hero_path"),
+        max_width=300, max_height=430)
+    if hero is None:
+        return parts
+
+    # Wrap existing parts (text) into the left column, image on the right.
+    text_col = parts
+    container = Table([[text_col, hero]],
+                       colWidths=[ASX_INNER_W - 320, 320])
+    container.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (0, 0), "TOP"),
+        ("VALIGN", (1, 0), (1, 0), "MIDDLE"),
+        ("ALIGN",  (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return [container]
+
+
+# === SLIDE 7: Next Steps (full navy bg, painted by _asx_page_painter) ===
+
+def _assessment_slide_next_steps(brand):
+    # Heading is white on navy background (painted at the page level).
+    label_st = ParagraphStyle("ns_lbl", fontSize=10, fontName=ASX_SANS_BOLD,
+                                textColor=colors.HexColor("#7ba0c4"), leading=12,
+                                spaceAfter=4)
+    title_st = ParagraphStyle("ns_t", fontSize=32, fontName=ASX_SERIF,
+                                textColor=ASX_WHITE, leading=36, spaceAfter=10)
+
+    head_st = ParagraphStyle("ns_h", fontSize=15, fontName=ASX_SANS_BOLD,
+                               textColor=ASX_WHITE, leading=18)
+    body_st = ParagraphStyle("ns_b", fontSize=10, fontName=ASX_SANS,
+                               textColor=colors.HexColor("#cbd5e1"), leading=14)
+
+    steps = [
+        (1, "Cyber Insurance Cover",
+         "Structure a tailored policy covering breach response, ransomware, business interruption, regulatory fines, and third-party liability."),
+        (2, "Vulnerability Remediation",
+         "Secure exposed services, patch critical issues, implement MFA, and strengthen posture &mdash; often reducing the premium in the process."),
+        (3, "Continuous Monitoring",
+         "Cyber risk is not static. Ongoing monitoring detects new threats as the attack surface changes."),
+    ]
+
+    def step_cell(n, h, b):
+        return [
+            _asx_circle_number(n, 40),
+            Spacer(1, 14),
+            Paragraph(h, head_st),
+            Spacer(1, 6),
+            Paragraph(b, body_st),
+        ]
+
+    grid = Table([[step_cell(*s) for s in steps]],
+                  colWidths=[ASX_INNER_W / 3] * 3,
+                  rowHeights=[260])
+    grid.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (-1, -1), ASX_NAVY_2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 24),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 24),
+        ("TOPPADDING", (0, 0), (-1, -1), 22),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 22),
+        ("INNERGRID", (0, 0), (-1, -1), 10, ASX_NAVY_DEEP),
+        ("ROUNDEDCORNERS", (0, 0), (-1, -1), [8, 8, 8, 8]),
+    ]))
+
+    cta_st = ParagraphStyle("ns_cta", fontSize=12, fontName=ASX_SANS,
+                              textColor=ASX_WHITE, leading=16)
+
+    return [
+        Paragraph("NEXT STEPS", label_st),
+        Paragraph("How We Can Help From Here", title_st),
+        Spacer(1, 6),
+        grid,
+        Spacer(1, 14),
+        Paragraph(f"To discuss cover or arrange a remediation assessment, contact your {brand['broker_label']}.",
+                   cta_st),
+    ]
+
+
+# === SLIDE 8: Disclosures ===============================================
+
+def _assessment_slide_disclosures(brand):
+    head_st = ParagraphStyle("d_h", fontSize=24, fontName=ASX_SERIF,
+                               textColor=ASX_NAVY, leading=28, spaceAfter=14)
+    sub_head_st = ParagraphStyle("d_sh", fontSize=11, fontName=ASX_SANS_BOLD,
+                                   textColor=ASX_NAVY, leading=14, spaceAfter=4)
+    body_st = ParagraphStyle("d_b", fontSize=10, fontName=ASX_SANS,
+                               textColor=ASX_GREY_BODY, leading=14, spaceAfter=10)
+
+    cn = brand["company_name"]
+    le = brand["legal_entity"]
+    def rebrand(s):
+        # Order matters: replace the full legal entity first so the short
+        # name doesn't grab it.
+        return s.replace("Phishield UMA (Pty) Ltd", le).replace("Phishield", cn)
+
+    civil = (
+        "The financial impact figures presented in this report exclude civil liability "
+        "arising from contractual or common-law obligations &mdash; specifically POPIA "
+        "Section 99 civil action, common-law delict, contractual indemnities, master "
+        "service agreement penalties, and third-party claims. These exposures cannot be "
+        "quantified from an external security assessment because they depend on contracts, "
+        "customer terms, supplier liabilities, and indemnity clauses held by the "
+        "organisation under assessment. Civil exposure is uncapped under POPIA Section 99 "
+        "and South African common law and can materially exceed the regulatory fine "
+        "figures shown. Legal counsel and the organisation's risk officer should review "
+        "contractual exposures alongside this report when determining appropriate cover. "
+        "Figures presented are statistical model output. Selection of cover limit is the "
+        "responsibility of the insured in consultation with the broker. Phishield does "
+        "not recommend a specific cover amount."
+    )
+
+    general = (
+        "This report has been prepared by Phishield based on information obtained from "
+        "third-party sources, publicly available data, client-provided information, "
+        "automated assessment tools, and/or external service providers. While reasonable "
+        "care has been taken in compiling and presenting the information contained "
+        "herein, Phishield makes no representation or warranty, express or implied, as "
+        "to the accuracy, completeness, reliability, or suitability of the information, "
+        "findings, estimates, projections, or opinions contained in this report. The "
+        "contents of this report are provided for general informational and advisory "
+        "purposes only and should not be construed as legal, financial, insurance, "
+        "cybersecurity, tax, investment, or professional advice. Any reliance placed on "
+        "this report or the information contained herein is done entirely at the "
+        "recipient's own risk. Phishield, its directors, employees, affiliates, agents, "
+        "and representatives shall not be liable for any direct, indirect, incidental, "
+        "consequential, or special loss, damage, claim, liability, cost, or expense "
+        "arising from or connected to the use of, reliance on, or decisions made based "
+        "on this report or any information contained herein. The recipient indemnifies "
+        "and holds harmless Phishield, its directors, employees, affiliates, agents, "
+        "and representatives against any claims, actions, proceedings, losses, damages, "
+        "or liabilities arising from the use of this report, reliance on its contents, "
+        "or the implementation or non-implementation of any recommendations or findings "
+        "contained herein. This report reflects information and conditions as at the "
+        "date of issue only and may not reflect subsequent developments or changes in "
+        "circumstances. Phishield accepts no obligation to update or revise this report "
+        "after issuance."
+    )
+
+    return [
+        Paragraph("Disclosures", head_st),
+        Paragraph("Civil Liability Disclosure", sub_head_st),
+        Paragraph(rebrand(civil), body_st),
+        Paragraph("General Disclosure &amp; Indemnity", sub_head_st),
+        Paragraph(rebrand(general), body_st),
+    ]
+
+
+# === ASSEMBLER ==========================================================
+
+def _build_assessment_pdf(results: dict) -> bytes:
+    """Build the 8-slide Cyber Security Assessment / Executive Summary Deck.
+
+    Brand-driven: company name, FSP entity, broker label, logo and hero
+    images all come from brand_assets/brand.json + the image files alongside
+    it. To re-brand for a different company, edit brand.json and swap the
+    image assets — no code change required."""
+    global _ASX_CURRENT_BRAND
+    _ASX_CURRENT_BRAND = _load_assessment_brand()
+    brand = _ASX_CURRENT_BRAND
+
+    buffer = io.BytesIO()
+    domain    = results.get("domain_scanned", "Unknown")
+    timestamp = results.get("scan_timestamp", datetime.utcnow().isoformat())
+
+    doc = SimpleDocTemplate(
+        buffer, pagesize=(ASX_PAGE_W, ASX_PAGE_H),
+        rightMargin=ASX_MARGIN, leftMargin=ASX_MARGIN,
+        topMargin=ASX_MARGIN - 10, bottomMargin=ASX_MARGIN - 14,
+        title=f"Cyber Security Assessment — {domain}",
+        author=brand["company_name"].upper(),
+    )
+
+    story = []
+    story += _assessment_slide_cover(domain, timestamp, brand);             story.append(PageBreak())
+    story += _assessment_slide_score_and_kpis(results);                     story.append(PageBreak())
+    story += _assessment_slide_attackers_view(results);                     story.append(PageBreak())
+    story += _assessment_slide_financial_impact(results);                   story.append(PageBreak())
+    story += _assessment_slide_why_this_matters();                          story.append(PageBreak())
+    story += _assessment_slide_plain_language(results);                     story.append(PageBreak())
+    story += _assessment_slide_next_steps(brand);                           story.append(PageBreak())
+    story += _assessment_slide_disclosures(brand)
+
+    doc.build(story, onFirstPage=_asx_page_painter, onLaterPages=_asx_page_painter)
+    return buffer.getvalue()
+
+
 def generate_pdf(results: dict, report_type: str = "full") -> bytes:
+    # New: Executive Summary Deck / Cyber Security Assessment — self-contained layout.
+    if report_type == "assessment":
+        return _build_assessment_pdf(results)
+
     buffer = io.BytesIO()
     domain    = results.get("domain_scanned", "Unknown")
     timestamp = results.get("scan_timestamp", datetime.utcnow().isoformat())
