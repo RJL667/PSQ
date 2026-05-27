@@ -1,32 +1,24 @@
 """
-Supply-chain checkers — assess risk inherited from related/supplier domains
-and from exposed third-party dependency manifests.
+Supply-chain checkers — assess risk inherited from related/supplier
+domains, exposed third-party dependency manifests, third-party JavaScript
+loaded into the page, the email-vendor surface (SPF include chain), and
+CMS-plugin attack surface.
 
 S-1 RelatedDomainsChecker (v1.0 — broker-declared only)
-    Scans broker-declared sibling/supplier domains in LITE mode (SSL +
-    DNS infrastructure ports + info_disclosure) and rolls up worst-of-N
-    findings into a single supply-chain category for the primary report.
+S-2 ThirdPartyJSChecker — Magecart / polyfill.io / missing-SRI risk
+S-3 DependencyManifestChecker — leaked package.json / requirements.txt etc.
+S-4 EmailVendorSurfaceChecker — SPF include-chain SaaS sender surface
+S-10 CMSPluginSBOMChecker — WordPress plugin enumeration (top SA SME
+    ransomware entry vector)
 
-    v1.1 (deferred) — auto-discovery via cert SAN, WHOIS registrant match,
-    and analytics-ID correlation; broker confirms via the existing
-    pre-flight regulatory-flag UX. See project memory:
-    project_related_domain_discovery.md.
-
-    Civil-liability rationale: under aggregator / supplier-liability theory
-    (a single Lloyd's Talbot precedent: mrcourier.co.uk), a breach at a
-    declared supplier can be imputed back to the insured. This category
-    feeds the DBI civil-liability scenario in financial_impact.
-
-S-3 DependencyManifestChecker
-    Probes the web root for exposed dependency manifests (package.json,
-    composer.json, requirements.txt, Gemfile.lock, go.mod, etc.).
-    Each exposed manifest reveals the exact dependency + version map an
-    attacker needs to chain known CVEs into a working exploit (OSV-chain
-    discovery).
+Cross-references to project memory:
+    project_scanner_systemic_sweep_2026-05-27.md — original integration map
+    project_related_domain_discovery.md — S-1 v1.1 auto-discovery design
 """
 
 import json
 import re
+from urllib.parse import urlparse
 
 from scanner_utils import *
 from checkers_core import SSLChecker
@@ -380,4 +372,440 @@ class DependencyManifestChecker:
                     "ranges leaked"
                 )
 
+        return result
+
+
+class ThirdPartyJSChecker:
+    # Domains with documented supply-chain compromises. Keep tight: only
+    # confirmed incidents to avoid noisy "trusted CDN looks scary" findings.
+    KNOWN_COMPROMISED_HOSTS = {
+        "polyfill.io":         "polyfill.io was sold and weaponised (2024)",
+        "cdn.polyfill.io":     "polyfill.io was sold and weaponised (2024)",
+        "bootcss.com":         "bootcss.com hosted Magecart skimmer (2018)",
+        "bootcdn.net":         "bootcdn.net hosted Magecart skimmer (2018)",
+    }
+
+    # Common safe CDN host suffixes — used only to label, not to whitelist.
+    KNOWN_CDN_SUFFIXES = (
+        "googleapis.com", "gstatic.com", "googletagmanager.com",
+        "cloudflare.com", "cloudfront.net", "akamaihd.net", "akamaized.net",
+        "fastly.net", "azureedge.net", "msecnd.net",
+        "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com",
+        "jspm.io", "skypack.dev",
+        "facebook.net", "twitter.com", "youtube.com",
+        "hotjar.com", "intercom.io", "hubspot.com",
+    )
+
+    SCRIPT_RE = re.compile(
+        r'<script\b([^>]*)>', re.IGNORECASE)
+    SRC_RE = re.compile(
+        r'src\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+    INTEGRITY_RE = re.compile(
+        r'integrity\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+    CROSSORIGIN_RE = re.compile(
+        r'crossorigin\s*=\s*["\']?([^"\'\s>]+)', re.IGNORECASE)
+
+    def _host_of(self, src: str, primary: str) -> str:
+        # Resolves protocol-relative + relative URLs to a host for
+        # first-party / third-party classification.
+        try:
+            if src.startswith("//"):
+                src = "https:" + src
+            elif src.startswith("/") or not src.startswith(("http://", "https://")):
+                return primary  # first-party
+            return (urlparse(src).hostname or "").lower()
+        except Exception:
+            return ""
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "total_scripts": 0,
+            "third_party_count": 0,
+            "missing_sri_count": 0,
+            "compromised_host_count": 0,
+            "third_party_hosts": [],
+            "missing_sri_scripts": [],
+            "compromised_scripts": [],
+            "score": 100,
+            "issues": [],
+        }
+        try:
+            from http_client import HTTP
+            r = HTTP.get(f"https://{domain}", timeout=12, allow_redirects=True)
+        except Exception as e:
+            result["status"] = "error"; result["error"] = str(e); return result
+        if r is None or r.status_code >= 400:
+            result["status"] = "error"
+            result["error"] = f"HTTP {r.status_code if r is not None else 'no-response'}"
+            return result
+
+        body = r.text[:300_000]
+        primary = domain.lower()
+        hosts = {}  # host -> {"count": int, "first_src": str}
+        for m in self.SCRIPT_RE.finditer(body):
+            attrs = m.group(1)
+            src_m = self.SRC_RE.search(attrs)
+            if not src_m:
+                continue
+            src = src_m.group(1)
+            host = self._host_of(src, primary)
+            result["total_scripts"] += 1
+            is_third = host and not (host == primary or host.endswith("." + primary))
+            if not is_third:
+                continue
+            result["third_party_count"] += 1
+            hosts.setdefault(host, {"count": 0, "first_src": src})
+            hosts[host]["count"] += 1
+
+            sri = self.INTEGRITY_RE.search(attrs)
+            if not sri:
+                result["missing_sri_count"] += 1
+                if len(result["missing_sri_scripts"]) < 10:
+                    result["missing_sri_scripts"].append({
+                        "host": host, "src": src[:160],
+                    })
+
+            if host in self.KNOWN_COMPROMISED_HOSTS or any(
+                    host == h or host.endswith("." + h)
+                    for h in self.KNOWN_COMPROMISED_HOSTS):
+                result["compromised_host_count"] += 1
+                matched = next(
+                    (h for h in self.KNOWN_COMPROMISED_HOSTS
+                     if host == h or host.endswith("." + h)),
+                    host,
+                )
+                result["compromised_scripts"].append({
+                    "host": host, "src": src[:160],
+                    "reason": self.KNOWN_COMPROMISED_HOSTS.get(matched, ""),
+                })
+
+        result["third_party_hosts"] = [
+            {
+                "host": h,
+                "count": meta["count"],
+                "known_cdn": any(h == k or h.endswith("." + k)
+                                  for k in self.KNOWN_CDN_SUFFIXES),
+            }
+            for h, meta in sorted(hosts.items(), key=lambda kv: -kv[1]["count"])
+        ]
+
+        # Scoring: SRI is the practical control. Compromised host = critical.
+        penalty = 0
+        if result["compromised_host_count"] > 0:
+            penalty += 60 * result["compromised_host_count"]
+            result["issues"].append(
+                f"CRITICAL: {result['compromised_host_count']} script(s) from "
+                "known-compromised CDN(s) — replace immediately"
+            )
+        if result["third_party_count"] > 0:
+            sri_pct = (
+                (result["third_party_count"] - result["missing_sri_count"])
+                / result["third_party_count"]
+            )
+            if sri_pct < 0.25:
+                penalty += 20
+                result["issues"].append(
+                    f"{result['missing_sri_count']} of "
+                    f"{result['third_party_count']} third-party scripts "
+                    "lack Subresource Integrity (SRI) hashes — Magecart / "
+                    "supply-chain tampering risk"
+                )
+            elif sri_pct < 0.75:
+                penalty += 10
+                result["issues"].append(
+                    f"{result['missing_sri_count']} third-party scripts "
+                    "lack SRI hashes — supply-chain tampering risk"
+                )
+        # Surface volume itself (lots of unique third-party hosts widens the
+        # attack surface even when each script is individually clean)
+        if len(hosts) > 15:
+            penalty += 5
+            result["issues"].append(
+                f"{len(hosts)} distinct third-party script origins — "
+                "consider consolidating to reduce supply-chain surface"
+            )
+        result["score"] = max(0, 100 - penalty)
+        return result
+
+
+class EmailVendorSurfaceChecker:
+    # SPF include-chain patterns → known email SaaS vendors. Match by
+    # suffix; first match wins. Sourced from each vendor's published SPF
+    # documentation.
+    VENDOR_PATTERNS = [
+        ("sendgrid",            ["sendgrid.net", "_spf.sendgrid.net"]),
+        ("mailgun",             ["mailgun.org"]),
+        ("mailchimp",           ["servers.mcsv.net", "_spf.mailchimp.com"]),
+        ("amazon_ses",          ["amazonses.com"]),
+        ("microsoft_365",       ["spf.protection.outlook.com",
+                                  "spf.messaging.microsoft.com"]),
+        ("google_workspace",    ["_spf.google.com", "aspmx.googlemail.com"]),
+        ("zoho",                ["zoho.com", "_spf.zoho.eu", "zohomail.com"]),
+        ("klaviyo",             ["_spf.klaviyo.com"]),
+        ("hubspot",             ["_spf.hubspotemail.net", "mail.hubspot.com"]),
+        ("constant_contact",    ["_spf.constantcontact.com"]),
+        ("activecampaign",      ["spf.activecampaign.com"]),
+        ("mailjet",             ["spf.mailjet.com"]),
+        ("postmark",            ["spf.mtasv.net"]),
+        ("sparkpost",           ["sparkpostmail.com"]),
+        ("sendinblue",          ["spf.sendinblue.com", "spf.brevo.com"]),
+        ("zendesk",             ["mail.zendesk.com"]),
+        ("freshdesk",           ["email.freshdesk.com"]),
+        ("intercom",            ["_spf.intercom.io"]),
+        ("salesforce",          ["_spf.salesforce.com",
+                                  "_spf.exacttarget.com"]),
+        ("oracle_responsys",    ["rsys.net"]),
+        ("pardot",              ["_spf.pardot.com"]),
+        ("marketo",             ["mktomail.com"]),
+        ("netcore",             ["_spf.netcorecloud.net"]),
+        ("everlytic",           ["_spf.everlytic.net"]),
+    ]
+
+    INCLUDE_RE = re.compile(r"include:(\S+)")
+
+    def _classify(self, include_domain: str) -> str:
+        d = include_domain.lower().rstrip(".")
+        for vendor, patterns in self.VENDOR_PATTERNS:
+            if any(d == p or d.endswith("." + p) for p in patterns):
+                return vendor
+        return ""
+
+    def _fetch_spf(self, domain: str) -> str:
+        try:
+            import dns.resolver
+            answers = dns.resolver.resolve(domain, "TXT", lifetime=DEFAULT_TIMEOUT)
+            for rdata in answers:
+                txt = "".join(
+                    s.decode() if isinstance(s, bytes) else s
+                    for s in rdata.strings
+                )
+                if txt.startswith("v=spf1"):
+                    return txt
+        except Exception:
+            return ""
+        return ""
+
+    def _walk_includes(self, domain: str, depth: int = 0,
+                       seen: set = None) -> list:
+        if depth > 4:
+            return []
+        seen = seen if seen is not None else set()
+        if domain in seen:
+            return []
+        seen.add(domain)
+        record = self._fetch_spf(domain)
+        if not record:
+            return []
+        includes = self.INCLUDE_RE.findall(record)
+        out = []
+        for inc in includes[:10]:
+            out.append({"include": inc, "depth": depth})
+            out.extend(self._walk_includes(inc, depth + 1, seen))
+        return out
+
+    def _fetch_dmarc_policy(self, domain: str) -> str:
+        try:
+            import dns.resolver
+            answers = dns.resolver.resolve(f"_dmarc.{domain}", "TXT",
+                                            lifetime=DEFAULT_TIMEOUT)
+            for rdata in answers:
+                txt = "".join(
+                    s.decode() if isinstance(s, bytes) else s
+                    for s in rdata.strings
+                )
+                if txt.startswith("v=DMARC1"):
+                    m = re.search(r"p\s*=\s*(\w+)", txt)
+                    if m:
+                        return m.group(1).lower()
+        except Exception:
+            return ""
+        return ""
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "spf_includes": [],
+            "vendors_detected": [],
+            "vendor_count": 0,
+            "unknown_count": 0,
+            "dmarc_policy": "",
+            "weak_dmarc": False,
+            "score": 100,
+            "issues": [],
+        }
+        includes = self._walk_includes(domain)
+        if not includes:
+            result["status"] = "no_data"
+            return result
+        result["spf_includes"] = includes
+        vendor_map = {}
+        for entry in includes:
+            vendor = self._classify(entry["include"])
+            if vendor:
+                vendor_map.setdefault(vendor, []).append(entry["include"])
+            else:
+                result["unknown_count"] += 1
+        result["vendors_detected"] = [
+            {"vendor": v, "includes": sorted(set(incs))}
+            for v, incs in sorted(vendor_map.items())
+        ]
+        result["vendor_count"] = len(vendor_map)
+        result["dmarc_policy"] = self._fetch_dmarc_policy(domain)
+        result["weak_dmarc"] = result["dmarc_policy"] in ("", "none")
+
+        # Scoring rationale: the vendor surface itself is informational
+        # (broker needs to see who can send mail on your behalf), but a
+        # weak DMARC policy combined with a wide vendor surface means a
+        # breach at any of N vendors lands phishing in customer inboxes.
+        penalty = 0
+        if result["vendor_count"] >= 3:
+            penalty += 5
+        if result["vendor_count"] >= 6:
+            penalty += 10
+        if result["weak_dmarc"] and result["vendor_count"] >= 1:
+            penalty += 20
+            result["issues"].append(
+                f"{result['vendor_count']} email-vendor(s) in SPF chain with "
+                f"DMARC p={result['dmarc_policy'] or 'missing'} — a breach at "
+                "any of these vendors enables direct phishing impersonation"
+            )
+        elif result["vendor_count"] >= 6:
+            result["issues"].append(
+                f"{result['vendor_count']} email-vendor(s) in SPF chain — wide "
+                "fourth-party surface; review whether each still needs send "
+                "authority"
+            )
+        result["score"] = max(0, 100 - penalty)
+        return result
+
+
+class CMSPluginSBOMChecker:
+    # Top SA SME ransomware entry vector — outdated WordPress plugins.
+    # Probe the top community plugins. List is small and conservative —
+    # the goal is "SBOM proxy" (what plugins are in use), not exhaustive
+    # enumeration. Each entry: (slug, common_dirname).
+    POPULAR_PLUGINS = [
+        ("contact-form-7", "contact-form-7"),
+        ("elementor", "elementor"),
+        ("woocommerce", "woocommerce"),
+        ("yoast-seo", "wordpress-seo"),
+        ("akismet", "akismet"),
+        ("jetpack", "jetpack"),
+        ("wpforms-lite", "wpforms-lite"),
+        ("classic-editor", "classic-editor"),
+        ("really-simple-ssl", "really-simple-ssl"),
+        ("updraftplus", "updraftplus"),
+        ("all-in-one-seo-pack", "all-in-one-seo-pack"),
+        ("wordfence", "wordfence"),
+        ("duplicator", "duplicator"),
+        ("wp-super-cache", "wp-super-cache"),
+        ("litespeed-cache", "litespeed-cache"),
+        ("autoptimize", "autoptimize"),
+        ("monsterinsights", "google-analytics-for-wordpress"),
+        ("loginizer", "loginizer"),
+        ("redirection", "redirection"),
+        ("better-search-replace", "better-search-replace"),
+        ("wp-mail-smtp", "wp-mail-smtp"),
+        ("ml-slider", "ml-slider"),
+        ("nextgen-gallery", "nextgen-gallery"),
+        ("revslider", "revslider"),    # historical CVE-2014-9734 etc.
+        ("simply-static", "simply-static"),
+    ]
+
+    README_VERSION_RE = re.compile(
+        r"^stable tag:\s*([0-9][\w.\-]*)", re.IGNORECASE | re.MULTILINE)
+
+    def _is_wordpress(self, domain: str) -> bool:
+        from http_client import HTTP
+        # Cheap discriminator: HEAD /wp-content/ — if directory exists and
+        # is readable (200/301/403 with WP signature), we're on WP. Pure
+        # 404 means almost certainly not WordPress.
+        for path in ("/wp-content/", "/wp-login.php", "/wp-includes/"):
+            try:
+                head = HTTP.head(f"https://{domain}{path}", timeout=6,
+                                  allow_redirects=False)
+                if head is None:
+                    continue
+                if head.status_code in (200, 301, 302, 401, 403):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _probe_plugin(self, base: str, dirname: str) -> dict:
+        from http_client import HTTP
+        plugin_root = f"{base}/wp-content/plugins/{dirname}/"
+        try:
+            head = HTTP.head(plugin_root, timeout=6, allow_redirects=False)
+        except Exception:
+            return None
+        if head is None or head.status_code not in (200, 301, 302, 401, 403):
+            return None
+        version = ""
+        try:
+            r = HTTP.get(f"{plugin_root}readme.txt", timeout=6,
+                          allow_redirects=False)
+            if r is not None and r.status_code == 200 and r.text:
+                m = self.README_VERSION_RE.search(r.text[:8000])
+                if m:
+                    version = m.group(1)
+        except Exception:
+            pass
+        return {"slug": dirname, "version": version,
+                "status_code": head.status_code}
+
+    def check(self, domain: str) -> dict:
+        result = {
+            "status": "completed",
+            "is_wordpress": False,
+            "plugins_detected": [],
+            "plugin_count": 0,
+            "versioned_count": 0,
+            "score": 100,
+            "issues": [],
+        }
+        if not self._is_wordpress(domain):
+            result["status"] = "skipped"
+            return result
+        result["is_wordpress"] = True
+        base = f"https://{domain}"
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = {
+                ex.submit(self._probe_plugin, base, dirname): slug
+                for slug, dirname in self.POPULAR_PLUGINS
+            }
+            try:
+                for fut in as_completed(futures, timeout=60):
+                    try:
+                        out = fut.result(timeout=8)
+                    except Exception:
+                        continue
+                    if out:
+                        result["plugins_detected"].append(out)
+            except TimeoutError:
+                pass
+
+        result["plugin_count"] = len(result["plugins_detected"])
+        result["versioned_count"] = sum(
+            1 for p in result["plugins_detected"] if p["version"])
+
+        # Scoring: every detected plugin is attack surface; readable
+        # version strings are a directly-actionable CVE-discovery signal.
+        penalty = 0
+        if result["plugin_count"] >= 1:
+            penalty += min(30, result["plugin_count"] * 3)
+        if result["versioned_count"] >= 1:
+            penalty += min(20, result["versioned_count"] * 5)
+            result["issues"].append(
+                f"{result['versioned_count']} WordPress plugin(s) expose "
+                "version strings in /wp-content/plugins/<plugin>/readme.txt — "
+                "directly actionable for CVE chaining"
+            )
+        if result["plugin_count"] >= 8:
+            result["issues"].append(
+                f"{result['plugin_count']} popular WordPress plugins detected — "
+                "wide CMS-plugin attack surface (top SA SME ransomware vector)"
+            )
+        result["score"] = max(0, 100 - penalty)
         return result

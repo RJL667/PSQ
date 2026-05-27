@@ -488,6 +488,9 @@ class RiskScorer:
         "financial_impact":     0.02,
         "related_domains":      0.04,
         "dependency_manifests": 0.04,
+        "third_party_js":       0.03,
+        "email_vendor_surface": 0.02,
+        "cms_plugin_sbom":      0.03,
     }  # Sum — includes all checkers from both branches
 
     RECOMMENDATIONS = {
@@ -689,6 +692,18 @@ class RiskScorer:
         dm = results.get("dependency_manifests", {})
         dm_risk = inv(dm.get("score", 100))
 
+        # Third-party JavaScript supply chain (Magecart / SRI / polyfill.io).
+        tpjs = results.get("third_party_js", {})
+        tpjs_risk = inv(tpjs.get("score", 100)) if tpjs.get("status") == "completed" else 0
+
+        # Email-vendor surface (SPF include chain + DMARC).
+        evs = results.get("email_vendor_surface", {})
+        evs_risk = inv(evs.get("score", 100)) if evs.get("status") == "completed" else 0
+
+        # CMS plugin SBOM (WordPress only — skipped otherwise).
+        cms = results.get("cms_plugin_sbom", {})
+        cms_risk = inv(cms.get("score", 100)) if cms.get("status") == "completed" else 0
+
         weighted = (
             ssl_risk         * effective_weights.get("ssl", 0) +
             email_risk       * effective_weights.get("email_security", 0) +
@@ -716,7 +731,10 @@ class RiskScorer:
             dbi_risk         * effective_weights.get("data_breach_index", 0) +
             fin_risk         * effective_weights.get("financial_impact", 0) +
             rd_risk          * effective_weights.get("related_domains", 0) +
-            dm_risk          * effective_weights.get("dependency_manifests", 0)
+            dm_risk          * effective_weights.get("dependency_manifests", 0) +
+            tpjs_risk        * effective_weights.get("third_party_js", 0) +
+            evs_risk         * effective_weights.get("email_vendor_surface", 0) +
+            cms_risk         * effective_weights.get("cms_plugin_sbom", 0)
         )
 
         risk_score = round(weighted * 10)

@@ -99,6 +99,9 @@ CHECKER_MANIFEST = [
         {"id": "fraudulent_domains", "label": "Lookalike Domains"},
         {"id": "related_domains", "label": "Supply-Chain / Related Domains"},
         {"id": "dependency_manifests", "label": "Exposed Dependency Manifests"},
+        {"id": "third_party_js", "label": "Third-Party JavaScript"},
+        {"id": "email_vendor_surface", "label": "Email-Vendor Surface (SPF)"},
+        {"id": "cms_plugin_sbom", "label": "CMS Plugin Surface"},
     ]},
     {"section": "Technology & Governance", "checkers": [
         {"id": "tech_stack", "label": "Technology Stack"},
