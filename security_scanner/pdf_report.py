@@ -3460,6 +3460,11 @@ _INSURANCE_CONTEXT = {
     "Est. Annual Loss": "FAIR-modelled expected loss; basis for coverage limits and premium calculation",
     "Fraudulent Domains": "Brand impersonation risk; phishing campaigns targeting clients and employees",
     "Web Ranking (Tranco)": "Site visibility indicator; higher-profile targets attract more automated attacks",
+    "Supply-Chain Risk": "Cumulative supplier/CDN/vendor-breach exposure; ~12% of breaches are SC-vectored (IBM CoDB 2024)",
+    "Compromised CDN": "Magecart-class card-skimmer risk; confirmed-compromised CDN serving scripts on the homepage",
+    "Vendor Breach Match": "Vendor in mail-path had a confirmed public breach in the lookback window; key rotation often incomplete",
+    "Exposed Manifests + CVEs": "Public dependency map cross-referenced via OSV.dev; actionable CVE patch targets",
+    "Related-Domain Critical": "Critical finding on a broker-declared supplier; civil-liability inflator in financial model",
 }
 
 
@@ -3546,6 +3551,113 @@ def build_summary_table(results: dict, S) -> Table:
     wr_label = f"#{wr_rank:,}" if wr_rank else "Unranked"
     rows.append(row("Web Ranking (Tranco)", wr_label,
                      C_GREEN if wr.get("in_list") else C_AMBER))
+
+    # ── Supply-Chain section ────────────────────────────────────────
+    # One aggregated row showing the worst signal across the 6
+    # supply-chain categories, then individual rows ONLY for the
+    # findings severe enough to warrant the underwriter's eye.
+    rd_cat = cats.get("related_domains", {})
+    dm_cat = cats.get("dependency_manifests", {})
+    tpjs_cat = cats.get("third_party_js", {})
+    evs_cat = cats.get("email_vendor_surface", {})
+    cms_cat = cats.get("cms_plugin_sbom", {})
+    vb_cat = cats.get("vendor_breach", {})
+
+    sc_findings = []
+    sc_crit_count = 0
+    sc_high_count = 0
+    if rd_cat.get("status") == "completed":
+        c = rd_cat.get("critical_count", 0)
+        h = rd_cat.get("high_count", 0)
+        sc_crit_count += c
+        sc_high_count += h
+        if c or h:
+            sc_findings.append(f"{c + h} sibling finding(s)")
+    if dm_cat.get("status") == "completed":
+        crit_cves = dm_cat.get("total_critical_cves", 0)
+        manifests = len(dm_cat.get("exposed_manifests", []) or [])
+        if crit_cves > 0:
+            sc_crit_count += 1
+            sc_findings.append(f"{crit_cves} crit CVE(s) via {manifests} manifest(s)")
+        elif manifests > 0:
+            sc_high_count += 1
+            sc_findings.append(f"{manifests} manifest(s) exposed")
+    if tpjs_cat.get("status") == "completed":
+        comp = tpjs_cat.get("compromised_host_count", 0)
+        missing_sri = tpjs_cat.get("missing_sri_count", 0)
+        third = tpjs_cat.get("third_party_count", 0)
+        if comp > 0:
+            sc_crit_count += 1
+            sc_findings.append(f"{comp} compromised CDN script(s)")
+        elif third > 0 and missing_sri / max(1, third) > 0.5:
+            sc_high_count += 1
+            sc_findings.append(f"{missing_sri}/{third} 3rd-party scripts w/o SRI")
+    if evs_cat.get("status") == "completed":
+        if evs_cat.get("weak_dmarc") and evs_cat.get("vendor_count", 0) >= 1:
+            sc_high_count += 1
+            sc_findings.append(
+                f"{evs_cat['vendor_count']} email vendor(s) + weak DMARC")
+    if cms_cat.get("status") == "completed" and cms_cat.get("is_wordpress"):
+        v = cms_cat.get("versioned_count", 0)
+        if v >= 1:
+            sc_high_count += 1
+            sc_findings.append(f"{v} WP plugin version(s) readable")
+    if vb_cat.get("status") == "completed":
+        c = vb_cat.get("critical_match_count", 0)
+        h = vb_cat.get("high_match_count", 0)
+        if c > 0:
+            sc_crit_count += 1
+            sc_findings.append(f"{c} critical vendor breach match(es)")
+        elif h > 0:
+            sc_high_count += 1
+            sc_findings.append(f"{h} high-severity vendor breach match(es)")
+
+    # Render the aggregate row when any supply-chain checker reported
+    # data (status=completed somewhere) — broker should see the
+    # baseline even when clean.
+    sc_any_completed = any(
+        c.get("status") == "completed" for c in
+        (rd_cat, dm_cat, tpjs_cat, evs_cat, cms_cat, vb_cat)
+    )
+    if sc_any_completed:
+        if sc_crit_count > 0:
+            sc_label = f"{sc_crit_count} critical / {sc_high_count} high"
+            sc_col = C_CRITICAL
+        elif sc_high_count > 0:
+            sc_label = f"{sc_high_count} high-severity finding(s)"
+            sc_col = C_RED if sc_high_count > 2 else C_AMBER
+        else:
+            sc_label = "Clean"
+            sc_col = C_GREEN
+        rows.append(row("Supply-Chain Risk", sc_label, sc_col))
+
+    # Spotlight rows — only when the underwriter genuinely benefits.
+    if tpjs_cat.get("compromised_host_count", 0) > 0:
+        rows.append(row(
+            "Compromised CDN",
+            f"{tpjs_cat['compromised_host_count']} script(s) — replace immediately",
+            C_CRITICAL,
+        ))
+    if vb_cat.get("critical_match_count", 0) > 0:
+        top = (vb_cat.get("matches") or [{}])[0]
+        months = max(1, (top.get("age_days") or 0) // 30)
+        rows.append(row(
+            "Vendor Breach Match",
+            f"{top.get('vendor', '?')} ~{months} mo ago ({top.get('severity','')})",
+            C_CRITICAL,
+        ))
+    if dm_cat.get("total_critical_cves", 0) > 0:
+        rows.append(row(
+            "Exposed Manifests + CVEs",
+            f"{dm_cat['total_critical_cves']} critical/high CVE(s) (OSV.dev)",
+            C_CRITICAL,
+        ))
+    if rd_cat.get("critical_count", 0) > 0:
+        rows.append(row(
+            "Related-Domain Critical",
+            f"{rd_cat['critical_count']} critical finding(s) on supplier(s)",
+            C_CRITICAL,
+        ))
 
     tbl = Table(rows, colWidths=[18, 45 * mm, INNER_W - 18 - 45 * mm])
     style = [
@@ -4647,7 +4759,272 @@ def _assessment_slide_attackers_view(results):
     return parts
 
 
-# === SLIDE 4: Financial Impact (navy card + bar chart) ==================
+# === SLIDE 4: Supply-Chain Exposure =====================================
+# Sits between Attacker's View (how) and Financial Impact (cost) because
+# supply-chain risk bridges them: it amplifies both the probability of a
+# breach (vulnerability uplift in the financial model) and the
+# narrative around HOW the insured gets compromised (vendor / CDN /
+# declared-supplier paths).
+
+def _assessment_slide_supply_chain(results):
+    cats = results.get("categories", {})
+    rd = cats.get("related_domains", {})
+    dm = cats.get("dependency_manifests", {})
+    tpjs = cats.get("third_party_js", {})
+    evs = cats.get("email_vendor_surface", {})
+    cms = cats.get("cms_plugin_sbom", {})
+    vb = cats.get("vendor_breach", {})
+
+    # Per-card severity classification — mirrors how the body PDF
+    # cat_* helpers compute traffic-light colours, but condensed.
+    # Returns (severity, metric_text) for "skipped" / not-run states;
+    # returns None when the checker completed and per-card logic should
+    # build the metric from real fields.
+    def _classify(payload):
+        if payload.get("status") == "skipped":
+            return "INFO", "Not applicable / not detected"
+        if payload.get("status") not in ("completed",):
+            return "INFO", "Not run"
+        return None
+
+    cards = []
+
+    # S-1 Related Domains
+    cls = _classify(rd)
+    if cls:
+        sev, metric = cls
+    else:
+        crit = rd.get("critical_count", 0)
+        scanned = rd.get("scanned_count", 0)
+        declared = rd.get("declared_count", 0)
+        if declared == 0:
+            sev, metric = "INFO", "No broker-declared suppliers"
+        elif crit > 0:
+            sev = "CRITICAL"
+            metric = f"{crit} critical of {scanned} declared supplier(s)"
+        elif rd.get("high_count", 0) > 0:
+            sev = "HIGH"
+            metric = f"{rd['high_count']} of {scanned} suppliers below 60/100"
+        else:
+            sev = "LOW"
+            metric = f"{scanned} declared supplier(s) — clean"
+    cards.append({
+        "label": "S-1 Related Domains",
+        "headline": "Civil-liability inflator (Talbot mrcourier precedent)",
+        "severity": sev,
+        "metric": metric,
+        "support": "Declared sibling/supplier domains scanned in LITE mode; "
+                   "worst-of-N feeds the vulnerability uplift.",
+    })
+
+    # S-3 Dependency Manifests
+    cls = _classify(dm)
+    if cls:
+        sev, metric = cls
+    else:
+        crit_cves = dm.get("total_critical_cves", 0)
+        manifests = len(dm.get("exposed_manifests", []) or [])
+        if crit_cves > 0:
+            sev = "CRITICAL"
+            metric = f"{crit_cves} CVE(s) actionable via OSV.dev"
+        elif manifests > 0:
+            sev = "HIGH"
+            metric = f"{manifests} manifest(s) exposed — OSV chain risk"
+        else:
+            sev = "LOW"
+            metric = "No public manifests at web root"
+    cards.append({
+        "label": "S-3 Dependency Manifests",
+        "headline": "Leaked version map enables zero-recon CVE chaining",
+        "severity": sev,
+        "metric": metric,
+        "support": "Probes 15 manifest paths (npm/PyPI/Packagist/RubyGems/Go/"
+                   "crates.io/Maven); OSV.dev cross-references exact versions.",
+    })
+
+    # S-2 Third-Party JS
+    cls = _classify(tpjs)
+    if cls:
+        sev, metric = cls
+    else:
+        comp = tpjs.get("compromised_host_count", 0)
+        missing = tpjs.get("missing_sri_count", 0)
+        third = tpjs.get("third_party_count", 0)
+        if comp > 0:
+            sev = "CRITICAL"
+            metric = f"{comp} compromised CDN script(s) live"
+        elif third and missing / max(1, third) > 0.5:
+            sev = "HIGH"
+            metric = f"{missing}/{third} third-party scripts without SRI"
+        else:
+            sev = "LOW"
+            metric = f"{third} third-party scripts — SRI coverage OK"
+    cards.append({
+        "label": "S-2 Third-Party JavaScript",
+        "headline": "Magecart card-skimmer channel (Polyfill.io 2024)",
+        "severity": sev,
+        "metric": metric,
+        "support": "Parses homepage &lt;script&gt; tags; flags known-"
+                   "compromised CDNs and SRI gaps on third-party origins.",
+    })
+
+    # S-4 Email-Vendor Surface
+    cls = _classify(evs)
+    if cls:
+        sev, metric = cls
+    else:
+        count = evs.get("vendor_count", 0)
+        weak = evs.get("weak_dmarc", False)
+        policy = evs.get("dmarc_policy") or "missing"
+        if weak and count >= 1:
+            sev = "HIGH"
+            metric = f"{count} vendor(s) + DMARC p={policy}"
+        elif count >= 6:
+            sev = "MEDIUM"
+            metric = f"{count} vendor(s) — wide fourth-party surface"
+        else:
+            sev = "LOW"
+            metric = f"{count} vendor(s) — DMARC p={policy}"
+    cards.append({
+        "label": "S-4 Email-Vendor Surface",
+        "headline": "Phishing-via-supplier when DMARC is weak",
+        "severity": sev,
+        "metric": metric,
+        "support": "Walks the SPF include: chain; classifies against 24 known "
+                   "email-SaaS patterns; cross-references DMARC policy.",
+    })
+
+    # S-10 CMS Plugin SBOM
+    cls = _classify(cms)
+    if cls:
+        sev, metric = cls
+    else:
+        if not cms.get("is_wordpress"):
+            sev, metric = "INFO", "Not WordPress"
+        else:
+            v = cms.get("versioned_count", 0)
+            cnt = cms.get("plugin_count", 0)
+            if v >= 1:
+                sev = "HIGH"
+                metric = f"{v} plugin(s) with readable version"
+            elif cnt >= 5:
+                sev = "MEDIUM"
+                metric = f"{cnt} popular plugins enumerable"
+            else:
+                sev = "LOW"
+                metric = f"{cnt} plugin(s) detected"
+    cards.append({
+        "label": "S-10 CMS Plugin Surface",
+        "headline": "Top SA SME ransomware vector (Patchstack 2024)",
+        "severity": sev,
+        "metric": metric,
+        "support": "WordPress-only. Enumerates 25 popular plugin slugs; "
+                   "harvests version strings from readme.txt 'Stable tag:'.",
+    })
+
+    # S-5 Vendor Breach Correlation
+    cls = _classify(vb)
+    if cls:
+        sev, metric = cls
+    else:
+        crit = vb.get("critical_match_count", 0)
+        high = vb.get("high_match_count", 0)
+        if crit > 0:
+            sev = "CRITICAL"
+            top = (vb.get("matches") or [{}])[0]
+            months = max(1, (top.get("age_days") or 0) // 30)
+            metric = f"{top.get('vendor', '?')} ~{months} mo ago ({top.get('severity','')})"
+        elif high > 0:
+            sev = "HIGH"
+            metric = f"{high} high-severity vendor match(es)"
+        elif vb.get("matches"):
+            sev = "MEDIUM"
+            metric = f"{len(vb['matches'])} historical vendor match(es)"
+        else:
+            sev = "LOW"
+            metric = "No vendor matches in lookback window"
+    cards.append({
+        "label": "S-5 Vendor Breach Correlation",
+        "headline": "Customer-key rotation often incomplete post-breach",
+        "severity": sev,
+        "metric": metric,
+        "support": "Curated 14-incident database (Mailchimp 2022/23, Okta 22/23, "
+                   "MS365 Storm-0558, etc.). 5-year lookback with age decay.",
+    })
+
+    # ── Layout: 2 columns × 3 rows ────────────────────────────────────
+    label_st = ParagraphStyle("sc_lbl", fontSize=8, fontName=ASX_SANS_BOLD,
+                                textColor=colors.HexColor("#7ba0c4"), leading=10)
+    name_st = ParagraphStyle("sc_n", fontSize=12, fontName=ASX_SANS_BOLD,
+                               textColor=ASX_NAVY, leading=14)
+    headline_st = ParagraphStyle("sc_h", fontSize=9, fontName=ASX_SANS_ITAL,
+                                   textColor=ASX_BLUE_LINK, leading=11)
+    metric_st = ParagraphStyle("sc_m", fontSize=10, fontName=ASX_SANS_BOLD,
+                                 textColor=ASX_NAVY, leading=13)
+    support_st = ParagraphStyle("sc_s", fontSize=8, fontName=ASX_SANS,
+                                  textColor=ASX_GREY_BODY, leading=11)
+
+    # Severity colour map for the pill badge — same hex values used
+    # in _assessment_slide_attackers_view.
+    _SC_SEV_HEX = {
+        "CRITICAL": "#991b1b", "HIGH": "#dc2626",
+        "MEDIUM": "#92400e",   "LOW": "#166534",
+        "INFO": "#475569",
+    }
+
+    def card_cell(card):
+        return [
+            Paragraph(card["label"], label_st),
+            Spacer(1, 3),
+            _asx_pill(card["severity"], _SC_SEV_HEX.get(card["severity"], "#475569"),
+                       font_size=9),
+            Spacer(1, 8),
+            Paragraph(card["headline"], headline_st),
+            Spacer(1, 6),
+            Paragraph(card["metric"], metric_st),
+            Spacer(1, 5),
+            Paragraph(card["support"], support_st),
+        ]
+
+    rows = []
+    for i in range(0, len(cards), 2):
+        pair = cards[i:i + 2]
+        cells = [card_cell(c) for c in pair]
+        while len(cells) < 2:
+            cells.append([Paragraph("", support_st)])  # pad
+        rows.append(cells)
+
+    grid = Table(rows, colWidths=[(ASX_INNER_W - 16) / 2] * 2,
+                  rowHeights=[125] * len(rows))
+    grid.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, -1), ASX_WHITE),
+        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 16),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+        ("TOPPADDING",   (0, 0), (-1, -1), 14),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+        ("INNERGRID",    (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+        ("BOX",          (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+    ]))
+
+    return [
+        Paragraph("SUPPLY-CHAIN EXPOSURE", _style_section_label()),
+        Paragraph("Risk Inherited From Vendors, CDNs, and Declared Suppliers",
+                   _style_slide_title(28)),
+        Paragraph(
+            "Approximately 12% of breaches have a supply-chain root cause "
+            "(IBM Cost of a Data Breach 2024) and dwell ~48% longer than "
+            "direct breaches. Six external signals are surfaced here; each "
+            "feeds the Ransomware Susceptibility Index and the financial-"
+            "impact vulnerability uplift.",
+            _style_intro(),
+        ),
+        Spacer(1, 8),
+        grid,
+    ]
+
+
+# === SLIDE 5: Financial Impact (navy card + bar chart) ==================
 
 def _assessment_slide_financial_impact(results):
     ins = results.get("insurance", {})
@@ -5135,6 +5512,7 @@ def _build_assessment_pdf(results: dict) -> bytes:
     story += _assessment_slide_cover(domain, timestamp, brand);             story.append(PageBreak())
     story += _assessment_slide_score_and_kpis(results);                     story.append(PageBreak())
     story += _assessment_slide_attackers_view(results);                     story.append(PageBreak())
+    story += _assessment_slide_supply_chain(results);                       story.append(PageBreak())
     story += _assessment_slide_financial_impact(results);                   story.append(PageBreak())
     story += _assessment_slide_why_this_matters();                          story.append(PageBreak())
     story += _assessment_slide_plain_language(results);                     story.append(PageBreak())
