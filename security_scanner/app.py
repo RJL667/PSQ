@@ -98,6 +98,7 @@ CHECKER_MANIFEST = [
         {"id": "subdomains", "label": "Subdomain Recon"},
         {"id": "fraudulent_domains", "label": "Lookalike Domains"},
         {"id": "related_domains", "label": "Supply-Chain / Related Domains"},
+        {"id": "dependency_manifests", "label": "Exposed Dependency Manifests"},
     ]},
     {"section": "Technology & Governance", "checkers": [
         {"id": "tech_stack", "label": "Technology Stack"},

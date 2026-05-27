@@ -8,7 +8,7 @@ from scanner_utils import *
 from checkers_core import *
 from checkers_network import *
 from checkers_threats import *
-from checkers_supply_chain import RelatedDomainsChecker
+from checkers_supply_chain import RelatedDomainsChecker, DependencyManifestChecker
 from scoring_analytics import *
 from http_client import HTTP, _apex_of
 
@@ -182,6 +182,7 @@ class SecurityScanner:
             "web_ranking":         (WebRankingChecker().check,         [domain]),
             "info_disclosure":     (InformationDisclosureChecker().check, [domain]),
             "glasswing":           (GlasswingPartnerChecker().check,   [domain]),
+            "dependency_manifests": (DependencyManifestChecker().check, [domain]),
         }
 
         # Heavy checkers run sequentially AFTER the concurrent batch to cap

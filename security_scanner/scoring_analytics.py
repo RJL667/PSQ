@@ -487,6 +487,7 @@ class RiskScorer:
         "data_breach_index":    0.03,
         "financial_impact":     0.02,
         "related_domains":      0.04,
+        "dependency_manifests": 0.04,
     }  # Sum — includes all checkers from both branches
 
     RECOMMENDATIONS = {
@@ -684,6 +685,10 @@ class RiskScorer:
         rd = results.get("related_domains", {})
         rd_risk = inv(rd.get("score", 100)) if rd.get("status") == "completed" else 0
 
+        # Dependency manifest leak risk (exposed package.json/requirements.txt/etc).
+        dm = results.get("dependency_manifests", {})
+        dm_risk = inv(dm.get("score", 100))
+
         weighted = (
             ssl_risk         * effective_weights.get("ssl", 0) +
             email_risk       * effective_weights.get("email_security", 0) +
@@ -710,7 +715,8 @@ class RiskScorer:
             rsi_risk         * effective_weights.get("ransomware_risk", 0) +
             dbi_risk         * effective_weights.get("data_breach_index", 0) +
             fin_risk         * effective_weights.get("financial_impact", 0) +
-            rd_risk          * effective_weights.get("related_domains", 0)
+            rd_risk          * effective_weights.get("related_domains", 0) +
+            dm_risk          * effective_weights.get("dependency_manifests", 0)
         )
 
         risk_score = round(weighted * 10)
