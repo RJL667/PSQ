@@ -458,7 +458,17 @@ COMPLIANCE_MAP = {
 class RiskScorer:
     """
     Weighted 0-1000 risk score.
-    All weights must sum to 100 when WAF bonus excluded.
+
+    Note on WEIGHTS sum (audited 2026-05-27): the dict deliberately
+    includes both raw checker categories (ssl, email_security, …) AND
+    derived scoring outputs (`ransomware_risk`, `data_breach_index`,
+    `financial_impact`). Because the derived entries are computed FROM
+    the raw entries, the dict's nominal sum is ~1.32 — over 1.0 by
+    design, not a bug. The redistribution logic in `calculate()`
+    re-scales weights for any failed / skipped checker dynamically;
+    the headline 0-1000 score is then a sum of (risk × weight) with
+    the WAF bonus discounted separately. Don't naively divide WEIGHTS
+    by their sum — that would double-deflate the derived scoring rows.
     """
     WEIGHTS = {
         "ssl":                  0.09,
@@ -3337,6 +3347,21 @@ class RemediationSimulator:
          "Update WordPress plugins and block /wp-content/plugins/ enumeration at the web server — outdated plugins are the top SA SME ransomware entry vector.", "R3,600–R18,000", 0.05),
         ("vendor_breach", lambda c: c.get("critical_match_count", 0) > 0 or c.get("high_match_count", 0) > 0,
          "Rotate API keys, OAuth tokens, and service accounts at vendors with confirmed breaches in the past 5 years — customer-key rotation post-disclosure is typically incomplete.", "R9,000–R36,000", 0.03),
+        # --- Audit-fix rows (2026-05-27): close the WEIGHTS-vs-
+        # REMEDIATION_MAP asymmetry. These five checkers had WEIGHTS
+        # entries but no remediation guidance, so the broker-facing
+        # remediation panel was silent on their findings even when the
+        # underlying scan was returning material data.
+        ("payment_security", lambda c: c.get("score", 100) < 60,
+         "Migrate self-hosted payment forms to a PCI-DSS validated service provider (Stripe, PayFast, Peach Payments) to drop out of PCI scope and reduce card-skimmer breach probability.", "R9,000–R36,000", 0.02),
+        ("securitytrails", lambda c: c.get("associated_count", 0) > 50,
+         "Review the large set of associated domains found via SecurityTrails — confirm each is legitimately controlled and not a phishing impersonation set up under shared infrastructure.", "R0–R9,000", 0.01),
+        ("subdomains", lambda c: c.get("takeover_vulnerable") or c.get("risky_subdomains"),
+         "Audit risky-named subdomains (dev / staging / admin) for restricted access; reclaim or remove any dangling DNS records that point to unclaimed cloud services (subdomain takeover risk).", "R3,600–R18,000", 0.02),
+        ("virustotal", lambda c: c.get("malicious_count", 0) > 0 or c.get("suspicious_count", 0) > 0,
+         "Investigate VirusTotal malicious / suspicious flags — confirm the domain isn't compromised, hosting malware, or categorised as phishing; submit a re-categorisation request once cleared.", "R9,000–R36,000", 0.04),
+        ("web_ranking", lambda c: c.get("rank") and c.get("rank") <= 10_000,
+         "High Tranco rank attracts more automated attacks — strengthen WAF + DDoS protection and prioritise prompt patching of public-facing vulnerabilities.", "R0–R9,000/mo", 0.01),
     ]
 
     def calculate(self, categories: dict, rsi_result: dict,

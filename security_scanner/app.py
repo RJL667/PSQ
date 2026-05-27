@@ -86,13 +86,16 @@ CHECKER_MANIFEST = [
         {"id": "dns_infrastructure", "label": "DNS & Open Ports", "per_ip": True},
         {"id": "high_risk_protocols", "label": "High-Risk Protocols", "per_ip": True},
         {"id": "shodan_vulns", "label": "Shodan Vulnerabilities", "per_ip": True},
+        {"id": "osv_vulns", "label": "OSV.dev CVE Enrichment"},
         {"id": "dnsbl", "label": "DNSBL / Blacklists", "per_ip": True},
         {"id": "cloud_cdn", "label": "Cloud & CDN"},
         {"id": "vpn_remote", "label": "VPN / Remote Access"},
+        {"id": "external_ips", "label": "External IP Aggregation"},
     ]},
     {"section": "Exposure & Reputation", "checkers": [
         {"id": "breaches", "label": "Data Breaches (HIBP)"},
         {"id": "dehashed", "label": "Credential Leaks"},
+        {"id": "credential_risk", "label": "Credential Risk Assessment"},
         {"id": "exposed_admin", "label": "Exposed Admin Panels"},
         {"id": "virustotal", "label": "VirusTotal Intelligence"},
         {"id": "subdomains", "label": "Subdomain Recon"},
@@ -113,9 +116,11 @@ CHECKER_MANIFEST = [
         {"id": "privacy_compliance", "label": "Privacy Compliance"},
         {"id": "glasswing", "label": "AI Readiness (Glasswing)"},
     ]},
-    {"section": "Insurance Analytics", "checkers": [
-        {"id": "insurance_analytics", "label": "RSI / Financial Impact / DBI"},
-    ]},
+    # Note: insurance_analytics was previously listed here as a "checker"
+    # but is actually a post-scan phase (RSI + DBI + FIC + Remediation
+    # all run from cat_results); progress is emitted under that phase
+    # name in scanner.py but it's not a discrete category in results.
+    # Removed 2026-05-27 audit fix.
 ]
 
 

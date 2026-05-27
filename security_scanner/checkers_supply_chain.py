@@ -705,6 +705,13 @@ class EmailVendorSurfaceChecker:
         ("marketo",             ["mktomail.com"]),
         ("netcore",             ["_spf.netcorecloud.net"]),
         ("everlytic",           ["_spf.everlytic.net"]),
+        # Identity-provider class — Okta isn't an email SaaS in the
+        # traditional sense, but its SAML/SSO is in scope for vendor-
+        # breach correlation (S-5) because customer SSO compromise is
+        # the documented downstream impact (Storm-0558 / 1Password /
+        # Cloudflare 2023). Without an entry here, vendor_breaches.json
+        # rows for "okta" cannot correlate against ANY detected surface.
+        ("okta",                ["okta.com", "oktapreview.com", "okta.net"]),
     ]
 
     INCLUDE_RE = re.compile(r"include:(\S+)")

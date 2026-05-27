@@ -205,9 +205,15 @@ class SubdomainChecker:
         result["unique_ips_found"] = len(all_ips)
 
         # --- Check for subdomain takeover vulnerabilities ---
+        # 2026-05-27 audit fix: cap raised 60 → 150 to match the CT
+        # discovery cap above. Previously 90 subdomains discovered via
+        # CT logs were silently dropped from takeover checking. The
+        # CNAME-takeover probe is HEAD-only with a short timeout, so
+        # the cost of scanning 150 vs 60 is modest (~30s worst-case at
+        # max_workers=10) and the missed-finding risk is high.
         takeover_vulnerable = []
         with ThreadPoolExecutor(max_workers=10) as ex:
-            futures = {ex.submit(self._check_cname_takeover, sub): sub for sub in subdomains[:60]}
+            futures = {ex.submit(self._check_cname_takeover, sub): sub for sub in subdomains[:150]}
             for future in as_completed(futures, timeout=30):
                 try:
                     result_to = future.result(timeout=5)
