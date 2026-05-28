@@ -2859,12 +2859,14 @@ def loss_exposure_scenarios_block(d, S):
 
     # Fixed scenario order for consistent presentation
     scenario_order = ["most_likely", "median", "return_1_100", "return_1_200", "return_1_250"]
-    # Column widths per rules #6 / #12 — atomic minimums for the widest
-    # values that may appear in each column:
-    #   Scenario: "1-in-250 event (P99.6)" ~ 22 chars at 9pt
-    #   Modelled Loss: "R 999,999,999,999" ~ 17 chars at 9pt
-    #   Annual Probability: "Most likely" ~ 11 chars at 9pt
-    col_widths = [60 * mm, 55 * mm, 40 * mm]
+    # Column widths span full INNER_W to match the other tables in the
+    # report (build_cat_card, build_summary_table). Previously the table
+    # was 155mm of a 174mm content area — sat noticeably narrower than
+    # neighbouring tables. Now totals INNER_W:
+    #   Scenario: 65mm — fits "1-in-250 event (P99.6)" at 9pt with margin
+    #   Modelled Loss: 55mm — fits "R 999,999,999,999"
+    #   Annual Probability: INNER_W - 120mm — fills remaining ~54mm
+    col_widths = [65 * mm, 55 * mm, INNER_W - 65 * mm - 55 * mm]
 
     table_data = [["Scenario", "Modelled Loss", "Annual Probability"]]
     for key in scenario_order:
