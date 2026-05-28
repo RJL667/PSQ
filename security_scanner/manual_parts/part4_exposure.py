@@ -1559,14 +1559,21 @@ def build(doc):
     add_bold_body(
         doc,
         "Scoring: ",
-        "Wired as a P1 RSI factor (+0.06 raw on critical triple-source "
-        "match; +0.04 on high HR+SPF match), with the same magnitude "
-        "as RDP exposure (the dominant primary-access ransomware "
-        "vector). Adds +0.04 / +0.02 to the financial-impact "
-        "vulnerability uplift, stacking within the 0.15 cap. Triggers "
-        "a dedicated REMEDIATION_MAP row with R0–R3,600 per vendor "
-        "(credential rotation is cheap; the value is in the "
-        "specificity of the rotate-list)."
+        "REPORTING-ONLY. The cross-correlation deliberately does NOT "
+        "carry its own scoring weight, RSI factor, or financial-impact "
+        "uplift. The underlying signals it joins — Hudson Rock "
+        "infostealer harvest (via credential_risk), S-4 SPF vendor "
+        "surface, S-5 known-breach matches — each already contribute "
+        "to RSI and financial impact through their own channels. "
+        "Adding a separate weight here would double-count the same "
+        "data without empirical justification (no public evidence "
+        "that the correlation itself increases breach cost beyond "
+        "what each signal individually drives). The correlation's "
+        "value is QUALITATIVE: tell the broker which specific "
+        "vendors to rotate at, with confidence backed by three "
+        "independent sources. Credential rotation is cheap (R0–R3,600 "
+        "per vendor) — the value is in the specificity of the "
+        "rotate-list, not in a phantom RSI reduction."
     )
 
     add_note(
