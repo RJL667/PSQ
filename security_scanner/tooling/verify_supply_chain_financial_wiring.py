@@ -45,6 +45,7 @@ from scoring_analytics import (
 SUPPLY_CHAIN_KEYS = (
     "related_domains", "dependency_manifests", "third_party_js",
     "email_vendor_surface", "cms_plugin_sbom", "vendor_breach",
+    "third_party_correlation",
 )
 
 
@@ -127,6 +128,28 @@ WORST_CASE_PAYLOADS = {
         ],
         "match_count": 2, "critical_match_count": 1, "high_match_count": 1,
         "score": 75, "issues": ["CRITICAL match"],
+    },
+    # Phase 4f cross-correlation — triple-source critical match (HR
+    # exposure × SPF vendor surface × known breach in DB).
+    "third_party_correlation": {
+        "status": "completed", "severity": "critical",
+        "critical_count": 1, "high_count": 0, "medium_count": 0,
+        "hudson_rock_third_party_count": 3,
+        "hudson_rock_employees": 1,
+        "spf_vendor_count": 2,
+        "spf_vendors": ["microsoft_365", "mailchimp"],
+        "vendor_breach_match_count": 2,
+        "suspected_vendors": [
+            {"vendor": "microsoft_365",
+             "breaches": [{"date": "2024-01-19", "severity": "critical",
+                            "exposure_class": "vendor_email_corp"}]},
+            {"vendor": "mailchimp",
+             "breaches": [{"date": "2023-01-11", "severity": "high",
+                            "exposure_class": "customer_email_lists"}]},
+        ],
+        "score": 45,
+        "issues": ["CRITICAL: cross-correlation triple-source match"],
+        "rationale": "Three signals align",
     },
 }
 
@@ -285,6 +308,15 @@ def run(industry: str = "retail",
             ("fin_p99", True, 0, 0.1),
             ("fin_p99_5", True, 0, 0.1),
             ("fin_most_likely", True, 0, 0.1),
+        ],
+        # Phase 4f cross-correlation — strongest single signal (RSI P1
+        # +0.06 on critical match). Should move risk score, RSI, AND
+        # financial impact (via the vuln uplift channel).
+        "third_party_correlation": [
+            ("overall_risk_score", True, 0, 0.5),
+            ("rsi_score", True, 0.03, 0),
+            ("fin_most_likely", True, 0, 0.1),
+            ("fin_p99", True, 0, 0.1),
         ],
     }
 

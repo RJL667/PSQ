@@ -502,6 +502,12 @@ class RiskScorer:
         "email_vendor_surface": 0.02,
         "cms_plugin_sbom":      0.03,
         "vendor_breach":        0.04,
+        # Strongest single-signal class — three independent sources
+        # (Hudson Rock observed credential harvest + S-4 SPF vendor
+        # surface + S-5 vendor public breach) confirming risk. Weight
+        # mirrors RDP at 0.04 because the correlation is at least as
+        # actionable as RDP exposure (observed + specific vendor).
+        "third_party_correlation": 0.04,
     }  # Sum — includes all checkers from both branches
 
     RECOMMENDATIONS = {
@@ -546,6 +552,15 @@ class RiskScorer:
         "lookalike domain(s) found": "Review detected lookalike domains for potential typosquatting — consider defensive registration.",
         "No privacy policy found": "Publish a comprehensive privacy policy to comply with POPIA/GDPR — failure to do so risks regulatory fines.",
         "Privacy policy missing critical sections": "Update your privacy policy to include all required sections for POPIA/GDPR compliance.",
+        "CRITICAL cross-correlation":
+            "Three independent sources confirm vendor-channel credential risk. "
+            "Rotate credentials and force MFA at the cross-matched vendor(s) "
+            "TODAY — Hudson Rock has observed harvest, the vendor is in your "
+            "send-authority chain (S-4), and the vendor has a public breach "
+            "in the lookback window (S-5).",
+        "cross-correlation":
+            "Hudson Rock infostealer harvest overlaps with detected vendor "
+            "surface — review credentials at the affected vendors.",
     }
 
     # Statuses that indicate a checker failed and should be excluded from scoring
@@ -719,6 +734,13 @@ class RiskScorer:
         vb = results.get("vendor_breach", {})
         vb_risk = inv(vb.get("score", 100)) if vb.get("status") == "completed" else 0
 
+        # Third-party cross-correlation (Hudson Rock × S-4 × S-5).
+        # Strongest single signal in the model — three independent
+        # sources confirming risk. status=completed only when HR has
+        # third-party exposures > 0.
+        tpc = results.get("third_party_correlation", {})
+        tpc_risk = inv(tpc.get("score", 100)) if tpc.get("status") == "completed" else 0
+
         weighted = (
             ssl_risk         * effective_weights.get("ssl", 0) +
             email_risk       * effective_weights.get("email_security", 0) +
@@ -750,7 +772,8 @@ class RiskScorer:
             tpjs_risk        * effective_weights.get("third_party_js", 0) +
             evs_risk         * effective_weights.get("email_vendor_surface", 0) +
             cms_risk         * effective_weights.get("cms_plugin_sbom", 0) +
-            vb_risk          * effective_weights.get("vendor_breach", 0)
+            vb_risk          * effective_weights.get("vendor_breach", 0) +
+            tpc_risk         * effective_weights.get("third_party_correlation", 0)
         )
 
         risk_score = round(weighted * 10)
@@ -1064,6 +1087,33 @@ class RansomwareIndex:
         if ssl_grade in ("D", "E", "F"):
             base += 0.05
             factors.append({"factor": f"Weak SSL (grade {ssl_grade})", "impact": 0.05, "priority": 3})
+
+        # --- Third-party cross-correlation (P1 — strongest single signal) ---
+        # When Hudson Rock infostealer harvest overlaps with the S-4
+        # SPF vendor surface AND a vendor in that surface has a known
+        # public breach (S-5), three independent sources confirm risk.
+        # This factor scores higher than any single supply-chain signal
+        # because of the triple-source confirmation.
+        tpc = categories.get("third_party_correlation", {})
+        if tpc.get("status") == "completed":
+            if tpc.get("critical_count", 0) > 0:
+                base += 0.06
+                susp = tpc.get("suspected_vendors", []) or []
+                vendor_list = ", ".join(s.get("vendor", "?") for s in susp[:3])
+                factors.append({
+                    "factor": (f"CRITICAL cross-correlation — Hudson Rock harvest "
+                                f"× SPF vendor surface × known breach ({vendor_list})"),
+                    "impact": 0.06, "priority": 1,
+                })
+            elif tpc.get("high_count", 0) > 0:
+                base += 0.04
+                hr_n = tpc.get("hudson_rock_third_party_count", 0)
+                spf_n = tpc.get("spf_vendor_count", 0)
+                factors.append({
+                    "factor": (f"HIGH cross-correlation — {hr_n} HR exposure(s) "
+                                f"+ {spf_n} SPF vendor(s); no S-5 breach overlap"),
+                    "impact": 0.04, "priority": 1,
+                })
 
         # --- Supply-chain ransomware vectors (S-1, S-2, S-3, S-4, S-10) ---
         # Empirically calibrated against published 2024-2025 data:
@@ -2047,6 +2097,18 @@ class FinancialImpactCalculator:
             elif vb.get("high_match_count", 0) > 0:
                 sc_vuln_uplift += 0.02
                 sc_uplift_factors.append("Vendor-breach high (S-5)")
+        # Third-party cross-correlation (HR × S-4 × S-5) — when three
+        # independent sources confirm vendor-channel risk, the
+        # vulnerability uplift compounds with the individual S-2/S-1/S-5
+        # uplifts above. Stays within the 0.15 cap.
+        tpc_for_fic = categories.get("third_party_correlation", {})
+        if tpc_for_fic.get("status") == "completed":
+            if tpc_for_fic.get("critical_count", 0) > 0:
+                sc_vuln_uplift += 0.04
+                sc_uplift_factors.append("HR cross-correlation critical (Phase 4f)")
+            elif tpc_for_fic.get("high_count", 0) > 0:
+                sc_vuln_uplift += 0.02
+                sc_uplift_factors.append("HR cross-correlation high (Phase 4f)")
         # Cap at +0.15 (mid-range of empirical +15-30 pp band) — at max
         # vulnerability already near 1.0 the cap protects against
         # overflow. Single weak signal lands +0.04-0.06 (matches empirical
@@ -3347,6 +3409,8 @@ class RemediationSimulator:
          "Update WordPress plugins and block /wp-content/plugins/ enumeration at the web server — outdated plugins are the top SA SME ransomware entry vector.", "R3,600–R18,000", 0.05),
         ("vendor_breach", lambda c: c.get("critical_match_count", 0) > 0 or c.get("high_match_count", 0) > 0,
          "Rotate API keys, OAuth tokens, and service accounts at vendors with confirmed breaches in the past 5 years — customer-key rotation post-disclosure is typically incomplete.", "R9,000–R36,000", 0.03),
+        ("third_party_correlation", lambda c: c.get("critical_count", 0) > 0 or c.get("high_count", 0) > 0,
+         "Immediately rotate credentials and force MFA at the cross-matched vendor(s) — these accounts have ALREADY been compromised (Hudson Rock infostealer harvest) AND the vendor is in your send-authority chain (S-4 SPF detection). When the vendor also has a public breach in the lookback window (S-5), they are the highest-priority rotate-target.", "R0–R3,600 per vendor", 0.06),
         # --- Audit-fix rows (2026-05-27): close the WEIGHTS-vs-
         # REMEDIATION_MAP asymmetry. These five checkers had WEIGHTS
         # entries but no remediation guidance, so the broker-facing

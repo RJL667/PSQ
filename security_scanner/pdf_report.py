@@ -2406,6 +2406,100 @@ def cat_cms_plugin_sbom(d, S):
     return parts
 
 
+def cat_third_party_correlation(d, S):
+    tpc = d.get("third_party_correlation", {})
+    if tpc.get("status") not in ("completed",):
+        return []
+    sev = tpc.get("severity", "medium")
+    hr_n = tpc.get("hudson_rock_third_party_count", 0)
+    spf_n = tpc.get("spf_vendor_count", 0)
+    susp = tpc.get("suspected_vendors", []) or []
+    col = (C_CRITICAL if sev == "critical" else
+           (C_RED if sev == "high" else C_AMBER))
+    rows = [
+        ("Severity", sev.upper()),
+        ("Hudson Rock third-party exposures", hr_n),
+        ("S-4 vendors in SPF chain", spf_n),
+        ("S-5 breach overlap (suspected rotate-targets)", len(susp)),
+    ]
+    for s in susp[:5]:
+        breaches = s.get("breaches") or []
+        dates = ", ".join(b.get("date", "") for b in breaches[:3])
+        rows.append((
+            f"  {s.get('vendor', '?')}",
+            f"{len(breaches)} breach(es) — most recent: {dates or '?'}",
+        ))
+    fb = (
+        f"CRITICAL: {hr_n} HR exposure(s) cross-correlate with "
+        f"{len(susp)} breached vendor(s) in your SPF chain — rotate now."
+        if sev == "critical" else
+        (f"HIGH: {hr_n} HR exposure(s) + {spf_n} SPF vendor(s); no S-5 overlap to narrow scope."
+         if sev == "high" else
+         f"MEDIUM: {hr_n} HR exposure(s) detected; no SPF / breach overlap.")
+    )
+    parts = build_cat_card("Third-Party Cross-Correlation (HR × SPF × Breach)",
+                            col, sev.upper(), rows,
+                            tpc.get("issues", []), S, fallback=fb)
+
+    parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
+    parts.append(Spacer(1, 1 * mm))
+    if sev == "critical":
+        vendor_names = ", ".join(s.get("vendor", "?") for s in susp[:5])
+        parts.append(Paragraph(
+            "Three independent signals confirm vendor-channel credential risk: "
+            f"Hudson Rock reports {hr_n} infostealer-harvested credential record(s) "
+            "for third-party services accessed from this organisation's machines; "
+            f"the SPF chain authorises {spf_n} email vendor(s); and {len(susp)} of "
+            f"those vendor(s) ({vendor_names}) have confirmed public breaches in "
+            "the curated database. The intersection narrows the rotate-list to "
+            "high-probability targets — these specific vendors are the most likely "
+            "source of the Hudson Rock harvest and should be treated as already "
+            "compromised until credentials are rotated.",
+            S["body"]))
+        parts.append(Spacer(1, 2 * mm))
+        parts.append(Paragraph("<b>Recommended Actions</b>", S["cat_title"]))
+        parts.append(Spacer(1, 1 * mm))
+        parts.append(Paragraph(
+            f"1. TODAY: rotate all API keys, OAuth tokens, and SSO session "
+            f"secrets at: {vendor_names}.", S["body"]))
+        parts.append(Paragraph(
+            "2. Force MFA re-enrolment for all staff with accounts at the "
+            "above vendor(s).", S["body"]))
+        parts.append(Paragraph(
+            "3. Audit recent login records at these vendor(s) for unusual "
+            "geographies / impossible-travel anomalies.", S["body"]))
+        parts.append(Paragraph(
+            "4. Engage incident response if any vendor shows unrecognised "
+            "activity in the past 90 days.", S["body"]))
+    elif sev == "high":
+        parts.append(Paragraph(
+            f"Hudson Rock reports {hr_n} third-party credential exposure(s) "
+            f"for this organisation, and {spf_n} email vendor(s) are detected "
+            "in the SPF chain. No vendor-breach overlap (S-5) was found, so the "
+            "rotate-list cannot be narrowed via cross-correlation — review "
+            "credentials at all detected vendors as a precaution.",
+            S["body"]))
+        parts.append(Spacer(1, 2 * mm))
+        parts.append(Paragraph("<b>Recommended Actions</b>", S["cat_title"]))
+        parts.append(Spacer(1, 1 * mm))
+        parts.append(Paragraph(
+            "1. Review credentials at all detected SPF vendors and rotate where "
+            "MFA is not enforced.", S["body"]))
+        parts.append(Paragraph(
+            "2. Expand the curated vendor_breaches.json database to include "
+            "any of the detected vendors that have public breach history not "
+            "yet catalogued.", S["body"]))
+    else:
+        parts.append(Paragraph(
+            f"Hudson Rock reports {hr_n} third-party credential exposure(s) "
+            "for this organisation. No SPF vendor surface or breach matches to "
+            "cross-reference; broker should review the insured's SaaS inventory "
+            "manually to identify the most likely affected vendors.",
+            S["body"]))
+    parts.append(Spacer(1, 3 * mm))
+    return parts
+
+
 def cat_vendor_breach(d, S):
     vb = d.get("vendor_breach", {})
     if vb.get("status") not in ("completed",):
@@ -3465,6 +3559,7 @@ _INSURANCE_CONTEXT = {
     "Vendor Breach Match": "Vendor in mail-path had a confirmed public breach in the lookback window; key rotation often incomplete",
     "Exposed Manifests + CVEs": "Public dependency map cross-referenced via OSV.dev; actionable CVE patch targets",
     "Related-Domain Critical": "Critical finding on a broker-declared supplier; civil-liability inflator in financial model",
+    "Cross-Correlated Vendor Risk": "Hudson Rock infostealer harvest × S-4 SPF vendor surface × S-5 known breach — three independent signals confirming risk; highest-priority rotate target",
 }
 
 
@@ -3658,6 +3753,28 @@ def build_summary_table(results: dict, S) -> Table:
             f"{rd_cat['critical_count']} critical finding(s) on supplier(s)",
             C_CRITICAL,
         ))
+
+    # Cross-correlation spotlight — strongest single signal in the model
+    tpc_cat = cats.get("third_party_correlation", {})
+    if tpc_cat.get("status") == "completed":
+        if tpc_cat.get("critical_count", 0) > 0:
+            susp = tpc_cat.get("suspected_vendors") or []
+            vendor_short = ", ".join(s.get("vendor", "?") for s in susp[:2])
+            if len(susp) > 2:
+                vendor_short += f" +{len(susp) - 2}"
+            rows.append(row(
+                "Cross-Correlated Vendor Risk",
+                f"CRITICAL — rotate at {vendor_short} (HR harvest × SPF × breach)",
+                C_CRITICAL,
+            ))
+        elif tpc_cat.get("high_count", 0) > 0:
+            hr_n = tpc_cat.get("hudson_rock_third_party_count", 0)
+            spf_n = tpc_cat.get("spf_vendor_count", 0)
+            rows.append(row(
+                "Cross-Correlated Vendor Risk",
+                f"HIGH — {hr_n} HR harvest + {spf_n} SPF vendor(s)",
+                C_RED,
+            ))
 
     tbl = Table(rows, colWidths=[18, 45 * mm, INNER_W - 18 - 45 * mm])
     style = [
@@ -4952,6 +5069,38 @@ def _assessment_slide_supply_chain(results):
                    "MS365 Storm-0558, etc.). 5-year lookback with age decay.",
     })
 
+    # Phase 4f Cross-Correlation (Hudson Rock x S-4 x S-5)
+    tpc = cats.get("third_party_correlation", {})
+    cls = _classify(tpc)
+    if cls:
+        sev, metric = cls
+    else:
+        if tpc.get("critical_count", 0) > 0:
+            sev = "CRITICAL"
+            susp = tpc.get("suspected_vendors") or []
+            vendor_names = ", ".join(s.get("vendor", "?") for s in susp[:3])
+            metric = f"Rotate at: {vendor_names}"
+        elif tpc.get("high_count", 0) > 0:
+            sev = "HIGH"
+            metric = (f"{tpc.get('hudson_rock_third_party_count', 0)} HR exposure(s) "
+                       f"+ {tpc.get('spf_vendor_count', 0)} SPF vendor(s)")
+        elif tpc.get("medium_count", 0) > 0:
+            sev = "MEDIUM"
+            metric = (f"{tpc.get('hudson_rock_third_party_count', 0)} HR exposure(s) "
+                       "(no SPF / breach overlap)")
+        else:
+            sev = "LOW"
+            metric = "No HR third-party exposures"
+    cards.append({
+        "label": "Phase 4f Cross-Correlation",
+        "headline": "Strongest signal: HR observed harvest x SPF x breach DB",
+        "severity": sev,
+        "metric": metric,
+        "support": "Joins Hudson Rock infostealer harvest with S-4 SPF vendor "
+                   "surface and S-5 known-breach DB. Triple-source match = "
+                   "highest-priority rotate target.",
+    })
+
     # ── Layout: 2 columns × 3 rows ────────────────────────────────────
     label_st = ParagraphStyle("sc_lbl", fontSize=8, fontName=ASX_SANS_BOLD,
                                 textColor=colors.HexColor("#7ba0c4"), leading=10)
@@ -5355,7 +5504,7 @@ def _assessment_slide_plain_language(results):
 
 # === SLIDE 7: Next Steps (full navy bg, painted by _asx_page_painter) ===
 
-def _assessment_slide_next_steps(brand):
+def _assessment_slide_next_steps(brand, results=None):
     # Heading is white on navy background (painted at the page level).
     label_st = ParagraphStyle("ns_lbl", fontSize=10, fontName=ASX_SANS_BOLD,
                                 textColor=colors.HexColor("#7ba0c4"), leading=12,
@@ -5368,14 +5517,36 @@ def _assessment_slide_next_steps(brand):
     body_st = ParagraphStyle("ns_b", fontSize=10, fontName=ASX_SANS,
                                textColor=colors.HexColor("#cbd5e1"), leading=14)
 
-    steps = [
-        (1, "Cyber Insurance Cover",
-         "Structure a tailored policy covering breach response, ransomware, business interruption, regulatory fines, and third-party liability."),
-        (2, "Vulnerability Remediation",
-         "Secure exposed services, patch critical issues, implement MFA, and strengthen posture &mdash; often reducing the premium in the process."),
-        (3, "Continuous Monitoring",
-         "Cyber risk is not static. Ongoing monitoring detects new threats as the attack surface changes."),
-    ]
+    # Promote cross-correlation rotation to step #1 when critical —
+    # it's the single highest-value action by far when triple-source
+    # match fires (HR harvest × SPF × known breach).
+    tpc = (results or {}).get("categories", {}).get(
+        "third_party_correlation", {})
+    if tpc.get("status") == "completed" and tpc.get("critical_count", 0) > 0:
+        susp = tpc.get("suspected_vendors") or []
+        vendor_names = ", ".join(s.get("vendor", "?") for s in susp[:3])
+        steps = [
+            (1, "Rotate cross-matched vendor credentials TODAY",
+             f"Three independent signals (Hudson Rock infostealer harvest, "
+             f"SPF vendor surface, public-breach database) point at: "
+             f"<b>{vendor_names}</b>. Rotate API keys, OAuth tokens, and SSO "
+             "session secrets at these vendors and force MFA re-enrolment for "
+             "all staff with accounts there. Audit recent login records for "
+             "anomalies before assuming compromise stops here."),
+            (2, "Cyber Insurance Cover",
+             "Structure a tailored policy covering breach response, ransomware, business interruption, regulatory fines, and third-party liability."),
+            (3, "Continuous Monitoring",
+             "Cyber risk is not static. Ongoing monitoring detects new threats as the attack surface changes."),
+        ]
+    else:
+        steps = [
+            (1, "Cyber Insurance Cover",
+             "Structure a tailored policy covering breach response, ransomware, business interruption, regulatory fines, and third-party liability."),
+            (2, "Vulnerability Remediation",
+             "Secure exposed services, patch critical issues, implement MFA, and strengthen posture &mdash; often reducing the premium in the process."),
+            (3, "Continuous Monitoring",
+             "Cyber risk is not static. Ongoing monitoring detects new threats as the attack surface changes."),
+        ]
 
     def step_cell(n, h, b):
         return [
@@ -5516,7 +5687,7 @@ def _build_assessment_pdf(results: dict) -> bytes:
     story += _assessment_slide_financial_impact(results);                   story.append(PageBreak())
     story += _assessment_slide_why_this_matters();                          story.append(PageBreak())
     story += _assessment_slide_plain_language(results);                     story.append(PageBreak())
-    story += _assessment_slide_next_steps(brand);                           story.append(PageBreak())
+    story += _assessment_slide_next_steps(brand, results);                  story.append(PageBreak())
     story += _assessment_slide_disclosures(brand)
 
     doc.build(story, onFirstPage=_asx_page_painter, onLaterPages=_asx_page_painter)
@@ -5929,6 +6100,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         story += cat_hudson_rock(cats, S)
         story += cat_intelx(cats, S)
         story += cat_credential_risk(cats, S)
+        story += cat_third_party_correlation(cats, S)
         story += cat_virustotal(cats, S)
         story += cat_fraudulent_domains(cats, S)
         story += cat_related_domains(cats, S)

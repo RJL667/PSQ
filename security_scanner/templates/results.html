@@ -1790,6 +1790,48 @@
       </div>
     </div>
 
+    <!-- Third-Party Cross-Correlation (Hudson Rock × S-4 × S-5) -->
+    {% set tpc = results.categories.get('third_party_correlation', {}) %}
+    {% if tpc and tpc.get('status') == 'completed' %}
+    {% set tpc_sev = tpc.severity or 'medium' %}
+    {% set tpc_tl = 'tl-crimson' if tpc_sev == 'critical' else ('tl-red' if tpc_sev == 'high' else 'tl-amber') %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ tpc_tl }}"></div><div class="cat-title">Third-Party Cross-Correlation <span style="font-size:.65rem;color:var(--muted);">(Hudson Rock &times; SPF &times; Vendor Breach)</span></div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade color-red">{{ tpc_sev | upper }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>HR third-party credential exposures</td><td>{% if tpc.hudson_rock_third_party_count > 0 %}<span class="badge badge-amber">{{ tpc.hudson_rock_third_party_count }}</span>{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
+          <tr><td>S-4 vendors in SPF chain</td><td>{{ tpc.spf_vendor_count | default(0) }}{% if tpc.spf_vendors %} <span style="font-size:.72rem;color:var(--muted);">({{ tpc.spf_vendors[:6] | join(', ') }})</span>{% endif %}</td></tr>
+          <tr><td>S-5 breach overlap</td><td>{% if tpc.vendor_breach_match_count > 0 %}<span class="badge badge-red">{{ tpc.vendor_breach_match_count }} suspected vendor(s)</span>{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
+        </table>
+        {% if tpc.suspected_vendors %}
+        <div style="margin-top:10px;">
+          <div style="font-size:.78rem;color:#fca5a5;margin-bottom:4px;font-weight:500;">Priority rotate-targets (vendors in BOTH your SPF chain AND public-breach DB):</div>
+          {% for s in tpc.suspected_vendors %}
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <strong style="color:#f87171;">{{ s.vendor }}</strong>
+            <div style="flex:1;">
+              {% for b in s.breaches %}
+              <div style="font-size:.72rem;color:var(--muted);">{{ b.date }} &middot; <span class="badge badge-{% if b.severity == 'critical' %}red{% elif b.severity == 'high' %}amber{% else %}grey{% endif %}" style="font-size:.6rem;">{{ b.severity }}</span> &middot; {{ b.exposure_class }}</div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if tpc.rationale %}
+        <p style="font-size:.72rem;color:var(--muted);margin-top:8px;font-style:italic;">{{ tpc.rationale }}</p>
+        {% endif %}
+        {% if tpc.issues %}<ul class="issue-list" style="margin-top:8px;">{% for i in tpc.issues %}<li class="issue-item"><span class="issue-icon issue-{% if 'CRITICAL' in i %}err{% else %}warn{% endif %}">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Hudson Rock Infostealer Detection -->
     {% set hr = results.categories.get('hudson_rock', {}) %}
     {% set hr_total = (hr.compromised_employees | default(0)) + (hr.compromised_users | default(0)) %}

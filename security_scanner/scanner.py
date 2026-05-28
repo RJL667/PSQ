@@ -624,6 +624,153 @@ class SecurityScanner:
             pass
         self._notify(on_progress, "credential_risk", "done")
 
+        # --- Phase 4f: Third-party cross-correlation (Hudson Rock × S-4 × S-5) ---
+        # Joins three independent signals into a single broker-facing finding:
+        #   (A) Hudson Rock reports infostealer-harvested credentials for
+        #       third-party services used by the insured's employees
+        #       (count only — the free Hudson Rock endpoint doesn't
+        #       publish per-vendor breakdown, so we can't do a true
+        #       per-vendor join with current data)
+        #   (B) S-4 EmailVendorSurfaceChecker detected named SaaS
+        #       vendors in the SPF include chain
+        #   (C) S-5 VendorBreachChecker matched some of those vendors
+        #       against the curated public-breach database
+        # Severity ladder:
+        #   - CRITICAL: A>0 AND B>0 AND C>0 (HR count + SPF vendor + breach
+        #     match) — three independent signals confirming risk. The
+        #     vendors in C are the most likely candidates for which the
+        #     HR-reported credentials were harvested. Strongest single
+        #     actionable signal in the model.
+        #   - HIGH: A>0 AND B>0 (no S-5 match) — credentials harvested AND
+        #     SPF vendor surface exists, but no known-breach overlap.
+        #     Still strong: review credentials at all detected vendors.
+        #   - MEDIUM: A>0 only — HR signal alone; covered by base HR card.
+        # The output drives RSI (P1 factor on CRITICAL/HIGH), FIC vuln
+        # uplift, REMEDIATION_MAP, and is rendered as a cross-correlated
+        # finding in all six broker-facing surfaces.
+        self._notify(on_progress, "third_party_correlation", "running")
+        try:
+            from checkers_supply_chain import EmailVendorSurfaceChecker
+            hr = cat_results.get("hudson_rock", {})
+            evs = cat_results.get("email_vendor_surface", {})
+            vb = cat_results.get("vendor_breach", {})
+            corr = {
+                "status": "no_data",
+                "hudson_rock_third_party_count": int(hr.get("third_party_exposures", 0) or 0),
+                "hudson_rock_employees": int(hr.get("compromised_employees", 0) or 0),
+                "spf_vendor_count": 0,
+                "spf_vendors": [],
+                "vendor_breach_match_count": 0,
+                "suspected_vendors": [],
+                "severity": "none",
+                "critical_count": 0,
+                "high_count": 0,
+                "medium_count": 0,
+                "score": 100,
+                "issues": [],
+                "rationale": "",
+            }
+            hr_tp = corr["hudson_rock_third_party_count"]
+            # Only meaningful when HR returned data AND at least one
+            # third-party exposure was detected.
+            if (hr.get("status") == "completed" and hr_tp > 0):
+                # Collect S-4 vendor names (already normalised to lowercase
+                # keys by EmailVendorSurfaceChecker._classify).
+                spf_vendor_keys = []
+                for v in (evs.get("vendors_detected") or []):
+                    key = (v.get("vendor") or "").lower().strip()
+                    if key:
+                        spf_vendor_keys.append(key)
+                corr["spf_vendors"] = spf_vendor_keys
+                corr["spf_vendor_count"] = len(spf_vendor_keys)
+
+                # Cross-reference S-5 matched breaches against the SPF
+                # vendor set — vendors in BOTH are the suspected
+                # candidates for the HR-reported exposures.
+                breach_by_vendor = {}
+                for m in (vb.get("matches") or []):
+                    vk = (m.get("vendor") or "").lower().strip()
+                    if vk:
+                        breach_by_vendor.setdefault(vk, []).append({
+                            "date": m.get("date", ""),
+                            "severity": m.get("severity", ""),
+                            "exposure_class": m.get("exposure_class", ""),
+                            "summary": (m.get("summary") or "")[:200],
+                        })
+                suspected = []
+                for vk in spf_vendor_keys:
+                    if vk in breach_by_vendor:
+                        suspected.append({
+                            "vendor": vk,
+                            "breaches": breach_by_vendor[vk],
+                        })
+                corr["suspected_vendors"] = suspected
+                corr["vendor_breach_match_count"] = len(suspected)
+
+                if suspected:
+                    corr["severity"] = "critical"
+                    corr["critical_count"] = 1
+                    corr["status"] = "completed"
+                    vendor_names = ", ".join(s["vendor"] for s in suspected[:5])
+                    corr["issues"].append(
+                        f"CRITICAL: Hudson Rock reports {hr_tp} third-party "
+                        f"credential exposure(s) for this domain. Your SPF "
+                        f"chain authorises {len(suspected)} vendor(s) with "
+                        f"known public breaches ({vendor_names}). High "
+                        "probability these vendors are the source — rotate "
+                        "credentials at them as priority targets."
+                    )
+                    corr["rationale"] = (
+                        f"Three independent signals align: (A) Hudson Rock "
+                        f"infostealer harvest count = {hr_tp}; (B) {len(spf_vendor_keys)} "
+                        f"vendor(s) in SPF send-authority chain; (C) {len(suspected)} "
+                        f"of those vendors have confirmed public breaches in "
+                        "the curated vendor_breaches.json. The intersection "
+                        "is the most actionable rotate-list."
+                    )
+                    corr["score"] = max(0, 100 - 35 - hr_tp * 5)
+                elif spf_vendor_keys:
+                    corr["severity"] = "high"
+                    corr["high_count"] = 1
+                    corr["status"] = "completed"
+                    corr["issues"].append(
+                        f"{hr_tp} third-party credential exposure(s) detected "
+                        f"(Hudson Rock) AND {len(spf_vendor_keys)} email "
+                        "vendor(s) in your SPF chain. No vendor-breach "
+                        "overlap found, but review credentials at all "
+                        f"detected vendors: {', '.join(spf_vendor_keys[:5])}."
+                    )
+                    corr["rationale"] = (
+                        f"Two signals: HR third-party count {hr_tp}; "
+                        f"{len(spf_vendor_keys)} SPF vendors. No S-5 "
+                        "breach overlap to narrow the rotate-list."
+                    )
+                    corr["score"] = max(0, 100 - 20 - hr_tp * 3)
+                else:
+                    corr["severity"] = "medium"
+                    corr["medium_count"] = 1
+                    corr["status"] = "completed"
+                    corr["issues"].append(
+                        f"{hr_tp} third-party credential exposure(s) detected "
+                        "(Hudson Rock). No SPF vendor surface or breach "
+                        "matches to cross-reference — broker should review "
+                        "the insured's SaaS inventory manually."
+                    )
+                    corr["rationale"] = (
+                        f"Single signal: HR third-party count {hr_tp}. "
+                        "No S-4 / S-5 overlap to narrow scope."
+                    )
+                    corr["score"] = max(0, 100 - 10 - hr_tp * 2)
+            results["categories"]["third_party_correlation"] = corr
+        except Exception as _corr_err:
+            results["categories"]["third_party_correlation"] = {
+                "status": "error",
+                "error": str(_corr_err)[:200],
+                "critical_count": 0, "high_count": 0,
+                "score": 100, "issues": [],
+            }
+        self._notify(on_progress, "third_party_correlation", "done")
+
         # --- Phase 5: Score ---
         # WAF / bot-manager intervention status is read once here, before
         # scoring, so the score can discount the WAF "bonus" when the WAF

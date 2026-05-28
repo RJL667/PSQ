@@ -2,7 +2,7 @@
 Section 4.6 — Exposure & Reputation
 Phishield Cyber Risk Scanner User Manual
 
-Covers all 17 sub-checkers in the Exposure & Reputation category:
+Covers all 18 sub-checkers in the Exposure & Reputation category:
   1. Credential Exposure (HIBP)
   2. IP/Domain Reputation (DNSBL)
   3. Exposed Admin Panels
@@ -20,6 +20,7 @@ Covers all 17 sub-checkers in the Exposure & Reputation category:
  15. Email-Vendor Surface (S-4)
  16. CMS Plugin Surface (S-10)
  17. Vendor Breach Correlation (S-5)
+ 18. Cross-Correlation (Hudson Rock × S-4 × S-5)
 """
 
 from manual_helpers import (
@@ -1503,8 +1504,99 @@ def build(doc):
         "refinement that addresses this."
     )
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 4.6.19  Third-Party Cross-Correlation (Hudson Rock × S-4 × S-5)
+    # ══════════════════════════════════════════════════════════════════════
+    add_h2(doc, "4.6.19  Third-Party Cross-Correlation (Hudson Rock × S-4 × S-5)")
+
+    add_bold_body(
+        doc,
+        "What it checks: ",
+        "Joins three independent risk signals into a single actionable "
+        "finding: (A) Hudson Rock's infostealer-harvested credential "
+        "count for third-party services used by the insured's employees; "
+        "(B) the email-vendor surface detected by S-4 (vendors in the "
+        "SPF send-authority chain); and (C) public-record breaches at "
+        "those vendors per the curated S-5 vendor_breaches.json "
+        "database. When all three sources align, the intersection is "
+        "the highest-priority rotate-target in the entire scan."
+    )
+
+    add_bold_body(
+        doc,
+        "How it works: ",
+        "Post-scan Phase 4f reads cat_results['hudson_rock'], "
+        "cat_results['email_vendor_surface'], and cat_results"
+        "['vendor_breach']. The cavalier.hudsonrock.com free-tier "
+        "endpoint returns aggregate counts only (no per-vendor "
+        "breakdown), so the correlation is necessarily soft: when HR "
+        "reports N third-party exposures AND M vendors are detected "
+        "in the SPF chain AND K of those vendors have known public "
+        "breaches, the K vendors in the intersection are the most "
+        "likely candidates for the HR-reported harvest. The result is "
+        "stored as cat_results['third_party_correlation'] with severity "
+        "ladder critical (triple-source match) / high (HR + SPF) / "
+        "medium (HR only)."
+    )
+
+    add_bold_body(
+        doc,
+        "Why it matters for insurance: ",
+        "This is the strongest single signal in the model because "
+        "three independent measurement methods confirm the same risk "
+        "vector. The infostealer harvest is OBSERVED (not predicted); "
+        "the vendor surface is DOCUMENTED (SPF DNS records); the "
+        "vendor breach is PUBLIC RECORD. When all three align, the "
+        "broker can write the rotate-list with confidence: 'rotate "
+        "credentials at these specific vendors before underwriting "
+        "completes.' Empirical anchor: Hudson Rock's 2024 infostealer "
+        "data shows ~50% of compromised credentials are reused across "
+        "multiple SaaS, and post-breach key rotation at vendors is "
+        "incomplete years after disclosure (Ponemon Third-Party Risk "
+        "2023)."
+    )
+
+    add_bold_body(
+        doc,
+        "Scoring: ",
+        "Wired as a P1 RSI factor (+0.06 raw on critical triple-source "
+        "match; +0.04 on high HR+SPF match), with the same magnitude "
+        "as RDP exposure (the dominant primary-access ransomware "
+        "vector). Adds +0.04 / +0.02 to the financial-impact "
+        "vulnerability uplift, stacking within the 0.15 cap. Triggers "
+        "a dedicated REMEDIATION_MAP row with R0–R3,600 per vendor "
+        "(credential rotation is cheap; the value is in the "
+        "specificity of the rotate-list)."
+    )
+
+    add_note(
+        doc,
+        "Surface coverage: this finding is explicitly rendered in "
+        "ALL six broker-facing surfaces — HTML cat-card (Exposure & "
+        "Reputation), top recommendations block (auto via "
+        "RECOMMENDATIONS), PDF body cat_third_party_correlation, PDF "
+        "Broker Summary spotlight row, PDF Executive Deck Slide 4 "
+        "Supply-Chain Exposure (7th card), Executive Deck Slide 7 "
+        "Next Steps (promoted to Step 1 when critical). The "
+        "verification harness asserts the signal appears in all "
+        "rendered outputs."
+    )
+
+    add_warning(
+        doc,
+        "Soft-correlation caveat: the free Hudson Rock endpoint "
+        "returns aggregate counts only, not per-vendor names. The "
+        "'suspected vendors' list is therefore the intersection of "
+        "S-4 detected vendors and S-5 breach database — it identifies "
+        "the highest-probability candidates, NOT a confirmed mapping. "
+        "Brokers should treat the rotate-list as priority targets, not "
+        "as definitive attribution. A v1.2 enhancement to fetch per-"
+        "vendor data from a richer Hudson Rock endpoint would tighten "
+        "the attribution."
+    )
+
     # ── Section summary ──────────────────────────────────────────────────
-    add_h2(doc, "4.6.18  Section Summary — Interpreting Exposure Results")
+    add_h2(doc, "4.6.20  Section Summary — Interpreting Exposure Results")
 
     add_body(
         doc,
