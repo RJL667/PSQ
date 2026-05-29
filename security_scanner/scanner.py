@@ -325,7 +325,8 @@ class SecurityScanner:
         # never scanned (they may have been reassigned to a third party).
         try:
             from origin_discovery import discover_origin_ips
-            origin = discover_origin_ips(domain, self.securitytrails_api_key)
+            origin = discover_origin_ips(domain, self.securitytrails_api_key,
+                                         self.shodan_api_key)
         except Exception as e:
             origin = {"status": "error", "error": str(e),
                       "candidates": [], "verified": [], "unverified": []}

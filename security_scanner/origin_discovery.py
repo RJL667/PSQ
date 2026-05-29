@@ -39,7 +39,9 @@ except ImportError:
     CRYPTO_AVAILABLE = False
 
 ST_HISTORY_URL = "https://api.securitytrails.com/v1/history/{domain}/dns/a"
-MAX_CANDIDATES = 15          # cap historical IPs we will verify
+SHODAN_COUNT_URL = "https://api.shodan.io/shodan/host/count"
+SHODAN_SEARCH_URL = "https://api.shodan.io/shodan/host/search"
+MAX_CANDIDATES = 25          # cap candidate IPs we will verify (both sources merged)
 VERIFY_TIMEOUT = 5           # seconds per TLS handshake
 VERIFY_WORKERS = 8
 
@@ -70,6 +72,44 @@ def _fetch_historical_a(domain: str, api_key: str) -> list:
                 seen.add(ip)
                 ips.append(ip)
     return ips[:MAX_CANDIDATES]
+
+
+def _shodan_cert_hosts(domain: str, api_key: str):
+    """Query Shodan for hosts presenting a certificate for the domain.
+
+    Returns (cert_host_count, search_ips, search_used):
+      - cert_host_count: total hosts Shodan indexes with this cert. Uses the
+        FREE /host/count endpoint (no query credits) — works on the free 'oss'
+        plan, so this hint is always available.
+      - search_ips: the actual IPs, from /host/search. That endpoint requires
+        a paid plan (Membership+); on the free plan it returns 403 and we fall
+        back to count-only. So the moment a paid key is inserted, real origin
+        IPs start flowing in automatically — no code change needed.
+      - search_used: True if the paid search returned results.
+    """
+    count, ips, used = None, [], False
+    if not REQUESTS_AVAILABLE:
+        return count, ips, used
+    query = f"ssl.cert.subject.cn:{domain}"
+    try:
+        rc = requests.get(SHODAN_COUNT_URL,
+                          params={"key": api_key, "query": query}, timeout=15)
+        if rc.status_code == 200:
+            count = rc.json().get("total")
+    except Exception:
+        pass
+    try:
+        rs = requests.get(SHODAN_SEARCH_URL,
+                          params={"key": api_key, "query": query}, timeout=20)
+        if rs.status_code == 200:
+            used = True
+            for m in (rs.json().get("matches") or []):
+                ip = (m.get("ip_str") or "").strip()
+                if ip:
+                    ips.append(ip)
+    except Exception:
+        pass
+    return count, ips, used
 
 
 def _cert_names(der: bytes) -> set:
@@ -124,45 +164,73 @@ def _verify_origin(ip: str, domain: str) -> bool:
 
 
 def discover_origin_ips(domain: str,
-                        securitytrails_api_key: Optional[str] = None) -> dict:
-    """Discover + verify Cloudflare-bypass origin IPs.
+                        securitytrails_api_key: Optional[str] = None,
+                        shodan_api_key: Optional[str] = None) -> dict:
+    """Discover + verify Cloudflare-bypass origin IPs from two sources.
+
+    Sources:
+      - SecurityTrails historical A-records (free-tier key).
+      - Shodan certificate match: the FREE /host/count endpoint always yields a
+        cert-host COUNT hint; the paid /host/search endpoint contributes actual
+        candidate IPs only when a Membership+ key is present (auto-activates on
+        key swap — see _shodan_cert_hosts).
 
     Returns:
-      status      — skipped (no key) / no_data / completed / error
-      candidates  — all historical IPs considered
-      verified    — IPs that currently serve the domain's certificate (SAFE
-                    to scan; the caller adds these to the IP pool)
-      unverified  — candidates that did not serve the cert (surfaced only,
-                    NEVER scanned)
+      status            — skipped (no keys) / completed / error
+      candidates        — all candidate IPs considered (both sources, deduped)
+      verified          — IPs that currently serve the domain's certificate
+                          (SAFE to scan; the caller adds these to the IP pool)
+      unverified        — candidates that did not serve the cert (surfaced
+                          only, NEVER scanned)
+      shodan_cert_hosts — Shodan's count of hosts presenting this cert (hint;
+                          None if no Shodan key). If this exceeds the number of
+                          verified origins, there are likely origin IPs we
+                          could not retrieve (free plan) — upgrade to fetch them
+      shodan_search_used — True if the paid Shodan search contributed IPs
     """
     domain = (domain or "").strip().lower()
     domain = domain.removeprefix("https://").removeprefix("http://").split("/")[0]
     out = {"status": "skipped", "domain": domain,
-           "candidates": [], "verified": [], "unverified": []}
-    if not securitytrails_api_key:
+           "candidates": [], "verified": [], "unverified": [],
+           "shodan_cert_hosts": None, "shodan_search_used": False}
+    if not securitytrails_api_key and not shodan_api_key:
         return out
 
-    candidates = _fetch_historical_a(domain, securitytrails_api_key)
+    candidates, seen = [], set()
+
+    def _add(ips):
+        for ip in ips or []:
+            if ip and ip not in seen:
+                seen.add(ip)
+                candidates.append(ip)
+
+    if securitytrails_api_key:
+        _add(_fetch_historical_a(domain, securitytrails_api_key))
+    if shodan_api_key:
+        count, shodan_ips, used = _shodan_cert_hosts(domain, shodan_api_key)
+        out["shodan_cert_hosts"] = count
+        out["shodan_search_used"] = used
+        _add(shodan_ips)
+
+    candidates = candidates[:MAX_CANDIDATES]
     out["candidates"] = candidates
-    if not candidates:
-        out["status"] = "no_data"
-        return out
 
     verified, unverified = [], []
-    with ThreadPoolExecutor(max_workers=VERIFY_WORKERS) as ex:
-        futs = {ex.submit(_verify_origin, ip, domain): ip for ip in candidates}
-        try:
-            for fut in as_completed(futs, timeout=VERIFY_TIMEOUT * 3):
-                ip = futs[fut]
-                try:
-                    (verified if fut.result() else unverified).append(ip)
-                except Exception:
-                    unverified.append(ip)
-        except Exception:
-            # Timeout on the batch — treat any unresolved candidate as unverified.
-            for fut, ip in futs.items():
-                if ip not in verified and ip not in unverified:
-                    unverified.append(ip)
+    if candidates:
+        with ThreadPoolExecutor(max_workers=VERIFY_WORKERS) as ex:
+            futs = {ex.submit(_verify_origin, ip, domain): ip for ip in candidates}
+            try:
+                for fut in as_completed(futs, timeout=VERIFY_TIMEOUT * 3):
+                    ip = futs[fut]
+                    try:
+                        (verified if fut.result() else unverified).append(ip)
+                    except Exception:
+                        unverified.append(ip)
+            except Exception:
+                # Batch timeout — treat any unresolved candidate as unverified.
+                for fut, ip in futs.items():
+                    if ip not in verified and ip not in unverified:
+                        unverified.append(ip)
 
     out["verified"] = verified
     out["unverified"] = unverified

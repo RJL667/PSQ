@@ -1459,8 +1459,10 @@
 
     <!-- Cloudflare-Bypass Origin Discovery -->
     {% set od = results.categories.get('origin_discovery', {}) %}
-    {% if od.get('status') == 'completed' and (od.get('verified') or od.get('unverified')) %}
-    {% set od_tl = 'tl-crimson' if od.get('verified') else 'tl-amber' %}
+    {% set od_certhosts = od.get('shodan_cert_hosts') %}
+    {% if od.get('status') == 'completed' and (od.get('verified') or od.get('unverified') or od_certhosts) %}
+    {% set od_gap = (od_certhosts is not none) and (od_certhosts > (od.get('verified') | length)) %}
+    {% set od_tl = 'tl-crimson' if od.get('verified') else ('tl-amber' if (od.get('unverified') or od_gap) else 'tl-green') %}
     <div class="cat-card" style="grid-column: 1 / -1;">
       <div class="cat-header" onclick="toggle(this)">
         <div class="cat-left"><div class="traffic-light {{ od_tl }}"></div><div class="cat-title">Origin IP Discovery (CDN bypass)</div></div>
@@ -1468,6 +1470,14 @@
       </div>
       <div class="cat-body">
         <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px;">Historical-DNS IPs that may be the real server behind the CDN. <strong>Verified</strong> origins currently serve this domain's TLS certificate (confirmed by cert match) and were scanned as part of the assessment. <strong>Candidate</strong> IPs did not present the certificate and were <em>not</em> scanned (they may have been reassigned).</p>
+        {% if od_certhosts is not none %}
+        <div style="background:{% if od_gap %}rgba(217,119,6,0.10){% else %}var(--surface2){% endif %};border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;">
+          <strong>Shodan certificate match:</strong> {{ od_certhosts }} host(s) on the internet present this domain's certificate.
+          {% if od_gap %}<span style="color:#d97706;">This exceeds the {{ od.get('verified') | length }} origin(s) confirmed via DNS history — there are likely <strong>undiscovered origin server(s)</strong> directly exposed behind the CDN.</span>
+          {% if not od.get('shodan_search_used') %} A paid Shodan plan is required to retrieve and scan these IPs (currently count-only on the free tier).{% endif %}
+          {% endif %}
+        </div>
+        {% endif %}
         {% if od.get('verified') %}
         <div style="margin-bottom:8px;"><strong style="color:var(--critical);">Verified origins (scanned):</strong></div>
         <div class="port-list" style="margin-bottom:12px;">{% for ip in od.verified %}<span class="port-chip port-critical">{{ ip }}</span>{% endfor %}</div>

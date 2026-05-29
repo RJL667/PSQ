@@ -29,11 +29,46 @@ outstanding item lands.
 
 | API | Current tier | Required tier for 4,000-cohort | Estimated monthly cost | Action by |
 |---|---|---|---|---|
-| Shodan | Free (1 IP/month) | Paid tier supporting ~30 IP lookups/day | R5-10k/month for 7 months | Before 1 July 2026 |
-| SecurityTrails | Free (100/month) | Paid tier for sustained usage | Similar order of magnitude | Before 1 July 2026 |
+| Shodan | Free `oss` (0 query credits — confirmed via `/api-info` 2026-05-29) | **Freelancer ($69/mo, 10,000 query credits)** unlocks search + origin cert-search. One-time **Membership (~$49, 100 credits/mo)** is a low-volume stopgap. | ~$69/mo (≈R1,300) if per-IP vuln data stays on free InternetDB and only origin cert-search spends credits (~1 credit/scan). Higher only if per-IP `/shodan/host/{ip}` lookups are also moved to the paid API. | Before 1 July 2026 — **also gates origin IP discovery (see §5, item 4c), which is a scanner-breaking RDP false-negative on CDN-fronted targets** |
+| SecurityTrails | Free (100/month; history endpoint works on current key — confirmed 2026-05-29, NOT paid-gated) | Paid tier for sustained usage | Similar order of magnitude | Before 1 July 2026 |
 | VirusTotal | Free (4/min, 500/day) | No upgrade needed | — | n/a |
 | IntelX | **Trial expired 2026-04-08** | Pick alternative or remove from pipeline | Decision pending | Before 1 July 2026 |
 | HIBP, Hudson Rock, OSV.dev | Free unlimited | No upgrade needed | — | n/a |
+
+### Shodan origin cert-search — how to make it live
+
+Origin IP discovery (`origin_discovery.py`) is **already wired and deployed**.
+It works in two stages and the paid stage **auto-activates the moment a paid
+key is in place — no code change or redeploy of logic is needed**:
+
+1. **Free stage (live now):** `/shodan/host/count` returns how many internet
+   hosts present the target's TLS certificate. Surfaced in the report as the
+   "Origin IP Discovery" card. When that count exceeds the origins we confirm
+   via DNS history, the report flags a likely **undiscovered exposed origin**.
+2. **Paid stage (pending key):** `/shodan/host/search` returns the actual
+   origin IPs. On the free `oss` plan it returns HTTP 403 and we fall back to
+   count-only. On a paid plan it returns the IPs, which are then TLS-cert
+   verified and scanned like any other origin.
+
+**Go-live steps:**
+1. Buy a Shodan plan — **Freelancer ($69/mo)** recommended (10,000 query
+   credits/mo); or one-time **Membership (~$49)** for low volume. Buy it on
+   the Shodan account **whose API key is already set in Render** (so credits
+   attach to that key), or buy on a new account and update the key in step 2.
+2. Set / confirm `SHODAN_API_KEY` in the Render environment for the scanner
+   service (Render → service → Environment). No code change required.
+3. (Optional) verify with `GET https://api.shodan.io/api-info?key=...` —
+   `query_credits` should be > 0 and `plan` should read `dev`/`member`/etc.,
+   not `oss`.
+4. Next scan of a CDN-fronted domain will retrieve + verify + scan the real
+   origin IPs automatically; the "Origin IP Discovery" card switches from a
+   count-only hint to listing the verified origins.
+
+Budget note: keep per-IP vulnerability data on the **free InternetDB** path
+(current default) so Shodan credits are spent only on the ~1-credit-per-scan
+cert-search. Moving `/shodan/host/{ip}` per-IP lookups onto the paid API is
+the larger credit consumer (~1 credit per discovered IP per scan) and is a
+separate decision.
 
 ## 3. Peer benchmarking rollout (SCN-028)
 
@@ -63,7 +98,7 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 | Phase | Item | Status |
 |---|---|---|
 | 4b | CMS admin path detection (dynamic from tech stack) | Open |
-| 4c | CDN origin IP leakage | Open |
+| 4c | CDN origin IP leakage / origin discovery | **Partial — implemented (`origin_discovery.py`, 2026-05-29):** SecurityTrails historical-DNS candidates + TLS cert-match verification live; verified origins scanned, candidates surfaced. Free Shodan cert-host count hint live. **Full Shodan cert-search IP retrieval pending paid key (see §2 go-live).** Also: RDP exposure now reconciled across all discovered IPs, not just the apex (was a false-negative on CDN-fronted targets). |
 | 4d | MFA presence on VPN login pages | Open |
 | 4e | WAF rate limiting / bot protection detection | Open |
 | 4f | DNSSEC validation chain | Open |

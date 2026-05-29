@@ -982,14 +982,18 @@ def origin_discovery_block(d, S):
         return []
     verified = od.get("verified", []) or []
     unverified = od.get("unverified", []) or []
-    if not verified and not unverified:
+    cert_hosts = od.get("shodan_cert_hosts")
+    gap = (cert_hosts is not None) and (cert_hosts > len(verified))
+    if not verified and not unverified and cert_hosts is None:
         return []
-    col = C_CRITICAL if verified else C_AMBER
+    col = C_CRITICAL if verified else (C_AMBER if (unverified or gap) else C_GREEN)
     rows = []
     if verified:
         rows.append(("Verified origins (scanned)", ", ".join(verified)))
     if unverified:
         rows.append(("Candidate origins (not scanned)", ", ".join(unverified)))
+    if cert_hosts is not None:
+        rows.append(("Shodan cert-host count", str(cert_hosts)))
     fb = ("Real server IP(s) behind the CDN were confirmed by TLS certificate match and "
           "scanned as part of this assessment." if verified else
           "Historical IP(s) that may sit behind the CDN were found but did not present this "
@@ -1006,6 +1010,15 @@ def origin_discovery_block(d, S):
         "<b>Candidate</b> IPs came from historical DNS but did not present the certificate, so they "
         "were not scanned (they may have been reassigned to another party).",
         S["body"]))
+    if gap:
+        parts.append(Spacer(1, 1 * mm))
+        msg = (f"Shodan indexes <b>{cert_hosts}</b> host(s) presenting this domain's certificate — "
+               f"more than the {len(verified)} origin(s) confirmed via DNS history. This strongly "
+               f"suggests one or more origin servers are directly exposed behind the CDN.")
+        if not od.get("shodan_search_used"):
+            msg += (" Retrieving and scanning these IPs requires a paid Shodan plan; the current "
+                    "key can only return the count.")
+        parts.append(Paragraph(msg, S["body"]))
     parts.append(Spacer(1, 3 * mm))
     return parts
 
