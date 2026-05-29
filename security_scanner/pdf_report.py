@@ -974,6 +974,42 @@ def cat_vpn(d, S):
     return parts
 
 
+def origin_discovery_block(d, S):
+    """Cloudflare-bypass origin IPs. Verified origins (TLS cert match) were
+    scanned; unverified candidates are surfaced for awareness only."""
+    od = d.get("origin_discovery", {}) or {}
+    if od.get("status") != "completed":
+        return []
+    verified = od.get("verified", []) or []
+    unverified = od.get("unverified", []) or []
+    if not verified and not unverified:
+        return []
+    col = C_CRITICAL if verified else C_AMBER
+    rows = []
+    if verified:
+        rows.append(("Verified origins (scanned)", ", ".join(verified)))
+    if unverified:
+        rows.append(("Candidate origins (not scanned)", ", ".join(unverified)))
+    fb = ("Real server IP(s) behind the CDN were confirmed by TLS certificate match and "
+          "scanned as part of this assessment." if verified else
+          "Historical IP(s) that may sit behind the CDN were found but did not present this "
+          "domain's certificate — listed for awareness, not scanned.")
+    parts = build_cat_card("Origin IP Discovery (CDN bypass)", col,
+                           f"{len(verified)} verified / {len(unverified)} candidate",
+                           rows, [], S, fallback=fb)
+    parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
+    parts.append(Spacer(1, 1 * mm))
+    parts.append(Paragraph(
+        "A CDN/WAF (e.g. Cloudflare) normally hides the origin server's real IP. <b>Verified</b> "
+        "origins currently serve this domain's TLS certificate — confirmed to be the organisation's "
+        "own infrastructure and scanned for exposed services (RDP, databases, admin panels). "
+        "<b>Candidate</b> IPs came from historical DNS but did not present the certificate, so they "
+        "were not scanned (they may have been reassigned to another party).",
+        S["body"]))
+    parts.append(Spacer(1, 3 * mm))
+    return parts
+
+
 def cat_breaches(d, S):
     br    = d.get("breaches", {})
     count = br.get("breach_count", 0)
@@ -3626,9 +3662,11 @@ def build_summary_table(results: dict, S) -> Table:
             row("Data Breach Index", f"{dbi_score}/100",
             _tl(dbi_score >= 70, dbi_score >= 40)))
 
-    # Est. Annual Loss from insurance analytics
+    # Est. Annual Loss from insurance analytics — Monte Carlo P50 median,
+    # the same basis the executive deck headlines. (Was previously the PERT
+    # expected/mean ALE, which disagreed with the P50 shown everywhere else.)
     fin_ins = ins.get("financial_impact", {})
-    fin_ml  = fin_ins.get("estimated_annual_loss", {}).get("most_likely")
+    fin_ml  = fin_ins.get("monte_carlo", {}).get("total", {}).get("p50")
     if fin_ml is not None:
         cur_sym   = "R" if fin_ins.get("currency") == "ZAR" else "$"
         fin_score = fin_ins.get("score", 50)
@@ -3657,72 +3695,97 @@ def build_summary_table(results: dict, S) -> Table:
     cms_cat = cats.get("cms_plugin_sbom", {})
     vb_cat = cats.get("vendor_breach", {})
 
-    sc_findings = []
-    sc_crit_count = 0
-    sc_high_count = 0
-    if rd_cat.get("status") == "completed":
-        c = rd_cat.get("critical_count", 0)
-        h = rd_cat.get("high_count", 0)
-        sc_crit_count += c
-        sc_high_count += h
-        if c or h:
-            sc_findings.append(f"{c + h} sibling finding(s)")
+    # Worst-severity rollup across the supply-chain signals. Thresholds
+    # MIRROR the per-card severities on the executive-deck supply-chain
+    # slide (_assessment_slide_supply_chain) so this row can never read
+    # "Clean" while the deck shows MEDIUM/CRITICAL. KEEP IN SYNC with that
+    # slide's classification. MEDIUM-tier signals count here (previously
+    # they were silently dropped, producing a false "Clean").
+    sc_n = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0}
+
+    def _sc_bump(level):
+        if level in sc_n:
+            sc_n[level] += 1
+
     if dm_cat.get("status") == "completed":
-        crit_cves = dm_cat.get("total_critical_cves", 0)
-        manifests = len(dm_cat.get("exposed_manifests", []) or [])
-        if crit_cves > 0:
-            sc_crit_count += 1
-            sc_findings.append(f"{crit_cves} crit CVE(s) via {manifests} manifest(s)")
-        elif manifests > 0:
-            sc_high_count += 1
-            sc_findings.append(f"{manifests} manifest(s) exposed")
+        if dm_cat.get("total_critical_cves", 0) > 0:
+            _sc_bump("CRITICAL")
+        elif dm_cat.get("exposed_manifests"):
+            _sc_bump("HIGH")
     if tpjs_cat.get("status") == "completed":
         comp = tpjs_cat.get("compromised_host_count", 0)
-        missing_sri = tpjs_cat.get("missing_sri_count", 0)
         third = tpjs_cat.get("third_party_count", 0)
+        missing_sri = tpjs_cat.get("missing_sri_count", 0)
         if comp > 0:
-            sc_crit_count += 1
-            sc_findings.append(f"{comp} compromised CDN script(s)")
+            _sc_bump("CRITICAL")
         elif third > 0 and missing_sri / max(1, third) > 0.5:
-            sc_high_count += 1
-            sc_findings.append(f"{missing_sri}/{third} 3rd-party scripts w/o SRI")
+            _sc_bump("HIGH")
     if evs_cat.get("status") == "completed":
-        if evs_cat.get("weak_dmarc") and evs_cat.get("vendor_count", 0) >= 1:
-            sc_high_count += 1
-            sc_findings.append(
-                f"{evs_cat['vendor_count']} email vendor(s) + weak DMARC")
+        cnt = evs_cat.get("vendor_count", 0)
+        if evs_cat.get("weak_dmarc") and cnt >= 1:
+            _sc_bump("HIGH")
+        elif cnt >= 6:
+            _sc_bump("MEDIUM")
     if cms_cat.get("status") == "completed" and cms_cat.get("is_wordpress"):
-        v = cms_cat.get("versioned_count", 0)
-        if v >= 1:
-            sc_high_count += 1
-            sc_findings.append(f"{v} WP plugin version(s) readable")
+        if cms_cat.get("versioned_count", 0) >= 1:
+            _sc_bump("HIGH")
+        elif cms_cat.get("plugin_count", 0) >= 5:
+            _sc_bump("MEDIUM")
     if vb_cat.get("status") == "completed":
-        c = vb_cat.get("critical_match_count", 0)
-        h = vb_cat.get("high_match_count", 0)
-        if c > 0:
-            sc_crit_count += 1
-            sc_findings.append(f"{c} critical vendor breach match(es)")
-        elif h > 0:
-            sc_high_count += 1
-            sc_findings.append(f"{h} high-severity vendor breach match(es)")
+        if vb_cat.get("critical_match_count", 0) > 0:
+            _sc_bump("CRITICAL")
+        elif vb_cat.get("high_match_count", 0) > 0:
+            _sc_bump("HIGH")
+        elif vb_cat.get("matches"):
+            _sc_bump("MEDIUM")
+    if rd_cat.get("status") == "completed":
+        if rd_cat.get("critical_count", 0) > 0:
+            _sc_bump("CRITICAL")
+        elif rd_cat.get("high_count", 0) > 0:
+            _sc_bump("HIGH")
 
-    # Render the aggregate row when any supply-chain checker reported
-    # data (status=completed somewhere) — broker should see the
-    # baseline even when clean.
+    # Phase-4f cross-correlation is reporting-only (no score) but IS
+    # surfaced — a triple-source CRITICAL must not be hidden behind "Clean".
+    tpc_cat = cats.get("third_party_correlation", {})
+    sc_cross = None
+    if tpc_cat.get("status") == "completed":
+        if tpc_cat.get("critical_count", 0) > 0:
+            susp = tpc_cat.get("suspected_vendors") or []
+            names = ", ".join(s.get("vendor", "?") for s in susp[:2])
+            sc_cross = ("CRITICAL", f"cross-vendor CRITICAL — rotate at {names}"
+                        if names else "cross-vendor CRITICAL")
+        elif tpc_cat.get("high_count", 0) > 0:
+            sc_cross = ("HIGH", "cross-vendor HIGH")
+
     sc_any_completed = any(
         c.get("status") == "completed" for c in
         (rd_cat, dm_cat, tpjs_cat, evs_cat, cms_cat, vb_cat)
     )
-    if sc_any_completed:
-        if sc_crit_count > 0:
-            sc_label = f"{sc_crit_count} critical / {sc_high_count} high"
+    if sc_any_completed or sc_cross:
+        # Worst severity drives the colour; the cross-correlation can lift it.
+        if sc_n["CRITICAL"] > 0 or (sc_cross and sc_cross[0] == "CRITICAL"):
             sc_col = C_CRITICAL
-        elif sc_high_count > 0:
-            sc_label = f"{sc_high_count} high-severity finding(s)"
-            sc_col = C_RED if sc_high_count > 2 else C_AMBER
+        elif sc_n["HIGH"] > 0 or (sc_cross and sc_cross[0] == "HIGH"):
+            sc_col = C_RED
+        elif sc_n["MEDIUM"] > 0:
+            sc_col = C_AMBER
         else:
-            sc_label = "Clean"
             sc_col = C_GREEN
+        # Broker-facing wording: lead with the urgent cross-vendor action,
+        # then the count of contributing signals by severity.
+        bits = []
+        if sc_cross:
+            bits.append(sc_cross[1])
+        counts = []
+        if sc_n["CRITICAL"]:
+            counts.append(f"{sc_n['CRITICAL']} critical")
+        if sc_n["HIGH"]:
+            counts.append(f"{sc_n['HIGH']} high")
+        if sc_n["MEDIUM"]:
+            counts.append(f"{sc_n['MEDIUM']} medium")
+        if counts:
+            bits.append(", ".join(counts) + " signal(s)")
+        sc_label = " · ".join(bits) if bits else "Clean"
         rows.append(row("Supply-Chain Risk", sc_label, sc_col))
 
     # Spotlight rows — only when the underwriter genuinely benefits.
@@ -4052,6 +4115,57 @@ def _build_vulnerability_posture(results: dict, S) -> list:
     return parts
 
 
+_KILL_CHAIN_SEV_ORDER = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+
+def _kill_chain_severities(results: dict) -> dict:
+    """Single source of truth for the four attacker-kill-chain phase severities.
+
+    Both the full/broker Attacker's View (_build_attackers_view) and the
+    executive-deck kill chain (_assessment_kill_chain) call this, so the two
+    outputs can never disagree on phase severity again. Logic is the deck's
+    (the one that matched the underlying data): Phase 3 keys off CVEs / SSL /
+    header score with a real LOW tier; Phase 4 keys off RSI bands + DB exposure.
+    """
+    cats = results.get("categories", {}) or {}
+    ins = results.get("insurance", {}) or {}
+
+    # Phase 1 — Reconnaissance
+    ip_count = cats.get("external_ips", {}).get("total_unique_ips", 0)
+    emails = cats.get("dehashed", {}).get("unique_emails", 0)
+    recon = ("HIGH" if (ip_count > 5 or emails > 3)
+             else "MEDIUM" if (ip_count > 1 or emails > 0) else "LOW")
+
+    # Phase 2 — Initial Access
+    rdp = cats.get("vpn_remote", {}).get("rdp_exposed", False)
+    hrp = cats.get("high_risk_protocols", {}).get("exposed_services", []) or []
+    cred_leaks = cats.get("dehashed", {}).get("total_entries", 0)
+    infostealers = cats.get("hudson_rock", {}).get("compromised_employees", 0)
+    access = ("CRITICAL" if (rdp or infostealers > 0)
+              else "HIGH" if (len(hrp) > 0 or cred_leaks > 5)
+              else "MEDIUM" if cred_leaks > 0 else "LOW")
+
+    # Phase 3 — Exploitation
+    osv = cats.get("osv_vulns", {})
+    osv_crit = osv.get("critical_count", 0)
+    osv_high = osv.get("high_count", 0)
+    ssl_grade = cats.get("ssl", {}).get("grade", "A")
+    hh_score = cats.get("http_headers", {}).get("score", 100)
+    exploit = ("CRITICAL" if osv_crit > 0
+               else "HIGH" if (osv_high > 0 or ssl_grade in ("D", "E", "F"))
+               else "MEDIUM" if hh_score < 50 else "LOW")
+
+    # Phase 4 — Data Access & Impact
+    db_ports = {3306, 5432, 27017, 6379, 9200, 1433}
+    db_exposed = any(s.get("port") in db_ports for s in hrp)
+    rsi = ins.get("rsi", {}).get("rsi_score", 0)
+    data = ("CRITICAL" if (db_exposed or rsi >= 0.75)
+            else "HIGH" if rsi >= 0.50
+            else "MEDIUM" if rsi >= 0.25 else "LOW")
+
+    return {"recon": recon, "access": access, "exploit": exploit, "data": data}
+
+
 def _build_attackers_view(results: dict, S) -> list:
     """Build an Attacker's View section that maps findings to the cyber kill chain."""
     cats = results.get("categories", {})
@@ -4066,6 +4180,10 @@ def _build_attackers_view(results: dict, S) -> list:
         "in a typical attack.</i>", S["body_muted"]))
     parts.append(Spacer(1, 3 * mm))
 
+    # Phase severities come from the shared helper so this view and the
+    # executive-deck kill chain stay in lock-step.
+    sevs = _kill_chain_severities(results)
+
     rows = []
     bgs = []
 
@@ -4075,7 +4193,7 @@ def _build_attackers_view(results: dict, S) -> list:
     tech = cats.get("tech_stack", {})
     dh = cats.get("dehashed", {})
     emails = dh.get("unique_emails", 0)
-    recon_risk = "HIGH" if (ip_count > 5 or emails > 3) else ("MEDIUM" if (ip_count > 1 or emails > 0) else "LOW")
+    recon_risk = sevs["recon"]
     recon_findings = []
     if ip_count: recon_findings.append(f"{ip_count} external IPs discoverable")
     if sub_count: recon_findings.append(f"{sub_count} subdomains enumerable")
@@ -4099,7 +4217,7 @@ def _build_attackers_view(results: dict, S) -> list:
     cred_leaks = dh.get("total_entries", 0)
     hr = cats.get("hudson_rock", {})
     infostealers = hr.get("compromised_employees", 0)
-    access_risk = "CRITICAL" if (rdp or infostealers > 0) else ("HIGH" if (len(hrp) > 0 or cred_leaks > 5) else ("MEDIUM" if cred_leaks > 0 else "LOW"))
+    access_risk = sevs["access"]
     access_findings = []
     if rdp: access_findings.append("RDP (port 3389) exposed — primary ransomware entry vector, brute-force attack possible")
     for svc in hrp[:3]:
@@ -4123,7 +4241,7 @@ def _build_attackers_view(results: dict, S) -> list:
     shodan = cats.get("shodan_vulns", {})
     shodan_cves = shodan.get("total_cves", 0)
     ssl_grade = cats.get("ssl", {}).get("grade", "A")
-    exploit_risk = "CRITICAL" if osv_crit > 0 else ("HIGH" if (osv_high > 0 or ssl_grade in ("D", "E", "F")) else "MEDIUM")
+    exploit_risk = sevs["exploit"]
     exploit_findings = []
     if osv_crit: exploit_findings.append(f"{osv_crit} critical CVE(s) with known exploits — remote code execution possible")
     if osv_high: exploit_findings.append(f"{osv_high} high-severity CVE(s) — privilege escalation and data access")
@@ -4139,42 +4257,22 @@ def _build_attackers_view(results: dict, S) -> list:
         r, bg = kv_row("", f"• {f}", S, alt=True)
         rows.append(r); bgs.append(bg)
 
-    # Phase 4: Data Access & Impact
-    # Severity incorporates financial impact — a high financial impact cannot be LOW
+    # Phase 4: Data Access & Impact (severity from shared kill-chain helper)
     db_exposed = any(s.get("port") in (3306, 5432, 27017, 6379, 9200, 1433) for s in hrp)
     ix = cats.get("intelx", {})
     darkweb = ix.get("total_results", 0)
-    fin = ins.get("financial_impact", {}).get("total", {})
-    fin_most_likely = fin.get("most_likely", 0)
-    fin_revenue = ins.get("financial_impact", {}).get("annual_revenue_zar", 0)
-    fin_loss_pct = fin_most_likely / fin_revenue if fin_revenue > 0 else 0
-
-    # Determine base risk from technical signals
-    if db_exposed:
-        data_risk = "CRITICAL"
-    elif darkweb > 10:
-        data_risk = "HIGH"
-    elif darkweb > 0:
-        data_risk = "MEDIUM"
-    else:
-        data_risk = "LOW"
-
-    # Elevate based on financial impact severity
-    if fin_loss_pct >= 0.30:
-        data_risk = max(data_risk, "CRITICAL", key=lambda x: ["LOW", "MEDIUM", "HIGH", "CRITICAL"].index(x))
-    elif fin_loss_pct >= 0.15:
-        data_risk = max(data_risk, "HIGH", key=lambda x: ["LOW", "MEDIUM", "HIGH", "CRITICAL"].index(x))
-    elif fin_loss_pct >= 0.08:
-        data_risk = max(data_risk, "MEDIUM", key=lambda x: ["LOW", "MEDIUM", "HIGH", "CRITICAL"].index(x))
+    fin = ins.get("financial_impact", {})
+    fin_p50 = fin.get("monte_carlo", {}).get("total", {}).get("p50", 0)
+    data_risk = sevs["data"]
 
     data_findings = []
     if db_exposed: data_findings.append("Databases directly internet-facing — attacker can extract all business data without further escalation")
     if darkweb > 0: data_findings.append(f"{darkweb} references in dark web databases — stolen data is already circulating in criminal networks")
     rsi = ins.get("rsi", {}).get("rsi_score", 0)
     if rsi > 0.5: data_findings.append(f"Ransomware susceptibility {rsi:.0%} — high probability of ransomware deployment after access is gained")
-    if fin_most_likely:
-        cur = "R" if ins.get("financial_impact", {}).get("currency") == "ZAR" else "$"
-        data_findings.append(f"Estimated financial impact: {cur}&nbsp;{fin_most_likely:,.0f} (Monte Carlo P50 median)")
+    if fin_p50:
+        cur = "R" if fin.get("currency") == "ZAR" else "$"
+        data_findings.append(f"Estimated financial impact: {cur}&nbsp;{fin_p50:,.0f} (Monte Carlo P50 median)")
     if not data_findings: data_findings.append("Limited external data access vectors identified")
 
     rows.append([Paragraph(f"<b><font color='{_PHASE_FG[data_risk]}'>Phase 4: DATA ACCESS & IMPACT [{data_risk}]</font></b>", S["kv_key"]),
@@ -4320,13 +4418,15 @@ def _assessment_kill_chain(results: dict) -> list:
     """Compact 4-phase kill chain. Each: {name, severity, headline, findings[<=3]}."""
     cats = results.get("categories", {})
     ins  = results.get("insurance", {})
+    # Shared with the full/broker Attacker's View so severities never diverge.
+    sevs = _kill_chain_severities(results)
 
     # Phase 1: Reconnaissance
     ip_count  = cats.get("external_ips", {}).get("total_unique_ips", 0)
     sub_count = cats.get("subdomains", {}).get("total_count", 0)
     dh = cats.get("dehashed", {})
     emails = dh.get("unique_emails", 0)
-    p1_sev = "HIGH" if (ip_count > 5 or emails > 3) else ("MEDIUM" if (ip_count > 1 or emails > 0) else "LOW")
+    p1_sev = sevs["recon"]
     p1f = []
     if ip_count:  p1f.append(f"{ip_count} external IP addresses discoverable")
     if sub_count: p1f.append(f"{sub_count} subdomains can be enumerated")
@@ -4338,9 +4438,7 @@ def _assessment_kill_chain(results: dict) -> list:
     hrp = cats.get("high_risk_protocols", {}).get("exposed_services", [])
     cred_leaks = dh.get("total_entries", 0)
     infostealers = cats.get("hudson_rock", {}).get("compromised_employees", 0)
-    p2_sev = ("CRITICAL" if (rdp or infostealers > 0)
-              else "HIGH" if (len(hrp) > 0 or cred_leaks > 5)
-              else "MEDIUM" if cred_leaks > 0 else "LOW")
+    p2_sev = sevs["access"]
     p2f = []
     if rdp: p2f.append("RDP exposed on port 3389")
     elif hrp:
@@ -4356,9 +4454,7 @@ def _assessment_kill_chain(results: dict) -> list:
     hh_score  = cats.get("http_headers", {}).get("score", 100)
     osv_crit  = cats.get("osv_vulns", {}).get("critical_count", 0)
     osv_high  = cats.get("osv_vulns", {}).get("high_count", 0)
-    p3_sev = ("CRITICAL" if osv_crit > 0
-              else "HIGH" if (osv_high > 0 or ssl_grade in ("D", "E", "F"))
-              else "MEDIUM" if hh_score < 50 else "LOW")
+    p3_sev = sevs["exploit"]
     p3f = []
     if ssl_grade in ("D", "E", "F"): p3f.append(f"SSL grade {ssl_grade} enables interception")
     if hh_score < 50: p3f.append(f"Security headers at {hh_score}% only")
@@ -4376,10 +4472,7 @@ def _assessment_kill_chain(results: dict) -> list:
     fin = ins.get("financial_impact", {})
     fin_mc_p50 = fin.get("monte_carlo", {}).get("total", {}).get("p50", 0)
     cur_sym = "R" if fin.get("currency") == "ZAR" else "$"
-    p4_sev = ("CRITICAL" if (db_exposed or rsi >= 0.75)
-              else "HIGH"   if rsi >= 0.50
-              else "MEDIUM" if rsi >= 0.25
-              else "LOW")
+    p4_sev = sevs["data"]
     p4f = []
     if db_exposed: p4f.append("Databases directly internet-facing")
     if rsi:        p4f.append(f"{int(round(rsi*100))}% ransomware susceptibility")
@@ -4482,6 +4575,60 @@ def _assessment_top_findings(results: dict) -> list:
             "summary": "Common web attacks are not blocked at the browser.",
             "detail": f"Security headers at {hh}% — site is exposed to XSS, clickjacking, and content injection that modern headers would block."
         }))
+
+    # Brand-impersonation / lookalike domains
+    fd = cats.get("fraudulent_domains", {}).get("resolved_count", 0)
+    if fd > 0:
+        cands.append((52, {
+            "level": "MEDIUM" if fd > 3 else "LOW",
+            "headline": f"{fd} lookalike domain(s) registered",
+            "summary": "Brand-impersonation infrastructure targeting staff and customers.",
+            "detail": f"{fd} domains resembling this brand resolve to live infrastructure — the raw material for phishing and business-email-compromise campaigns against clients and employees."
+        }))
+
+    # Backfill so the section always surfaces the THREE highest factors,
+    # irrespective of absolute severity — never repeats a single finding when
+    # the target is otherwise healthy. These are lower-tier posture signals.
+    if len(cands) < 3:
+        have = {c[1]["headline"] for c in cands}
+        em_b = cats.get("email_security", {}).get("score", 10)
+        sub_count = cats.get("subdomains", {}).get("total_count", 0)
+        ip_count = cats.get("external_ips", {}).get("total_unique_ips", 0)
+        breach_emails = cats.get("dehashed", {}).get("unique_emails", 0)
+        backfill = []
+        if ssl_grade == "C":
+            backfill.append((38, {
+                "level": "LOW",
+                "headline": f"SSL/TLS grade {ssl_grade} — encryption could be stronger",
+                "summary": "Encryption is acceptable but not best-practice.",
+                "detail": f"SSL grade {ssl_grade} indicates older cipher suites or configuration that should be hardened to an A grade."}))
+        if 5 <= em_b < 8:
+            backfill.append((36, {
+                "level": "LOW",
+                "headline": f"Email authentication at {em_b}/10",
+                "summary": "Phishing-resistance has room to improve.",
+                "detail": "SPF/DKIM/DMARC are partially configured; tightening DMARC to p=reject reduces domain-spoofing risk."}))
+        if 40 <= hh < 80:
+            backfill.append((34, {
+                "level": "LOW",
+                "headline": f"Web security headers at {hh}%",
+                "summary": "Some browser-side protections are missing.",
+                "detail": f"Security headers at {hh}% — adding the missing headers hardens the site against XSS and clickjacking."}))
+        if breach_emails > 0:
+            backfill.append((30, {
+                "level": "LOW",
+                "headline": f"{breach_emails} staff email(s) in breach data",
+                "summary": "Reconnaissance material for targeted phishing.",
+                "detail": f"{breach_emails} staff email addresses appear in historical breach databases — useful to attackers for spear-phishing even without passwords."}))
+        if ip_count or sub_count:
+            backfill.append((22, {
+                "level": "LOW",
+                "headline": f"{ip_count} external IP(s), {sub_count} subdomain(s) discoverable",
+                "summary": "Internet-facing attack surface is enumerable.",
+                "detail": f"{ip_count} IP addresses and {sub_count} subdomains can be enumerated — a larger surface gives attackers more to probe."}))
+        for w, d in backfill:
+            if d["headline"] not in have:
+                cands.append((w, d))
 
     cands.sort(key=lambda x: -x[0])
     return [c[1] for c in cands[:4]]
@@ -4935,7 +5082,7 @@ def _assessment_slide_supply_chain(results):
             metric = f"{scanned} declared supplier(s) — clean"
     cards.append({
         "label": "S-1 Related Domains",
-        "headline": "Civil-liability inflator (Talbot mrcourier precedent)",
+        "headline": "Civil-liability inflator — supplier-domain compromise",
         "severity": sev,
         "metric": metric,
         "support": "Declared sibling/supplier domains scanned in LITE mode; "
@@ -5803,6 +5950,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
     story += _build_vulnerability_posture(results, S)
     story.append(Spacer(1, 4 * mm))
     story += _build_attackers_view(results, S)
+    story += origin_discovery_block(results.get("categories", {}), S)
 
     # ── Report type branching ───────────────────────────────────────────────
     if report_type == "summary":
@@ -6097,6 +6245,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         story += cat_hrp(cats, S)
         story += cat_cloud(cats, S)
         story += cat_vpn(cats, S)
+        story += origin_discovery_block(cats, S)
 
         # ── Exposure & Reputation ───────────────────────────────────────────
         story += section_with_first_card("EXPOSURE & REPUTATION", S, cat_breaches(cats, S))

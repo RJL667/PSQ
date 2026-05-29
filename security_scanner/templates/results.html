@@ -1457,6 +1457,29 @@
       </div>
     </div>
 
+    <!-- Cloudflare-Bypass Origin Discovery -->
+    {% set od = results.categories.get('origin_discovery', {}) %}
+    {% if od.get('status') == 'completed' and (od.get('verified') or od.get('unverified')) %}
+    {% set od_tl = 'tl-crimson' if od.get('verified') else 'tl-amber' %}
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ od_tl }}"></div><div class="cat-title">Origin IP Discovery (CDN bypass)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">{{ od.get('verified') | length }} verified, {{ od.get('unverified') | length }} candidate</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px;">Historical-DNS IPs that may be the real server behind the CDN. <strong>Verified</strong> origins currently serve this domain's TLS certificate (confirmed by cert match) and were scanned as part of the assessment. <strong>Candidate</strong> IPs did not present the certificate and were <em>not</em> scanned (they may have been reassigned).</p>
+        {% if od.get('verified') %}
+        <div style="margin-bottom:8px;"><strong style="color:var(--critical);">Verified origins (scanned):</strong></div>
+        <div class="port-list" style="margin-bottom:12px;">{% for ip in od.verified %}<span class="port-chip port-critical">{{ ip }}</span>{% endfor %}</div>
+        {% endif %}
+        {% if od.get('unverified') %}
+        <div style="margin-bottom:8px;"><strong>Candidate origins (unverified — not scanned):</strong></div>
+        <div class="port-list">{% for ip in od.unverified %}<span class="port-chip">{{ ip }}</span>{% endfor %}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- CVE / Known Vulnerabilities -->
     {% set extip = results.categories.get('external_ips', {}) %}
     {% set extip_agg = extip.get('aggregate_vulns', {}) if extip else {} %}
