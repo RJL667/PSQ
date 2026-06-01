@@ -18,7 +18,7 @@ visit?), **recency** (fresh infostealer vs a 6-year-old combo list), and
 p(breach) exactly as hard as 13 freshly-stolen passwords.** The catastrophe model
 (severity / loss given breach) is fine — this is purely about the *probability* input.
 
-## 2. The precedent we are matching (this is not a new mechanism)
+## 2. The precedent being matched (this is not a new mechanism)
 
 | Path | Credential input today | Confidence-aware? |
 |---|---|---|
@@ -55,9 +55,9 @@ Replace the `dehashed_total × 2` term with a `credential_confidence_contributio
 (class → contribution). Keep it as an **observed-risk probability uplift (pre-MC)**,
 consistent with the cat-tail design (observed → p uplift; unobserved → K_TAIL).
 
-## 4. Calibration knobs — **the table to fill tomorrow**
+## 4. Calibration knobs — the table to fill tomorrow
 
-> Leave blank / placeholder now; set against the anchors in §5. Be deterministic.
+*Placeholders only at this stage; each value is set against the anchors in §5. Calibration is deterministic — anchor-driven, not intuited.*
 
 | # | Knob | Placeholder | Anchor that should set it |
 |---|---|---|---|
@@ -72,7 +72,7 @@ consistent with the cat-tail design (observed → p uplift; unobserved → K_TAI
 ## 5. Empirical anchors to calibrate against
 
 - **Verizon DBIR 2025** — stolen-credential involvement in breaches; use-of-stolen-creds initial-access share. Sets K1, K5 base rates.
-- **Mandiant M-Trends 2025** — stolen credentials = **#2 initial-access vector (16%)**, exploits #1 (33%). Sets the relative weight of credentials vs other vectors (so we don't over-rotate p(breach) onto creds).
+- **Mandiant M-Trends 2025** — stolen credentials = **#2 initial-access vector (16%)**, exploits #1 (33%). Sets the relative weight of credentials vs other vectors, so the model does not over-rotate p(breach) onto credentials.
 - **IBM Cost of a Data Breach 2024** — credential-based breach frequency + dwell time; informs K2 recency decay.
 - **Sophos SA 2025** — credentials = **#1 root cause (34%)** (already cited in the RSI code). Local anchor for K4/K5 top class.
 - **Infostealer vs combo-list reuse** (HudsonRock / SpyCloud reporting) — how much fresh infostealer captures out-rank recycled combo lists. Sets K2/K3.
@@ -82,7 +82,7 @@ consistent with the cat-tail design (observed → p uplift; unobserved → K_TAI
 
 - **Replace** `dehashed_total × 2`, do not stack on top of it.
 - The HIBP `breach_count` scenario path ([L1664](../scoring_analytics.py#L1664)) overlaps — decide whether it folds into the new class or stays separate (open question Q3).
-- `credential_correlation` stays **reporting-only**; we are promoting a *confidence-weighted credential class*, not the correlation card, into the score.
+- `credential_correlation` stays **reporting-only**; what is promoted into the score is a *confidence-weighted credential class*, not the correlation card.
 - Consistent with the cat-tail rule: observed risk → probability uplift (pre-MC); unobserved → K_TAIL (untouched here).
 
 ## 7. Verification plan (after calibration)
