@@ -2476,11 +2476,15 @@ def cat_credential_correlation(d, S):
         ("Active infostealer theft",
          (f"{sig.get('infostealer_employees', 0)} employee + "
           f"{int(sig.get('infostealer_users', 0) or 0):,} user device(s)"
+          + ((f" — last infection {sig.get('infostealer_days_ago')}d ago"
+              + ("" if sig.get('active_theft_fresh') else " (aged)"))
+             if sig.get('infostealer_days_ago') is not None else "")
           if sig.get("active_theft") else "None")),
-        ("Active circulation (IntelX)",
+        ("Active circulation (forum / dump)",
          (f"{sig.get('intelx_leak', 0)} leak / {sig.get('intelx_paste', 0)} paste / "
           f"{sig.get('intelx_darkweb', 0)} dark-web mention(s)"
-          if sig.get("forum_active") else
+          + (" — may include re-circulated data" if sig.get('combo_only') else "")
+          if sig.get("circulating") else
           ("monitoring pending" if not sig.get("forum_available") else "None"))),
     ]
     fa = sig.get("freshest_age_days")

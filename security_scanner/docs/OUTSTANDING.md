@@ -70,6 +70,24 @@ cert-search. Moving `/shodan/host/{ip}` per-IP lookups onto the paid API is
 the larger credit consumer (~1 credit per discovered IP per scan) and is a
 separate decision.
 
+### IntelX (free tier) — current state + Wednesday testing
+
+Confirmed 2026-05-29: the configured IntelX key **works** (the "trial expired"
+note was stale). The **free tier refreshes ~500 query credits/day** (40
+results/search) — i.e. it is **recurring/daily**, not a one-off trial. So it
+is usable now for **low-volume / ad-hoc broker scans**, but the 40-results cap
+and daily ceiling make it **insufficient for the 4,000-client cohort**.
+
+- **Action (before 2026-06-03 calibration test):** add `INTELX_API_KEY` to
+  **Render** (it's currently set locally but NOT on Render — that's why prod
+  has no IntelX/forum signal while local does). This makes the credential
+  correlation's signal-4 active on prod for Wednesday's supply-chain
+  calibration run.
+- **Still seek a sustainable replacement** (Snusbase / LeakCheck Pro /
+  SpyCloud) for the cohort-scale + always-on case; the free tier can remain a
+  fallback for ad-hoc use. The credential-correlation circulation slot is
+  provider-agnostic, so swapping is a checker change, not a correlation rewrite.
+
 ## 3. Peer benchmarking rollout (SCN-028)
 
 | Phase | Status | Start date | Source tag |
@@ -100,6 +118,7 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 | 4b | CMS admin path detection (dynamic from tech stack) | Open |
 | 4c | CDN origin IP leakage / origin discovery | **Partial — implemented (`origin_discovery.py`, 2026-05-29):** SecurityTrails historical-DNS candidates + TLS cert-match verification live; verified origins scanned, candidates surfaced. Free Shodan cert-host count hint live. **Full Shodan cert-search IP retrieval pending paid key (see §2 go-live).** Also: RDP exposure now reconciled across all discovered IPs, not just the apex (was a false-negative on CDN-fronted targets). |
 | 4d | MFA presence on VPN login pages | Open |
+| 4c-ii | **Infrastructure-infection / C2-beaconing signal** (reinsurer "Infrastructure Infections — Malicious Connection Attempt" card). Distinct from credential/infostealer: it flags *org servers/hosts* observed connecting to malicious infra. We partially cover via DNSBL (reputation/blacklist), but lack infection-type + days-observed granularity. Would need a threat-intel feed (Spamhaus CSS/XBL, GreyNoise, abuse.ch Feodo). **Attribution caveat:** the reinsurer's example IP `152.111.191.48` reverse-resolves to `download.kalahari.com` (Kalahari merged into Takealot 2014) — a legacy/related-brand IP not in takealot.com's scope, so it would only surface via related-domain (S-1) discovery + cert-verification. Same reassigned-IP risk as the RDP/origin case. | Open |
 | 4e | WAF rate limiting / bot protection detection | Open |
 | 4f | DNSSEC validation chain | Open |
 | 4h | Exploit Window narrative enhancement | Open |
@@ -119,6 +138,7 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 | WAF coverage-loading constant calibration (SCN-029) | `K_TAIL=1.20` in `_calculate_zar` sets how aggressively the catastrophe tail widens per unit of lost scan coverage. Heuristic — calibrate against rescan deltas (blinded scan vs allow-listed rescan of the same target) once continuous monitoring provides paired observations. Only the ZAR path is loaded; the dead USD path is not. |
 | Bias correction on `lower_tier_upsell` benchmark cohort | Cohort may not be SA median; pool composition disclosed in report. Future: source-class weighting in percentile calculation. |
 | GPD tail fit MLE upgrade (currently method-of-moments + pure numpy) | scipy.stats.genpareto provides MLE fit but adds dependency. Defer until scipy is acceptable on Render. |
+| **Credential-risk scoring calibration** (ticket, NOT done) | Two tweaks to `CredentialRiskClassifier`, both **calibration-gated** (empirical anchors + sign-off, per the scoring-change rule): (1) the IntelX paste/dark-web deductions are **per-mention and uncapped** (40 pastes → −120, floored at 0) — can out-deduct Hudson Rock's flat −50 in the raw 0-100 score even though HR sets the higher *level*; add a cap. (2) **Date-gate the HR CRITICAL** so a *stale* infostealer infection (old `last_compromised`) doesn't auto-force CRITICAL — use the new `days_since_compromise`. The Credential Exposure Correlation (reporting) already does this date-anchoring; this would align the *score* with it. |
 
 ## 7. Documentation / artifacts
 

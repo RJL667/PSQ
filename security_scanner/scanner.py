@@ -22,6 +22,15 @@ from http_client import HTTP, _apex_of
 
 _CRED_RECENCY_BANDS = ["<30d", "30-90d", "90-180d", "180-360d", "1-2yr", ">2yr"]
 
+# Known aggregator / combo / credential-stuffing lists — re-packaged historical
+# data. A recent OBSERVED/upload date on these is re-circulation, NOT fresh
+# compromise, so they must not, on their own, make exposure read as "active".
+COMBO_LIST_SOURCES = {
+    "alien txtbase", "naz.api", "apollo", "collection #1", "collection #2-5",
+    "anti public combo list", "exploit.in", "rockyou2024", "rockyou2021",
+    "socradar.io",
+}
+
 
 def _cred_recency_band(age_days):
     if age_days is None:
@@ -99,43 +108,68 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
         _consume(d.get("breach_date") or d.get("date"))
     for b in (br.get("breaches") or []):
         _consume(b.get("breach_date") or b.get("date") or b.get("BreachDate"))
+    # Infostealer INFECTION date — the most reliable freshness anchor (a
+    # point-in-time malware capture, not re-compiled breach data).
+    _consume(hr.get("most_recent_compromise"))
     freshest = min(ages) if ages else None
     out["dated_records"] = len(ages)
-    recent = freshest is not None and freshest <= 360
 
-    # Signal 3 — active theft (infostealer)
+    # Are the breached sources purely aggregator / combo lists? If so, a recent
+    # OBSERVED date on them is re-circulation of old data, not fresh theft.
+    combo_sources = [s for s in de_sources if s.lower().strip() in COMBO_LIST_SOURCES]
+    all_combo = bool(de_sources) and len(combo_sources) == len(de_sources)
+
+    # Signal 3 — active theft (infostealer), DATE-ANCHORED
     hr_emp = int(hr.get("compromised_employees", 0) or 0)
     hr_usr = int(hr.get("compromised_users", 0) or 0)
+    hr_days = hr.get("days_since_compromise")
     active_theft = (hr.get("status") == "completed") and (hr_emp > 0 or hr_usr > 0)
+    # A recent infection date proves the theft is LIVE, not historical/recycled.
+    active_theft_fresh = active_theft and (hr_days is not None and hr_days <= 90)
 
-    # Signal 4 — active circulation / trading (IntelX); pluggable, degrades
+    # Signal 4 — active CIRCULATION (IntelX or replacement). Provider-agnostic:
+    # any configured dark-web/forum source populates these counts. Lower
+    # confidence than active theft because dumps are frequently re-posted.
     ix_available = ix.get("status") == "completed"
     ix_paste = int(ix.get("paste_count", 0) or 0)
     ix_leak = int(ix.get("leak_count", 0) or 0)
     ix_dw = int(ix.get("darkweb_count", 0) or 0)
-    forum_active = ix_available and (ix_paste + ix_leak + ix_dw) > 0
+    circulating = ix_available and (ix_paste + ix_leak + ix_dw) > 0
+
+    # "Genuine recency": a date-proven fresh infection OR a recent NON-combo
+    # breach. Re-posted combo lists do not qualify on their own.
+    recent_genuine = active_theft_fresh or (
+        freshest is not None and freshest <= 360 and not all_combo)
 
     out["signals"] = {
         "breached": breached, "breached_records": de_total, "has_passwords": has_pw,
-        "sources": de_sources[:6], "recent": recent, "freshest_age_days": freshest,
-        "active_theft": active_theft, "infostealer_employees": hr_emp,
-        "infostealer_users": hr_usr, "forum_active": forum_active,
-        "forum_available": ix_available, "intelx_paste": ix_paste,
-        "intelx_leak": ix_leak, "intelx_darkweb": ix_dw,
+        "sources": de_sources[:6], "combo_only": all_combo,
+        "recent": recent_genuine, "freshest_age_days": freshest,
+        "active_theft": active_theft, "active_theft_fresh": active_theft_fresh,
+        "infostealer_employees": hr_emp, "infostealer_users": hr_usr,
+        "infostealer_last_compromised": hr.get("most_recent_compromise"),
+        "infostealer_days_ago": hr_days,
+        "stealer_families": hr.get("stealer_families", []),
+        "circulating": circulating, "forum_available": ix_available,
+        "intelx_paste": ix_paste, "intelx_leak": ix_leak, "intelx_darkweb": ix_dw,
     }
 
-    if not breached and not active_theft and not forum_active:
+    if not breached and not active_theft and not circulating:
         out["rationale"] = ("No breached credentials, infostealer infections, or "
                             "dark-web/forum mentions detected for this domain.")
         return out
 
-    # Verdict escalation (reporting-only)
-    if breached and active_theft and (forum_active or recent):
+    # Verdict — driven by DATE-PROVEN active theft, not re-circulation
+    if breached and active_theft_fresh:
         sev = "critical"
-    elif breached and (active_theft or forum_active or recent):
+    elif active_theft_fresh:
         sev = "high"
-    elif active_theft or forum_active:
+    elif breached and (active_theft or recent_genuine):
         sev = "high"
+    elif breached and circulating:
+        sev = "medium"   # corpus circulating but no fresh-theft proof — may be recycled
+    elif active_theft or circulating:
+        sev = "medium"
     elif breached and freshest is not None and freshest <= 730:
         sev = "medium"
     elif breached:
@@ -158,45 +192,46 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
         bits = []
         if hr_emp: bits.append(f"{hr_emp} employee device(s)")
         if hr_usr: bits.append(f"{hr_usr:,} user account(s)")
-        facts.append("ACTIVE infostealer malware on " + " + ".join(bits))
-    if forum_active:
+        when = f", most recent infection {hr_days} day(s) ago" if hr_days is not None else ""
+        fam = hr.get("stealer_families") or []
+        famtxt = f" [{', '.join(fam[:4])}]" if fam else ""
+        facts.append("ACTIVE infostealer theft on " + " + ".join(bits) + when + famtxt)
+    if circulating:
         fb = []
         if ix_leak: fb.append(f"{ix_leak} leak-site")
         if ix_paste: fb.append(f"{ix_paste} paste-site")
         if ix_dw: fb.append(f"{ix_dw} dark-web-market")
-        facts.append(", ".join(fb) + " mention(s) (IntelX)")
+        rc = " — may include re-circulated historical data" if all_combo else ""
+        facts.append(", ".join(fb) + " mention(s) circulating" + rc)
     elif not ix_available:
-        facts.append("forum/dark-web circulation: monitoring pending (source not configured)")
-    if freshest is not None:
-        if freshest < 30:    fa = f"freshest exposure < 30 days old"
-        elif freshest < 360: fa = f"freshest exposure ~{freshest} days old"
-        elif freshest < 730: fa = f"freshest exposure ~{freshest // 30} months old"
-        else:                fa = f"oldest-only — freshest exposure ~{freshest // 365} years old"
-        facts.append(fa)
+        facts.append("forum/dark-web circulation: monitoring pending (no source configured)")
+    if all_combo and de_total:
+        facts.append("note: breached sources are aggregator/combo lists (re-packaged historical data)")
 
     headline = {
-        "critical": "Credentials compromised AND actively targeted",
+        "critical": "Credentials compromised AND being actively stolen now",
         "high": "Active or recent credential exposure — rotate now",
-        "medium": "Aging credential exposure — partial rotation likely",
+        "medium": "Credential exposure circulating but no fresh-theft proof — likely partly remediated",
         "low": "Historical credential exposure only — likely already remediated",
     }[sev]
     out["issues"].append(f"{sev.upper()}: {headline}. " + "; ".join(facts) + ".")
 
     interp = {
-        "critical": ("A credential corpus, live infostealer theft, and/or active "
-                     "circulation align — high probability of imminent account-takeover. "
-                     "Force password resets + MFA re-enrolment immediately."),
-        "high": ("Credentials are exposed and either recent or actively circulating. "
+        "critical": ("A known credential corpus PLUS a date-proven live infostealer "
+                     "infection — high probability of active account-takeover. Force "
+                     "password resets + MFA re-enrolment immediately."),
+        "high": ("Credentials are exposed and either freshly stolen or recently breached. "
                  "Prioritise resets and MFA for affected accounts."),
-        "medium": ("Exposure is aging; much of it is likely rotated, but confirm "
-                   "resets covered the affected accounts."),
-        "low": ("All datable exposure is old with no active-theft or circulation "
-                "signal — most likely already remediated via prior password changes."),
+        "medium": ("Exposure is circulating or aging without a fresh-infection signal — "
+                   "much of it may already be rotated; confirm resets covered it."),
+        "low": ("All datable exposure is old with no active-theft signal — most likely "
+                "already remediated via prior password changes."),
     }[sev]
     out["rationale"] = (
-        f"Signals — breached: {'Y' if breached else 'N'}; recent: {'Y' if recent else 'N'}; "
-        f"active infostealer: {'Y' if active_theft else 'N'}; "
-        f"forum/trading: {'Y' if forum_active else ('N' if ix_available else 'pending')}. "
+        f"Signals — breached: {'Y' if breached else 'N'}; "
+        f"actively stolen (dated infostealer): {'Y' if active_theft_fresh else ('aged' if active_theft else 'N')}; "
+        f"circulating: {'Y' if circulating else ('N' if ix_available else 'pending')}; "
+        f"recency-anchor: {'infostealer infection date' if active_theft_fresh else ('breach dates' if freshest is not None else 'none')}. "
         + interp)
     return out
 

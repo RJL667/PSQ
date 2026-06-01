@@ -1582,6 +1582,13 @@ class HudsonRockChecker:
             "compromised_users": 0,
             "third_party_exposures": 0,
             "total_compromised": 0,
+            # Infection-date freshness anchors (the API already returns these;
+            # they prove the infostealer data is ACTIVE, not recycled).
+            "last_employee_compromised": None,
+            "last_user_compromised": None,
+            "most_recent_compromise": None,
+            "days_since_compromise": None,
+            "stealer_families": [],
             "score": 100,
             "issues": [],
         }
@@ -1602,6 +1609,29 @@ class HudsonRockChecker:
             result["compromised_users"] = users
             result["third_party_exposures"] = third_parties
             result["total_compromised"] = total
+
+            # Infection dates — point-in-time malware capture dates, NOT
+            # re-compiled breach data, so these are the reliable "is this
+            # active?" signal. Take the most recent of the two.
+            le = (data.get("last_employee_compromised") or "")[:10] or None
+            lu = (data.get("last_user_compromised") or "")[:10] or None
+            result["last_employee_compromised"] = le
+            result["last_user_compromised"] = lu
+            dates = [d for d in (le, lu) if d]
+            if dates:
+                most_recent = max(dates)
+                result["most_recent_compromise"] = most_recent
+                try:
+                    from datetime import datetime, timezone
+                    dt = datetime.strptime(most_recent, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    result["days_since_compromise"] = max(0, (datetime.now(timezone.utc) - dt).days)
+                except Exception:
+                    pass
+            fam = data.get("stealerFamilies")
+            if isinstance(fam, dict):
+                result["stealer_families"] = [
+                    k for k, v in fam.items()
+                    if k != "total" and isinstance(v, (int, float)) and v > 0][:8]
 
             if employees > 0:
                 result["issues"].append(
