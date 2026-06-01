@@ -2455,6 +2455,66 @@ def cat_cms_plugin_sbom(d, S):
     return parts
 
 
+def cat_credential_remediation(d, S, brief=False):
+    """Masked staff accounts + services captured from infected devices +
+    infection metadata. NO passwords — the complete list with passwords is only
+    ever the on-demand encrypted export (User Manual section 6.4). brief=True
+    shows a couple of examples (broker summary); brief=False enumerates (full
+    report)."""
+    n_acc = 3 if brief else 40
+    n_svc = 3 if brief else 12
+    de = d.get("dehashed", {}) or {}
+    hr = d.get("hudson_rock", {}) or {}
+    masked = de.get("staff_accounts_masked", []) or []
+    staff_total = int(de.get("staff_accounts_total", 0) or 0)
+    services = hr.get("compromised_services", []) or []
+    svc_total = int(hr.get("compromised_services_total", 0) or 0)
+    fam = hr.get("stealer_families", []) or []
+    if not masked and not services:
+        return []
+    rows = []
+    if staff_total:
+        rows.append(("Staff accounts exposed", str(staff_total)))
+    if hr.get("most_recent_compromise"):
+        rows.append(("Most recent infection",
+                     f"{hr.get('most_recent_compromise')} ({hr.get('days_since_compromise')} day(s) ago)"))
+    if fam:
+        rows.append(("Stealer families", ", ".join(fam[:6])))
+    if svc_total:
+        rows.append(("Services with captured logins", str(svc_total)))
+    fb = ("Remediation detail for the affected accounts and systems. Identifiers are "
+          "partially masked; the complete list (with passwords) is available on request "
+          "as an encrypted export, with client consent — see User Manual section 6.4.")
+    title = "Credential Exposure — Examples" if brief else "Credential Remediation Detail"
+    parts = build_cat_card(title, C_RED,
+                           f"{staff_total} account(s)", rows, [], S, fallback=fb)
+    if masked:
+        hdr = ("Examples of affected staff accounts (masked):" if brief
+               else "Affected staff accounts (masked — force a reset on each):")
+        parts.append(Paragraph(f"<b>{hdr}</b>", S["cat_title"]))
+        parts.append(Spacer(1, 1 * mm))
+        shown = masked[:n_acc]
+        more = f" … and {staff_total - len(shown)} more" if staff_total > len(shown) else ""
+        parts.append(Paragraph(", ".join(shown) + more, S["body"]))
+        parts.append(Spacer(1, 2 * mm))
+    if services:
+        hdr = ("Examples of services captured from infected devices:" if brief
+               else "Services captured from infected devices (rotate / re-issue first):")
+        parts.append(Paragraph(f"<b>{hdr}</b>", S["cat_title"]))
+        parts.append(Spacer(1, 1 * mm))
+        for s in services[:n_svc]:
+            parts.append(Paragraph(f"• {s.get('url', '')} ({s.get('occurrence', 0)}×)", S["body"]))
+        if svc_total > n_svc:
+            parts.append(Paragraph(f"… and {svc_total - n_svc} more service(s).", S["body_muted"]))
+        parts.append(Spacer(1, 2 * mm))
+    parts.append(Paragraph(
+        "<i>No passwords appear in this report. The complete list including passwords is "
+        "delivered only on request, with signed client consent, as an encrypted file "
+        "(User Manual section 6.4).</i>", S["body_muted"]))
+    parts.append(Spacer(1, 3 * mm))
+    return parts
+
+
 def cat_credential_correlation(d, S):
     """Credential-compromise cross-correlation card (reporting-only). Mirrors
     cat_third_party_correlation; verdict + dynamic narrative come straight from
@@ -4572,14 +4632,21 @@ def _assessment_top_findings(results: dict) -> list:
     # Credential risk
     cr_score = (ins.get("credential_risk", {}) or cats.get("credential_risk", {})).get("risk_score", 0)
     cred_total = cats.get("dehashed", {}).get("total_entries", 0)
+    staff_n = cats.get("dehashed", {}).get("staff_accounts_total", 0)
+    svc_n = cats.get("hudson_rock", {}).get("compromised_services_total", 0)
+    hr_emp = cats.get("hudson_rock", {}).get("compromised_employees", 0)
     if cred_total > 0 or cr_score >= 50:
         level = ("CRITICAL" if (cred_total >= 20 or cr_score >= 80)
                  else "HIGH" if (cred_total >= 5 or cr_score >= 50) else "MEDIUM")
+        counts = (f"{cred_total} credential records found"
+                  + (f", incl. {staff_n} staff account(s)" if staff_n else "")
+                  + (f" and {svc_n} service(s) captured from {hr_emp} infected employee device(s)"
+                     if svc_n else ""))
         cands.append((weight[level], {
             "level": level,
             "headline": f"Overall credential risk is classified as {level}",
             "summary": "Significantly elevated probability of unauthorised access via compromised credentials.",
-            "detail": f"{cred_total} credential records found — staff email addresses and possibly passwords are circulating in breach databases, the fuel for automated password-guessing attacks."
+            "detail": counts + " — staff email addresses and possibly passwords are circulating in breach databases, the fuel for automated password-guessing attacks."
         }))
 
     # DB / critical service exposure
@@ -6207,6 +6274,10 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             story.append(Spacer(1, 2 * mm))
         story.append(Spacer(1, 4 * mm))
 
+        # Brief, masked credential examples (broker sees masked; full list with
+        # passwords is the on-demand encrypted export only).
+        story += cat_credential_remediation(results.get("categories", {}), S, brief=True)
+
         # Call to action - intentionally does NOT recommend a specific
         # cover amount. Cover sizing is a broker / client decision informed
         # by the Loss Exposure Scenarios shown above.
@@ -6323,6 +6394,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         story += cat_intelx(cats, S)
         story += cat_credential_risk(cats, S)
         story += cat_credential_correlation(cats, S)
+        story += cat_credential_remediation(cats, S)
         story += cat_third_party_correlation(cats, S)
         story += cat_virustotal(cats, S)
         story += cat_fraudulent_domains(cats, S)

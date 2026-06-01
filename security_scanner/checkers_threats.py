@@ -1121,6 +1121,20 @@ class OSVChecker:
 # 21. Dehashed Credential Leak Checker (optional API key)
 # ---------------------------------------------------------------------------
 
+def _mask_identifier(value: str) -> str:
+    """Partial-reveal mask: first two + last char of the local part, e.g.
+    'john.doe@takealot.com' -> 'jo***e@takealot.com'. Verifiable by the owner,
+    not reconstructable by an outsider. Works for bare usernames too."""
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if "@" in value:
+        local, _, dom = value.partition("@")
+        masked = (local[:2] + "***" + local[-1]) if len(local) > 2 else ((local[0] if local else "") + "***")
+        return masked + "@" + dom
+    return (value[:2] + "***" + value[-1]) if len(value) > 2 else (value[0] + "***")
+
+
 class DehashedChecker:
     """
     Queries Dehashed for credential leaks associated with the domain.
@@ -1293,6 +1307,13 @@ class DehashedChecker:
             result["sample_emails"] = [
                 e[:40] + ("\u2026" if len(e) > 40 else "") for e in list(emails_seen)[:5]
             ]
+            # Masked STAFF accounts (on-domain) for the full-report enumeration.
+            # Partial reveal so the org recognises its own accounts but an
+            # outsider cannot reconstruct them. NO passwords stored (those are
+            # only ever in the on-demand encrypted export).
+            corporate_emails = sorted(e for e in emails_seen if domain.lower() in e.lower())
+            result["staff_accounts_total"] = len(corporate_emails)
+            result["staff_accounts_masked"] = [_mask_identifier(e) for e in corporate_emails[:60]]
             result["breach_sources"] = list(breach_sources)
             result["breach_details"] = breach_details[:20]
 
@@ -1589,6 +1610,11 @@ class HudsonRockChecker:
             "most_recent_compromise": None,
             "days_since_compromise": None,
             "stealer_families": [],
+            # Services whose logins were captured from infected EMPLOYEE
+            # devices — the most actionable remediation list (which systems to
+            # rotate). Service endpoints, not credentials, so safe to show.
+            "compromised_services": [],
+            "compromised_services_total": 0,
             "score": 100,
             "issues": [],
         }
@@ -1632,6 +1658,13 @@ class HudsonRockChecker:
                 result["stealer_families"] = [
                     k for k, v in fam.items()
                     if k != "total" and isinstance(v, (int, float)) and v > 0][:8]
+            # Captured employee service-logins (which systems to rotate first)
+            emp_urls = (data.get("data") or {}).get("employees_urls") or []
+            svc = [{"url": str(u.get("url"))[:120], "occurrence": int(u.get("occurrence", 0) or 0)}
+                   for u in emp_urls if isinstance(u, dict) and u.get("url")]
+            svc.sort(key=lambda x: -x["occurrence"])
+            result["compromised_services"] = svc[:15]
+            result["compromised_services_total"] = len(emp_urls)
 
             if employees > 0:
                 result["issues"].append(
