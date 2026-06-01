@@ -73,15 +73,20 @@ separate decision.
 ### IntelX (free tier) — current state + Wednesday testing
 
 Confirmed 2026-05-29: the configured IntelX key **works** (the "trial expired"
-note was stale). **Correction (2026-05-31, verified live via
-`/authenticate/info`):** the free tier's search cap is **`CreditMax = 50`** for
-`/intelligent/search` (NOT ~500 — that was a wrong code comment). `CreditReset`
-is present so credits **do replenish** (recurring, not one-off), but the cap is
-only **~50 search credits per cycle** (1 credit/scan), and max 3 concurrent
-searches. So it is usable only for a **handful of ad-hoc scans per cycle** —
-**far too small for the 4,000-client cohort or sustained broker volume.** A
-sustainable paid replacement is therefore the real requirement. Avoid burning
-credits on test scans (`skip_intelx:true` for smoke tests).
+note was stale). **Verified 2026-05-31 via `/authenticate/info` + IntelX docs:**
+the free tier's `/intelligent/search` cap is **`CreditMax = 50` per DAY, reset
+at midnight UTC** (NOT ~500 — that was a wrong code comment), 1 credit/scan,
+**max 3 concurrent searches**.
+
+Planning implication: the cohort runs at **~25-30 scans/day** (§3), which fits
+*under* 50/day with modest headroom — so the free daily tier is **borderline-
+viable for the steady cohort rate**, NOT "10× too small" as first thought.
+BUT: zero burst headroom, the 3-concurrent cap throttles throughput, and any
+broker ad-hoc scans eat into the same 50. So a **paid replacement
+(Snusbase / LeakCheck Pro / SpyCloud) is still recommended** for safety +
+throughput + always-on use, but it is no longer an emergency blocker. Avoid
+burning credits on test scans (`skip_intelx:true`; the smoke test is already
+credit-free).
 
 - **Action (before 2026-06-03 calibration test):** add `INTELX_API_KEY` to
   **Render** (it's currently set locally but NOT on Render — that's why prod
