@@ -34,5 +34,8 @@ security_scanner/_spec_workspace/substrate/sample/*.json
 # API keys / secrets (custom-named env files)
 security_scanner/ATT66027.env
 
+# age binary (downloaded by the Render build, never committed)
+security_scanner/bin/
+
 # Local Claude Code state
 .claude/worktrees/

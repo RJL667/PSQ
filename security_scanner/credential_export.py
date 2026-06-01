@@ -69,9 +69,20 @@ def build_credential_csv(entries):
     return buf.getvalue().encode("utf-8")
 
 
+def _age_bin():
+    """Resolve the `age` binary: AGE_BIN env override, then a bundled copy next to
+    this module (security_scanner/bin/age, dropped in by the Render build), then
+    plain `age` on PATH."""
+    env = os.environ.get("AGE_BIN")
+    if env:
+        return env
+    local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "age")
+    return local if os.path.exists(local) else "age"
+
+
 def encrypt_age(data, recipient_pubkey):
     """Encrypt to an age recipient public key via the `age` CLI."""
-    p = subprocess.run(["age", "-r", recipient_pubkey],
+    p = subprocess.run([_age_bin(), "-r", recipient_pubkey],
                        input=data, capture_output=True, timeout=30)
     if p.returncode != 0:
         raise RuntimeError("age failed: " + p.stderr.decode("utf-8", "replace")[:200])

@@ -779,6 +779,23 @@ def credential_export():
         "Cache-Control": "no-store"})
 
 
+@app.route("/api/age-check")
+def age_check():
+    """Credit-free health probe for the Phase 2 age path: confirms the `age`
+    binary resolves and runs on the live deploy. Reuses the same resolver the
+    export uses so this proves the real path, not a lookalike."""
+    import subprocess
+    from credential_export import _age_bin
+    age_bin = _age_bin()
+    try:
+        v = subprocess.run([age_bin, "--version"], capture_output=True, timeout=10)
+        return jsonify({"age_available": v.returncode == 0,
+                        "version": v.stdout.decode("utf-8", "replace").strip(),
+                        "bin": age_bin})
+    except Exception as e:
+        return jsonify({"age_available": False, "bin": age_bin, "error": str(e)[:160]})
+
+
 @app.route("/api/scan", methods=["POST"])
 def start_scan():
     data = request.get_json(silent=True) or {}
