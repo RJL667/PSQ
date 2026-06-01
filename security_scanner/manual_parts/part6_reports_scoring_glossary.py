@@ -313,6 +313,71 @@ def build(doc):
         "formal compliance assessments.",
     )
 
+    # 6.4 Sensitive Credential Disclosure & Encrypted Export ----------- #
+    add_h2(doc, "6.4 Sensitive Credential Disclosure & Encrypted Export")
+
+    add_body(
+        doc,
+        "The scanner surfaces leaked credentials (DeHashed), active "
+        "infostealer infections (Hudson Rock, with infection dates), and "
+        "dark-web / forum circulation (IntelX or replacement). Because this "
+        "is sensitive personal information, it is disclosed in TIERS by "
+        "audience, and the complete unmasked detail — including the actual "
+        "passwords — is delivered only on request, with the client's signed "
+        "consent, as an encrypted file. This exposure is already circulating "
+        "in the public / criminal domain; the scanner re-surfaces it solely so "
+        "the organisation can remediate (force resets, enforce MFA).",
+    )
+
+    add_bold_body(doc, "Tiered disclosure: ", "what each output shows.")
+    add_bullet(doc, "Executive Deck — counts only (number of exposed accounts, infected devices, services). No identifiers.")
+    add_bullet(doc, "Broker Summary — 2-3 partially-masked example accounts / services plus summarised counts. No passwords.")
+    add_bullet(doc, "Full Technical Report — enumerated, partially-masked accounts, a per-service summary, infection dates, and stealer families. No passwords.")
+    add_bullet(doc, "Encrypted Credential Export (on request) — the complete list INCLUDING actual passwords, delivered as an encrypted file after signed client consent. Never stored on the scanner; generated on demand.")
+
+    add_body(
+        doc,
+        "Masking uses a partial reveal (first two plus last character of the "
+        "local part, e.g. 'jo***n@example.com') so the organisation can "
+        "recognise its own accounts — demonstrating the findings are real — "
+        "while an outsider cannot reconstruct them.",
+    )
+
+    add_bold_body(doc, "Operator workflow (broker / scanner user): ", "")
+    add_bullet(doc, "1. Obtain the client's SIGNED CONSENT form and upload it — this is the authorisation gate and the FAIS / POPIA audit trail.")
+    add_bullet(doc, "2. Obtain the client's age PUBLIC key (the client generates it — see below). A public key is safe to share openly.")
+    add_bullet(doc, "3. Trigger the export. The scanner re-queries DeHashed at that moment, builds the CSV, and encrypts it to the client's public key with age. No passwords are written to the scanner database.")
+    add_bullet(doc, "4. Share the one-time, expiring download link with the client. The encrypted file is deleted after download or expiry.")
+    add_bullet(doc, "5. Fallback if the client cannot use age keys: the scanner produces an AES-256 password-protected file; send the passphrase via a SEPARATE secure channel (never the same channel as the link).")
+
+    add_bold_body(doc, "Client guide — one-time setup (age, recommended): ", "")
+    add_bullet(doc, "Install age (a small, free, cross-platform tool: github.com/FiloSottile/age).")
+    add_bullet(doc, "Generate a keypair: run 'age-keygen -o key.txt'. This prints your PUBLIC key (starts with 'age1...') and writes your PRIVATE key to key.txt.")
+    add_bullet(doc, "Send ONLY the public key (the 'age1...' line) to your broker. Keep key.txt (the private key) secret and backed up — without it the file cannot be opened.")
+
+    add_bold_body(doc, "Client guide — retrieve & decrypt: ", "")
+    add_bullet(doc, "Open the one-time link within its expiry window and download the '.age' file.")
+    add_bullet(doc, "Decrypt: 'age -d -i key.txt -o credentials.csv credentials.csv.age'. The result is the plain CSV.")
+    add_bullet(doc, "AES fallback: receive the passphrase from your broker via a separate channel, then open the file with 7-Zip (AES-256) or 'openssl enc -d -aes-256-cbc -in file.enc -out credentials.csv'.")
+
+    add_warning(
+        doc,
+        "The encrypted export contains live passwords — treat it like any "
+        "breach dump. Decrypt only on a secure workstation, action the password "
+        "resets and MFA enrolment, then securely delete the file. The scanner "
+        "itself never stores passwords, and none of the rendered reports (deck, "
+        "broker summary, full report) ever contain passwords.",
+    )
+
+    add_note(
+        doc,
+        "Why public-key (age) over a shared password: with age, only the "
+        "client's private key — which never leaves them — can decrypt the "
+        "file, so there is no secret to intercept in transit. A shared AES "
+        "passphrase is offered only as a fallback and must travel on a channel "
+        "separate from the file.",
+    )
+
     # ------------------------------------------------------------------ #
     #  SECTION 7 -- SCORING METHODOLOGY                                  #
     # ------------------------------------------------------------------ #
