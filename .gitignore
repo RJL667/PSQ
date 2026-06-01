@@ -37,5 +37,9 @@ security_scanner/ATT66027.env
 # age binary (downloaded by the Render build, never committed)
 security_scanner/bin/
 
+# Local reference scans for card back-testing (contain org breach data — never commit)
+security_scanner/test_fixtures/phishield_live.json
+security_scanner/preview_scans.db
+
 # Local Claude Code state
 .claude/worktrees/

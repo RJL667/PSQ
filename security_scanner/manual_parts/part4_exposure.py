@@ -1505,6 +1505,91 @@ def build(doc):
     )
 
     # ══════════════════════════════════════════════════════════════════════
+    # 4.6.18  Credential Exposure Correlation (DeHashed × Recency × Infostealer × IntelX)
+    # ══════════════════════════════════════════════════════════════════════
+    add_h2(doc, "4.6.18  Credential Exposure Correlation "
+                "(DeHashed × Recency × Infostealer × IntelX)")
+
+    add_bold_body(
+        doc,
+        "What it checks: ",
+        "A reporting-only cross-correlation that joins four independent "
+        "credential signals already gathered elsewhere in the scan into a "
+        "single rotate-now verdict: (1) the breached-credential corpus from "
+        "Dehashed (4.6.6); (2) the recency of that exposure, dated from "
+        "IntelX, HIBP-enriched breach dates, and — most reliably — the "
+        "infostealer infection date; (3) active theft from Hudson Rock "
+        "infostealer infections (4.6.7); and (4) active circulation / "
+        "trading from IntelX leak, paste, and dark-web mentions (4.6.8). "
+        "It is the credential analogue of the Third-Party Cross-Correlation "
+        "card (4.6.19) and follows the same design pattern."
+    )
+
+    add_bold_body(
+        doc,
+        "How it works: ",
+        "The verdict escalates from NONE up to CRITICAL based on how many "
+        "signals confirm ACTIVE (not merely historical) compromise. The "
+        "decisive factor is a date-proven fresh infostealer infection "
+        "(≤90 days): a breached corpus PLUS a live infection is CRITICAL; "
+        "a recent non-combo breach or aged infection is HIGH; a corpus that "
+        "is merely circulating with no fresh-theft proof is MEDIUM (it may "
+        "already be rotated); old datable exposure with no active signal is "
+        "LOW. Every dated record is bucketed into a recency timeline "
+        "(<30d / 30-90d / 90-180d / 180-360d / 1-2yr / >2yr) so the reader "
+        "can see at a glance whether the exposure is fresh or stale."
+    )
+
+    add_bold_body(
+        doc,
+        "Active vs re-circulated — the date-anchor discipline: ",
+        "Aggregator / combo-list sources (e.g. ALIEN TXTBASE) are flagged "
+        "as re-packaged historical data: a recent OBSERVED date on a combo "
+        "list is re-circulation, not fresh theft, and on its own does not "
+        "qualify as 'genuinely recent'. Only the infostealer infection "
+        "date — a point-in-time malware capture — is treated as a reliable "
+        "freshness anchor. This prevents a recycled compilation from "
+        "inflating the verdict to CRITICAL."
+    )
+
+    add_bold_body(
+        doc,
+        "Password-bearing records are counted, not assumed: ",
+        "The card reports the breached-record total AND, separately, how "
+        "many of those records actually carry a password — e.g. "
+        "'13 leaked credential records (2 with passwords)'. Only the "
+        "plaintext- and hashed-password subset (from Dehashed's credential "
+        "breakdown) is counted as 'with passwords'; the remaining records "
+        "are breach-exposure rows (email appeared in a breach) with no "
+        "credential attached. This distinction is deliberate: tagging the "
+        "full corpus as 'with passwords' would overstate the rotate-now "
+        "severity that underwriters act on."
+    )
+
+    add_bold_body(
+        doc,
+        "Why it matters for insurance: ",
+        "This card answers the single question an underwriter cares about "
+        "for credentials — 'is someone able to log in right now?' — by "
+        "separating live, date-proven exposure from old or recycled data. "
+        "A HIGH or CRITICAL verdict justifies a forced-reset + MFA "
+        "remediation condition before binding; a MEDIUM/LOW verdict on "
+        "aged-only exposure provides assurance that the credential risk is "
+        "largely historical."
+    )
+
+    add_note(
+        doc,
+        "Like the Third-Party Cross-Correlation card, this is "
+        "REPORTING-ONLY and carries NO scoring weight. The underlying "
+        "signals (Dehashed, Hudson Rock, IntelX) already score through "
+        "their own channels and the Credential Risk Assessment (4.6.9) "
+        "provides the headline verdict; a separate weight here would "
+        "double-count. The correlation exists to prioritise the rotate-"
+        "list, not to move the score."
+    )
+
+    # ══════════════════════════════════════════════════════════════════════
     # 4.6.19  Third-Party Cross-Correlation (Hudson Rock × S-4 × S-5)
     # ══════════════════════════════════════════════════════════════════════
     add_h2(doc, "4.6.19  Third-Party Cross-Correlation (Hudson Rock × S-4 × S-5)")

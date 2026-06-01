@@ -74,6 +74,11 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
     # Signal 1 — breached credential corpus
     de_total = int(de.get("total_entries", 0) or 0)
     de_sources = [s for s in (de.get("breach_sources") or []) if s]
+    # Password-bearing record COUNT (not just a yes/no) — only a subset of the
+    # breached corpus actually ships a credential. Overstating all records as
+    # "with passwords" inflates the rotate-now severity (caught in card back-test).
+    _cb = de.get("credential_breakdown", {}) or {}
+    pw_records = int(_cb.get("plaintext_count", 0) or 0) + int(_cb.get("hashed_count", 0) or 0)
     has_pw = bool(de.get("has_passwords"))
     hibp_count = int(br.get("breach_count", 0) or 0)
     breached = de_total > 0 or hibp_count > 0
@@ -142,7 +147,8 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
         freshest is not None and freshest <= 360 and not all_combo)
 
     out["signals"] = {
-        "breached": breached, "breached_records": de_total, "has_passwords": has_pw,
+        "breached": breached, "breached_records": de_total,
+        "has_passwords": has_pw, "password_records": pw_records,
         "sources": de_sources[:6], "combo_only": all_combo,
         "recent": recent_genuine, "freshest_age_days": freshest,
         "active_theft": active_theft, "active_theft_fresh": active_theft_fresh,
@@ -184,7 +190,12 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
     facts = []
     if de_total:
         src = (" (sources: " + ", ".join(de_sources[:4]) + ")") if de_sources else ""
-        pw = " with passwords" if has_pw else ""
+        if pw_records > 0:
+            pw = f", {pw_records:,} with passwords"
+        elif has_pw:
+            pw = ", some with passwords"
+        else:
+            pw = ""
         facts.append(f"{de_total:,} leaked credential record(s){pw}{src}")
     if hibp_count:
         facts.append(f"{hibp_count} known breach(es) on record")

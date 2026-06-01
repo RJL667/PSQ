@@ -2528,7 +2528,9 @@ def cat_credential_correlation(d, S):
            (C_RED if sev == "high" else
             (C_AMBER if sev == "medium" else C_GREEN)))
     rec = int(sig.get("breached_records", 0) or 0)
-    pw = " (with passwords)" if sig.get("has_passwords") else ""
+    pw_n = int(sig.get("password_records", 0) or 0)
+    pw = (f" ({pw_n:,} with passwords)" if pw_n
+          else (" (some with passwords)" if sig.get("has_passwords") else ""))
     srcs = ", ".join(sig.get("sources", []) or [])
     rows = [
         ("Verdict", sev.upper()),
