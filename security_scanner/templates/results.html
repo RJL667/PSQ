@@ -1868,6 +1868,44 @@
     </div>
     {% endif %}
 
+    <!-- Credential Exposure Correlation (DeHashed × Recency × Infostealer × IntelX) -->
+    {% set cc = results.categories.get('credential_correlation', {}) %}
+    {% if cc and cc.get('status') == 'completed' %}
+    {% set cc_sev = cc.severity or 'none' %}
+    {% set cc_tl = 'tl-crimson' if cc_sev == 'critical' else ('tl-red' if cc_sev == 'high' else ('tl-amber' if cc_sev == 'medium' else ('tl-blue' if cc_sev == 'low' else 'tl-green'))) %}
+    {% set cc_sig = cc.signals or {} %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light {{ cc_tl }}"></div><div class="cat-title">Credential Exposure Correlation <span style="font-size:.65rem;color:var(--muted);">(DeHashed &times; Recency &times; Infostealer &times; IntelX)</span></div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade {% if cc_sev in ('critical','high') %}color-red{% endif %}">{{ cc_sev | upper }}</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        {% if cc.issues %}<ul class="issue-list" style="margin-bottom:10px;">{% for i in cc.issues %}<li class="issue-item"><span class="issue-icon issue-{% if 'CRITICAL' in i or 'HIGH' in i %}err{% else %}warn{% endif %}">&#9888;</span>{{ i }}</li>{% endfor %}</ul>{% endif %}
+        <table class="kv-table">
+          <tr><td>Breached credential records</td><td>{% if cc_sig.breached_records %}<span class="badge badge-red">{{ '{:,}'.format(cc_sig.breached_records) }}{% if cc_sig.has_passwords %} (with passwords){% endif %}</span>{% if cc_sig.sources %} <span style="font-size:.72rem;color:var(--muted);">{{ cc_sig.sources | join(', ') }}</span>{% endif %}{% else %}<span class="badge badge-green">0</span>{% endif %}</td></tr>
+          <tr><td>Active infostealer theft</td><td>{% if cc_sig.active_theft %}<span class="badge badge-red">{{ cc_sig.infostealer_employees }} employee + {{ '{:,}'.format(cc_sig.infostealer_users) }} user device(s)</span>{% else %}<span class="badge badge-green">None</span>{% endif %}</td></tr>
+          <tr><td>Active circulation / trading (IntelX)</td><td>{% if cc_sig.forum_active %}<span class="badge badge-amber">{{ cc_sig.intelx_leak }} leak &middot; {{ cc_sig.intelx_paste }} paste &middot; {{ cc_sig.intelx_darkweb }} dark-web</span>{% elif not cc_sig.forum_available %}<span class="badge badge-grey">monitoring pending</span>{% else %}<span class="badge badge-green">None</span>{% endif %}</td></tr>
+          <tr><td>Freshest exposure</td><td>{% if cc_sig.freshest_age_days is not none %}{{ cc_sig.freshest_age_days }} days ago{% else %}<span style="color:var(--muted);">no dated records</span>{% endif %}</td></tr>
+        </table>
+        {% if cc.dated_records and cc.dated_records > 0 %}
+        <div style="margin-top:10px;">
+          <div style="font-size:.74rem;color:var(--muted);margin-bottom:5px;font-weight:500;">Exposure recency timeline ({{ cc.dated_records }} dated record(s)):</div>
+          <div class="port-list">
+            {% for band in ['<30d','30-90d','90-180d','180-360d','1-2yr','>2yr'] %}
+            {% set n = cc.recency_bands.get(band, 0) %}
+            <span class="port-chip {% if n > 0 and band in ['<30d','30-90d'] %}port-critical{% endif %}" style="{% if n == 0 %}opacity:.4;{% endif %}">{{ band }}: {{ n }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if cc.rationale %}<p style="font-size:.72rem;color:var(--muted);margin-top:8px;font-style:italic;">{{ cc.rationale }}</p>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Hudson Rock Infostealer Detection -->
     {% set hr = results.categories.get('hudson_rock', {}) %}
     {% set hr_total = (hr.compromised_employees | default(0)) + (hr.compromised_users | default(0)) %}

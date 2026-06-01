@@ -2455,6 +2455,54 @@ def cat_cms_plugin_sbom(d, S):
     return parts
 
 
+def cat_credential_correlation(d, S):
+    """Credential-compromise cross-correlation card (reporting-only). Mirrors
+    cat_third_party_correlation; verdict + dynamic narrative come straight from
+    build_credential_correlation()."""
+    cc = d.get("credential_correlation", {})
+    if cc.get("status") != "completed":
+        return []
+    sev = cc.get("severity", "none")
+    sig = cc.get("signals", {}) or {}
+    col = (C_CRITICAL if sev == "critical" else
+           (C_RED if sev == "high" else
+            (C_AMBER if sev == "medium" else C_GREEN)))
+    rec = int(sig.get("breached_records", 0) or 0)
+    pw = " (with passwords)" if sig.get("has_passwords") else ""
+    srcs = ", ".join(sig.get("sources", []) or [])
+    rows = [
+        ("Verdict", sev.upper()),
+        ("Breached records", f"{rec:,}{pw}" + (f" — {srcs}" if srcs else "") if rec else "0"),
+        ("Active infostealer theft",
+         (f"{sig.get('infostealer_employees', 0)} employee + "
+          f"{int(sig.get('infostealer_users', 0) or 0):,} user device(s)"
+          if sig.get("active_theft") else "None")),
+        ("Active circulation (IntelX)",
+         (f"{sig.get('intelx_leak', 0)} leak / {sig.get('intelx_paste', 0)} paste / "
+          f"{sig.get('intelx_darkweb', 0)} dark-web mention(s)"
+          if sig.get("forum_active") else
+          ("monitoring pending" if not sig.get("forum_available") else "None"))),
+    ]
+    fa = sig.get("freshest_age_days")
+    if fa is not None:
+        rows.append(("Freshest exposure", f"{fa} day(s) ago"))
+    bands = cc.get("recency_bands", {}) or {}
+    if cc.get("dated_records"):
+        rows.append(("Recency timeline", "  ".join(
+            f"{b}:{bands.get(b, 0)}" for b in
+            ("<30d", "30-90d", "90-180d", "180-360d", "1-2yr", ">2yr"))))
+    fb = (cc.get("issues") or [""])[0]
+    parts = build_cat_card(
+        "Credential Exposure Correlation (DeHashed × Recency × Infostealer × IntelX)",
+        col, sev.upper(), rows, cc.get("issues", []), S, fallback=fb)
+    if cc.get("rationale"):
+        parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
+        parts.append(Spacer(1, 1 * mm))
+        parts.append(Paragraph(cc["rationale"], S["body"]))
+        parts.append(Spacer(1, 3 * mm))
+    return parts
+
+
 def cat_third_party_correlation(d, S):
     tpc = d.get("third_party_correlation", {})
     if tpc.get("status") not in ("completed",):
@@ -6270,6 +6318,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         story += cat_hudson_rock(cats, S)
         story += cat_intelx(cats, S)
         story += cat_credential_risk(cats, S)
+        story += cat_credential_correlation(cats, S)
         story += cat_third_party_correlation(cats, S)
         story += cat_virustotal(cats, S)
         story += cat_fraudulent_domains(cats, S)

@@ -20,6 +20,180 @@ from http_client import HTTP, _apex_of
 # Main Scanner Orchestrator
 # ---------------------------------------------------------------------------
 
+_CRED_RECENCY_BANDS = ["<30d", "30-90d", "90-180d", "180-360d", "1-2yr", ">2yr"]
+
+
+def _cred_recency_band(age_days):
+    if age_days is None:
+        return None
+    if age_days < 30:   return "<30d"
+    if age_days < 90:   return "30-90d"
+    if age_days < 180:  return "90-180d"
+    if age_days < 360:  return "180-360d"
+    if age_days < 730:  return "1-2yr"
+    return ">2yr"
+
+
+def build_credential_correlation(cat_results: dict, today=None) -> dict:
+    """Credential-compromise cross-correlation (REPORTING-ONLY, mirrors the
+    Phase 4f supply-chain pattern). Joins four independent signals:
+
+      1. Breached credentials present       (DeHashed record corpus)
+      2. Recency of the exposure            (dates from IntelX / HIBP / DeHashed)
+      3. Active theft                       (Hudson Rock infostealer infections)
+      4. Active circulation / trading       (IntelX paste / leak / dark-web mentions)
+
+    The verdict escalates None -> Critical on how many independent signals
+    confirm ACTIVE (not merely historical) compromise. Output strings are
+    assembled dynamically from the actual findings — never generic. Carries
+    NO scoring weight: the underlying signals already score through their own
+    channels (credential_risk, hudson_rock, dehashed), so this is purely a
+    representational join (same design rule as third_party_correlation)."""
+    today = today or datetime.now(timezone.utc)
+    de = cat_results.get("dehashed", {}) or {}
+    br = cat_results.get("breaches", {}) or {}
+    hr = cat_results.get("hudson_rock", {}) or {}
+    ix = cat_results.get("intelx", {}) or {}
+
+    out = {
+        "status": "completed", "severity": "none",
+        "critical_count": 0, "high_count": 0, "medium_count": 0,
+        "recency_bands": {b: 0 for b in _CRED_RECENCY_BANDS},
+        "dated_records": 0, "signals": {}, "issues": [], "rationale": "",
+    }
+
+    # Signal 1 — breached credential corpus
+    de_total = int(de.get("total_entries", 0) or 0)
+    de_sources = [s for s in (de.get("breach_sources") or []) if s]
+    has_pw = bool(de.get("has_passwords"))
+    hibp_count = int(br.get("breach_count", 0) or 0)
+    breached = de_total > 0 or hibp_count > 0
+
+    # Signal 2 — recency (parse every dated source we have)
+    ages = []
+
+    def _consume(date_str):
+        if not date_str:
+            return
+        s = str(date_str)[:10]
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+            try:
+                dt = datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+                age = max(0, (today - dt).days)
+                ages.append(age)
+                out["recency_bands"][_cred_recency_band(age)] += 1
+                return
+            except Exception:
+                continue
+
+    for rec in (ix.get("recent_results") or []):
+        _consume(rec.get("date"))
+    for d in (de.get("breach_details") or []):
+        _consume(d.get("breach_date") or d.get("date"))
+    for b in (br.get("breaches") or []):
+        _consume(b.get("breach_date") or b.get("date") or b.get("BreachDate"))
+    freshest = min(ages) if ages else None
+    out["dated_records"] = len(ages)
+    recent = freshest is not None and freshest <= 360
+
+    # Signal 3 — active theft (infostealer)
+    hr_emp = int(hr.get("compromised_employees", 0) or 0)
+    hr_usr = int(hr.get("compromised_users", 0) or 0)
+    active_theft = (hr.get("status") == "completed") and (hr_emp > 0 or hr_usr > 0)
+
+    # Signal 4 — active circulation / trading (IntelX); pluggable, degrades
+    ix_available = ix.get("status") == "completed"
+    ix_paste = int(ix.get("paste_count", 0) or 0)
+    ix_leak = int(ix.get("leak_count", 0) or 0)
+    ix_dw = int(ix.get("darkweb_count", 0) or 0)
+    forum_active = ix_available and (ix_paste + ix_leak + ix_dw) > 0
+
+    out["signals"] = {
+        "breached": breached, "breached_records": de_total, "has_passwords": has_pw,
+        "sources": de_sources[:6], "recent": recent, "freshest_age_days": freshest,
+        "active_theft": active_theft, "infostealer_employees": hr_emp,
+        "infostealer_users": hr_usr, "forum_active": forum_active,
+        "forum_available": ix_available, "intelx_paste": ix_paste,
+        "intelx_leak": ix_leak, "intelx_darkweb": ix_dw,
+    }
+
+    if not breached and not active_theft and not forum_active:
+        out["rationale"] = ("No breached credentials, infostealer infections, or "
+                            "dark-web/forum mentions detected for this domain.")
+        return out
+
+    # Verdict escalation (reporting-only)
+    if breached and active_theft and (forum_active or recent):
+        sev = "critical"
+    elif breached and (active_theft or forum_active or recent):
+        sev = "high"
+    elif active_theft or forum_active:
+        sev = "high"
+    elif breached and freshest is not None and freshest <= 730:
+        sev = "medium"
+    elif breached:
+        sev = "low"
+    else:
+        sev = "medium"
+    out["severity"] = sev
+    out[{"critical": "critical_count", "high": "high_count",
+         "medium": "medium_count"}.get(sev, "medium_count")] = 1 if sev != "low" else 0
+
+    # ---- Dynamic, data-driven narrative (no boilerplate) ----
+    facts = []
+    if de_total:
+        src = (" (sources: " + ", ".join(de_sources[:4]) + ")") if de_sources else ""
+        pw = " with passwords" if has_pw else ""
+        facts.append(f"{de_total:,} leaked credential record(s){pw}{src}")
+    if hibp_count:
+        facts.append(f"{hibp_count} known breach(es) on record")
+    if active_theft:
+        bits = []
+        if hr_emp: bits.append(f"{hr_emp} employee device(s)")
+        if hr_usr: bits.append(f"{hr_usr:,} user account(s)")
+        facts.append("ACTIVE infostealer malware on " + " + ".join(bits))
+    if forum_active:
+        fb = []
+        if ix_leak: fb.append(f"{ix_leak} leak-site")
+        if ix_paste: fb.append(f"{ix_paste} paste-site")
+        if ix_dw: fb.append(f"{ix_dw} dark-web-market")
+        facts.append(", ".join(fb) + " mention(s) (IntelX)")
+    elif not ix_available:
+        facts.append("forum/dark-web circulation: monitoring pending (source not configured)")
+    if freshest is not None:
+        if freshest < 30:    fa = f"freshest exposure < 30 days old"
+        elif freshest < 360: fa = f"freshest exposure ~{freshest} days old"
+        elif freshest < 730: fa = f"freshest exposure ~{freshest // 30} months old"
+        else:                fa = f"oldest-only — freshest exposure ~{freshest // 365} years old"
+        facts.append(fa)
+
+    headline = {
+        "critical": "Credentials compromised AND actively targeted",
+        "high": "Active or recent credential exposure — rotate now",
+        "medium": "Aging credential exposure — partial rotation likely",
+        "low": "Historical credential exposure only — likely already remediated",
+    }[sev]
+    out["issues"].append(f"{sev.upper()}: {headline}. " + "; ".join(facts) + ".")
+
+    interp = {
+        "critical": ("A credential corpus, live infostealer theft, and/or active "
+                     "circulation align — high probability of imminent account-takeover. "
+                     "Force password resets + MFA re-enrolment immediately."),
+        "high": ("Credentials are exposed and either recent or actively circulating. "
+                 "Prioritise resets and MFA for affected accounts."),
+        "medium": ("Exposure is aging; much of it is likely rotated, but confirm "
+                   "resets covered the affected accounts."),
+        "low": ("All datable exposure is old with no active-theft or circulation "
+                "signal — most likely already remediated via prior password changes."),
+    }[sev]
+    out["rationale"] = (
+        f"Signals — breached: {'Y' if breached else 'N'}; recent: {'Y' if recent else 'N'}; "
+        f"active infostealer: {'Y' if active_theft else 'N'}; "
+        f"forum/trading: {'Y' if forum_active else ('N' if ix_available else 'pending')}. "
+        + interp)
+    return out
+
+
 class SecurityScanner:
     # Checkers that should be run once per discovered IP
     IP_LEVEL_CHECKERS = ("dns_infrastructure", "high_risk_protocols", "dnsbl", "shodan_vulns")
@@ -822,6 +996,23 @@ class SecurityScanner:
                 "score": 100, "issues": [],
             }
         self._notify(on_progress, "third_party_correlation", "done")
+
+        # --- Phase 4g: Credential-compromise cross-correlation (reporting-only) ---
+        # Joins DeHashed corpus + recency dates + Hudson Rock infostealer +
+        # IntelX forum/dump chatter into one escalating verdict. Carries no
+        # scoring weight (underlying signals already score through their own
+        # channels) — purely how credential exposure is represented to clients.
+        self._notify(on_progress, "credential_correlation", "running")
+        try:
+            results["categories"]["credential_correlation"] = \
+                build_credential_correlation(cat_results)
+        except Exception as _cc_err:
+            results["categories"]["credential_correlation"] = {
+                "status": "error", "error": str(_cc_err)[:200],
+                "severity": "none", "critical_count": 0, "high_count": 0,
+                "issues": [],
+            }
+        self._notify(on_progress, "credential_correlation", "done")
 
         # --- Phase 5: Score ---
         # WAF / bot-manager intervention status is read once here, before
