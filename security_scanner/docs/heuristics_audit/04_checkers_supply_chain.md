@@ -1,0 +1,82 @@
+# checkers_supply_chain.py — Heuristics Audit
+
+Module: `checkers_supply_chain.py` (S-1 RelatedDomains, S-2 ThirdPartyJS, S-3
+DependencyManifest, S-4 EmailVendorSurface, S-5 VendorBreach, S-10 CMSPluginSBOM)
++ `related_domain_discovery.py` (S-1 v1.1 pre-flight). Scoring contribution
+(`supply_chain_vulnerability_uplift`) lives in `scoring_analytics.py` ~L2066-2104.
+
+Method: every heuristic enumerated, screened against the Step-6 failure modes
+(fabrication-on-absent-input / generic-or-error-response-as-signal /
+boolean-as-count / inversion / stale-curated-table), then classified
+**justified / fragile / arbitrary / calibration-gated**. Bucket-1/2 = free
+correctness or hardening; **bucket-3 (scoring magic-numbers) flagged for FIN-9 —
+not intuited here.** Waves 1-5 fixes (S-4 Mandrill/Zoho, S-10 WP-fingerprint +
+plugin body-sanity, vendor-row prune + drift warn) confirmed present and clean;
+this audit focuses on the REMAINING heuristics.
+
+| Heuristic (value) | Location | What it does | Failure-mode screen | Class | Recommendation |
+|---|---|---|---|---|---|
+| `LITE_TIMEOUT_PER_DOMAIN=45`, `MAX_DOMAINS=10`, `max_workers=4` | S-1 L35-36, L92 | Bound LITE-mode related-domain scan time/concurrency | Operational caps, no signal interpretation | justified | Keep; document as scan-budget bounds. |
+| `lite_score = min(ssl, info, 100-dns_risk)` | S-1 L85-89 | Worst-axis rollup of a related domain's posture | Min-of-three is conservative (worst signal wins); no fabrication — defaults are 100 (clean) on checker failure | justified | Keep. Note: silent checker failure ⇒ 100 (clean) is fail-*open* per axis but `min` limits blast radius. |
+| `high_count` = lite_score `< 60` | S-1 L116-117 | Counts related domains scoring below 60 as "high" | Threshold only triggers the issue string + RSI remediation row; not the uplift. 60 is an arbitrary cutoff | arbitrary | Document basis (60 = "below passing") or align to the global grade band; low stakes (cosmetic). |
+| S-1 `check()` runs **only when broker passes `related_domains`**; auto-discovery is pre-flight-only | S-1 L38-55; `flag_inference.py` L539-554 | v1.1 cert-SAN discovery surfaces candidates for broker confirmation; never auto-feeds the scan | **S-1 INERTNESS confirmed**: `discover_related_domains` output is NOT wired into `RelatedDomainsChecker.check`. On a typical scan with no broker list, S-1 returns `status:"skipped"`, `critical_count:0` ⇒ Civil-liability uplift (L2079) never fires. Architecturally intended (observed→uplift, broker-confirmed), but the +0.04 factor is effectively dormant in unattended scans | fragile | Document that S-1 uplift is dormant absent a broker list; per "autonomous verification" memo, consider TLS-cert-match auto-promotion of `high`-confidence cert-SAN candidates so S-1 contributes without a human. Architecture-respecting (auto-verify replaces broker-confirm). |
+| crt.sh `SHARED_INFRA_SUFFIXES` (CDN/SaaS/CA exclusion list) | discovery L62-75 | Drops shared-infra apexes from SAN candidates | Stale-table risk (new CDNs/PaaS appear); conservative — broker still confirms, so misses are recoverable | fragile | Keep; add a periodic-review note. Not signal-critical (suggestions only). |
+| `KNOWN_MULTI_PART_TLDS` (co.za, co.uk, …) | discovery L80-88 | Reduce SAN hosts to public-suffix apex | Hand-rolled PSL subset; will mis-apex exotic TLDs ⇒ duplicate/over-broad candidates | fragile | Acceptable for SA-centric market; consider `publicsuffix2` if scope widens. |
+| `_confidence_for`: cnt≥5 & shared_root→high; cnt≥3 or shared_root→medium | discovery L178-194 | Confidence label for broker review | Labels only (not scored). `pri_root in cand_root` substring + 5-char-prefix is a loose match — but informational, broker adjudicates | justified | Keep (reporting-only confidence hint). |
+| S-3 `MANIFESTS` severity: lockfile=critical, manifest=high | S-3 L150-166 | Exact-pin lockfiles → critical; range manifests → high | Rationale documented (exact versions enable OSV chaining). Curated path list could miss new ecosystems (low stakes) | justified | Keep; rationale already inline. |
+| S-3 `_probe`: HEAD+GET **200-only** + `len≥10` + reject `<html`/`<!doctype` + reject "not found"/"404" | S-3 L188-201 | Body-sanity gate so a WAF/CDN 200 catch-all isn't read as a leaked manifest | **Reference pattern** for generic-response-as-signal. Correctly rejects 403/redirect/HTML-shell. Robust gate, not a magic number | justified | Keep — this is the template Step-6 endorses. |
+| `EXACT_VERSION_RE` (skip SemVer ranges) | S-3 L182, L338 | Only query OSV for pinned versions | Avoids mass-flag/mass-miss on ranges. Sound; ranges still yield the leak finding, just no CVE count | justified | Keep; rationale inline. |
+| `MAX_DEPS_RETURNED=50`, `MAX_OSV_LOOKUPS_PER_SCAN=30`, per-manifest budget | S-3 L184-185, L364-366 | Cap OSV calls (10 req/s limit) + spread budget smallest-first | Operational/rate caps. Budget spread prevents a 1000-dep lockfile starving small ones — good design | justified | Keep. |
+| S-3 penalty `crit*30 + high*15`; `+min(30, total_critical_cves*5)` CVE add-on; `score=max(0,100-penalty)` | S-3 L479-485 | Per-checker score delta into the 0.04-weighted `dependency_manifests` channel | **Scoring magic-numbers** (30/15/5 and the 30-cap). Drive a WEIGHTS-scored card. Not yet calibration-anchored | calibration-gated | **FLAG FIN-9.** Do not intuit. CVE-cap-keeps-leak-dominant rationale is sound directionally; the constants are the open question. |
+| S-2 `KNOWN_COMPROMISED_HOSTS` (polyfill.io, bootcss/bootcdn) | S-2 L526-531 | Tight allow-deny of confirmed Magecart/skimmer CDNs | Stale-table: deliberately tight ("only confirmed incidents"). Risk is under-coverage of NEW incidents, not false-positives | fragile | Keep tight; add review cadence. Each hit = +60 penalty + Magecart uplift, so completeness matters — periodic refresh from threat feeds. |
+| S-2 `KNOWN_CDN_SUFFIXES` (label only) | S-2 L534-542 | Tags a third-party host as "known CDN" for display | Comment says "label, not whitelist" — confirmed not used to suppress findings. No inversion | justified | Keep. |
+| S-2 `_host_of`: relative/`/`-prefixed ⇒ first-party | S-2 L553-563 | Classifies script origin | Protocol-relative `//` handled; relative ⇒ primary. Sound | justified | Keep. |
+| S-2 SRI penalty: `sri_pct<0.25`→+20; `<0.75`→+10; `>15 hosts`→+5; compromised→`60×n` | S-2 L639-672 | Per-checker score delta | **Scoring magic-numbers** (20/10/5/60, 0.25/0.75/15 thresholds). SRI-coverage logic is correct (protective signal lowers penalty — no inversion), but magnitudes uncalibrated | calibration-gated | **FLAG FIN-9** for the constants. Logic/direction justified; magnitudes not. |
+| S-4 `VENDOR_PATTERNS` (28 vendor→SPF-suffix rows) | S-4 L681-724 | Maps SPF includes to email-SaaS vendors; first-match-wins suffix match | **Coverage gap (stale-table class):** S-4 detects 28 vendors but only **9 have rows in vendor_breaches.json** (mailchimp, salesforce, okta, microsoft_365, hubspot, intercom, zendesk, marketo + none for the other 20). Conversely, every breaches.json vendor key IS covered by a pattern (no orphan rows). Notable SA-market senders absent from patterns: **Everlytic is present (good)**; missing: Mailchimp-owned **Mandrill correctly folded** (Wave 1 ✓), Zoho ZeptoMail folded (Wave 1 ✓). Gaps: no **Twilio/SendGrid-subsidiary nuance**, no **Amazon Pinpoint**, no **Mimecast/Proofpoint** secure-gateways (common SA corp), no **Sage/Xero** finance senders | fragile | Pattern→breach coverage is the live risk. (1) Add SA-relevant senders (Mimecast, Proofpoint, Amazon Pinpoint) — free. (2) Document that 20/28 patterns have no S-5 breach correlation by design (detection ≠ breach history). (3) Suffix match is sound (Wave-1 hardened). |
+| S-4 `_walk_includes` depth≤4, `includes[:10]` per node | S-4 L750-766 | Bounds SPF recursion (DNS 10-lookup limit) | Mirrors RFC 7208 lookup cap; cycle-guarded via `seen` | justified | Keep. |
+| S-4 `weak_dmarc = policy in ("", "none")` | S-4 L816 | Flags missing/none DMARC | Correct: `p=none`/absent = no enforcement. Not inverted. Boolean used as boolean (not as count) | justified | Keep. |
+| S-4 penalty: vendor≥3→+5; ≥6→+10; weak_dmarc & ≥1→+20 | S-4 L822-840 | Per-checker score delta | **Scoring magic-numbers** (5/10/20, thresholds 3/6). Direction sound (wide surface + weak DMARC = phishing risk); magnitudes uncalibrated | calibration-gated | **FLAG FIN-9.** |
+| S-10 `_is_wordpress` catch-all guard: random `token_hex(8)` path 200-check + homepage `/wp-content/`-`/wp-includes/`-generator markers + `wp-login.php` 200 ≠ control-body w/ `user_login`/`wp-submit`/`wordpress` | S-10 L880-936 | Robust WP discriminator; bails if host echoes content to nonsense paths | **Wave-2 fix confirmed clean.** Directly defeats the CDN/WAF catch-all-200/403 false-positive (the takealot-Next.js case). Body-confirmed, control-differenced. Exemplary | justified | Keep — second reference pattern alongside S-3 `_probe`. |
+| S-10 `_probe_plugin`: readme.txt **200-only** + `len≥10` + reject HTML shell + require `=== `/`stable tag:`/`tested up to:` marker | S-10 L938-974 | Plugin counts PRESENT only on a genuine readme body | **Wave-2 fix confirmed clean.** Defeats "WAF 403s/200s every path ⇒ all 25 plugins installed" bug. readme.txt-spec markers are the right sanity check | justified | Keep. |
+| S-10 `POPULAR_PLUGINS` (25 slugs) | S-10 L849-875 | "SBOM proxy" probe list | Deliberately small/conservative (not exhaustive). Stale-table risk low — only affects coverage, gated by readme sanity | fragile | Keep; refresh occasionally from wordpress.org popularity. |
+| S-10 `README_VERSION_RE` (`^stable tag:`) | S-10 L877-878 | Extracts plugin version | Per readme.txt spec; multiline/IGNORECASE. Sound | justified | Keep. |
+| S-10 penalty: plugin≥1→`min(30, n*3)`; versioned≥1→`min(20, n*5)`; ≥8 plugins→issue | S-10 L1013-1028 | Per-checker score delta | **Scoring magic-numbers** (3/5 per-plugin, 30/20 caps). Uncalibrated | calibration-gated | **FLAG FIN-9.** |
+| S-5 `LOOKBACK_DAYS=1825` (5yr) | S-5 L1045 | Window past which vendor breaches drop out | **Stale-table control — sound design.** Rationale inline (incomplete key rotation keeps incidents relevant). Paired with the Wave-5 **drift warn** (`VENDOR_BREACH_DRIFT_WARN_DAYS=60`) that nudges before rows expire silently. 5yr itself is a judgement call, not empirically pinned | calibration-gated | **FLAG FIN-9** for the 1825 value (window length affects which breaches score). Drift-warn mechanism is justified and confirmed present. |
+| S-5 linear decay `1 - age/LOOKBACK`; `pen = SEVERITY_PENALTY[sev] × decay` | S-5 L1116-1117 | Full penalty at age 0, zero at 5yr | Linear decay is a reasonable shape; defensible. The shape choice (linear vs exponential) is a modelling assumption | calibration-gated (shape) | Note shape assumption; FIN-9 may revisit linear vs half-life decay. |
+| S-5 `SEVERITY_PENALTY` {critical:25, high:15, medium:8, low:3}; default 5 | S-5 L1048, L1117 | Severity→penalty map feeding score + the S-5 uplift trigger | **Scoring magic-numbers.** Uncalibrated. (Also: unknown-severity default `5` > `low:3` — a row with a typo'd severity scores *higher* than an explicit `low`; minor inversion risk) | calibration-gated | **FLAG FIN-9** for the map. Free fix: clamp unknown-severity default to `low`(3) or skip, so a malformed row can't out-score an explicit low. |
+| S-5 `_days_since` ⇒ `99_999` on parse failure | S-5 L1066-1072 | Bad/missing date ⇒ effectively "ancient" ⇒ dropped by lookback | **Fail-safe, not fabrication:** a malformed date is excluded, not invented as recent. Correct direction | justified | Keep. |
+| S-5 vendor_breaches.json (12 rows, 9 vendors, oldest marketo 2021-06-22) | `vendor_breaches.json` | Curated breach DB | **Stale-table — primary risk class for S-5.** All 12 rows currently within the 1825d window; marketo 2021-06-22 is the nearest-expiry (drift-warn target, ~per the verifier comment). No rows past lookback. `_meta.version` "2026-05-27" — manually maintained | fragile | Keep + maintain. Drift-warn covers silent expiry. Add: cap-table coverage for high-SA-exposure vendors (no Everlytic/Netcore/SA-ISP breach rows even though patterns exist). |
+| `supply_chain_vulnerability_uplift` per-checker deltas: Magecart(S-2)+0.06; Civil-liability(S-1)+0.04; Vendor-breach crit(S-5)+0.04 / high+0.02 | `scoring_analytics.py` L2066-2091 | Observed supply-chain risk → p_breach uplift (pre-MC) | **Scoring magic-numbers.** Triggers are gated on `status=="completed"` + real counts (no fabrication-on-absent; S-1 dormant absent broker list, see above). Direction sound (observed→uplift, no double-count w/ cat-tail per L2700-2736). Magnitudes (0.06/0.04/0.02) are the open question | calibration-gated | **FLAG FIN-9.** Architecture (reporting-only cross-corr stays out, no K_TAIL_SC) confirmed respected — do not re-add. |
+| `sc_vuln_uplift = min(0.15, …)` cap | `scoring_analytics.py` L2099-2103 | Caps total SC uplift at +0.15 (mid of empirical +15-30pp band) | **Scoring magic-number.** Comment cites Ponemon/DBIR +15-30pp triangulation as basis — has a stated anchor, but mid-band placement and the cap value are calibration choices. No inversion/fabrication | calibration-gated | **FLAG FIN-9** to confirm 0.15 vs the +15-30pp band (arguably could sit higher when crit S-5 + Magecart stack). Basis is documented — good — but the value is gated. |
+
+## Summary
+
+total=31 justified=14 fragile=8 arbitrary=1 calibration-gated=8
+
+**Top 3 concerns:**
+
+1. **S-4 VENDOR_PATTERNS ↔ vendor_breaches.json coverage asymmetry (fragile, free fix).**
+   S-4 detects 28 email vendors but only 9 have breach rows; 20 detected
+   vendors can never correlate in S-5. No orphan breach rows (clean reverse),
+   and Wave-1 Mandrill/Zoho folding is confirmed. Add SA-market senders
+   (Mimecast, Proofpoint, Amazon Pinpoint) to patterns and document the
+   detection≠breach-history asymmetry. Bucket-1.
+
+2. **S-1 uplift is dormant in unattended scans (fragile, architecture-aware).**
+   `RelatedDomainsChecker.check` only runs on a broker-supplied list;
+   cert-SAN auto-discovery stays in pre-flight and never feeds the scan, so
+   the +0.04 Civil-liability factor effectively never fires autonomously. Per
+   the autonomous-verification memo, TLS-cert-match auto-promotion of
+   high-confidence candidates would let S-1 contribute without a human —
+   respects observed→uplift + no-double-count.
+
+3. **Eight calibration-gated scoring magic-numbers — FLAG FIN-9, do not intuit.**
+   The per-checker penalty constants (S-2 60/20/10, S-3 30/15/5, S-4 5/10/20,
+   S-10 3/5 caps), the S-5 SEVERITY_PENALTY map, the +0.06/0.04/0.02 uplift
+   deltas, the **+0.15 cap**, and the **1825-day lookback**. Direction/logic of
+   every one is sound (observed→uplift, no inversion, no double-count); only the
+   magnitudes are open. **Two free correctness sub-fixes** ride along: clamp the
+   S-5 unknown-severity default (5) so a malformed row can't out-score an
+   explicit `low` (3), and document the S-1 `<60` "high" cutoff. Confirmed clean
+   from Waves 1-5: S-3 `_probe`, S-10 WP-fingerprint catch-all guard + plugin
+   readme body-sanity, S-4 Mandrill/Zoho folding, vendor-row prune + drift warn.
