@@ -152,6 +152,42 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 | GPD tail fit MLE upgrade (currently method-of-moments + pure numpy) | scipy.stats.genpareto provides MLE fit but adds dependency. Defer until scipy is acceptable on Render. |
 | **Credential-risk scoring calibration** (ticket, NOT done) | Two tweaks to `CredentialRiskClassifier`, both **calibration-gated** (empirical anchors + sign-off, per the scoring-change rule): (1) the IntelX paste/dark-web deductions are **per-mention and uncapped** (40 pastes → −120, floored at 0) — can out-deduct Hudson Rock's flat −50 in the raw 0-100 score even though HR sets the higher *level*; add a cap. (2) **Date-gate the HR CRITICAL** so a *stale* infostealer infection (old `last_compromised`) doesn't auto-force CRITICAL — use the new `days_since_compromise`. The Credential Exposure Correlation (reporting) already does this date-anchoring; this would align the *score* with it. |
 
+## 6b. FIN-9 calibration inputs — financial-loss impact of the 2026-06-03 accuracy waves
+
+**Why this matters for the FIN-9 session.** Wave 1 wired `cat_results["_overall_score"]`
+into the FinancialImpactCalculator for the FIRST time in production — `vulnerability`
+now couples to the real posture score (was permanently pinned at 0.5). Combined with
+the de-inflation from the other waves (SSL no longer auto-"Invalid" −40, DNSBL no longer
+auto-"blacklisted", Exposed-Admin 403-inversion gone, phantom F5-WAF and fabricated
+CVE ASN/geo removed, HTTP-headers no longer false-penalised off a 403 block page), the
+financial-loss **inputs changed materially**. Worked example: a fixed-code production
+scan of phishield.com now scores **169 (Low)** vs **381 (Medium)** pre-fix, so its
+`p_breach`, expected loss and every Monte-Carlo return-period tail shift accordingly.
+
+**Consequence:** the FIN-9 Pareto widening (and the 5L credential-confidence work) must
+anchor to the **corrected post-fix loss baseline**, not the old inflated one. The
+downstream financial constants below were never empirically validated against *working*
+coupling (the coupling was broken until Wave 1), so they now genuinely need calibration.
+
+**Parameters to calibrate (anchor to DBIR / Mandiant M-Trends / IBM CoDB / Sophos SA + colleague judgement):**
+
+| Parameter | Where | Why it now needs calibration |
+|---|---|---|
+| `vulnerability` ← `_overall_score` mapping, and the `0.3` in `p_breach = vulnerability × TEF × 0.3` | `scoring_analytics.py` (~L2099) | coupling is live for the first time; neither the curve nor the `0.3` was ever validated against real scores |
+| credential → p(breach) contribution (replaces `dehashed_total × 2`, ~L669) | 5L / pre-read **K1–K7** | the confidence-weighted credential class (`docs/credential_confidence_pbreach_design.md`) |
+| Pareto **alpha** + LGB **mixture weight** (FIN-9 core) | `_calculate_zar` | re-anchor to the corrected loss baseline + the MOVEit per-org curve |
+| Remediation cap: `MAX_RSI_REDUCTION_FRACTION=0.15`, `RSI_RESIDUAL_FLOOR=0.05` | `scoring_analytics.py` (Wave 4) | set heuristically in Wave 4; the ~81% modelled loss-cut is now a calibration question, not a bug |
+| TEF industry-targeting multipliers | `scoring_analytics.py` | how often each industry is targeted |
+| HIBP scenario `p_breach` step thresholds (0.35 / 0.20 / 0.08) | `scoring_analytics.py:1664` | heuristic step function |
+| `COST_PER_RECORD`, `REGULATORY_FINE` tables | `scoring_analytics.py` | per-industry SA values |
+| `K_TAIL = 1.20` (catastrophe tail widening) | `_calculate_zar` | heuristic |
+
+**Pre-session action:** regenerate the reference loss curves on the FIXED code (a clean
+post-fix scan of takealot + 1–2 references) so the calibration anchors to the corrected
+baseline. `verify_supply_chain_financial_wiring.py` confirms wiring but INJECTS scores —
+use a real fixed-code scan for the magnitudes. (A fixed-code phishield scan is already in
+`test_fixtures/phishield_live.json`.)
+
 ## 7. Documentation / artifacts
 
 | Item | Status |
