@@ -1,10 +1,42 @@
-# Calibration pre-read — confidence-weighted credential contribution to p(breach)
+# Calibration pre-read — FIN-9 session (credential-confidence + the wider parameter set)
 
 **For:** FIN-9 calibration session, 2026-06-03 (with colleague — international breach-cost experience)
-**Status:** design + calibration knobs laid out; **numbers are placeholders to be set live against the anchors below.** Do not ship before the 2-step gate + sanity-check.
-**Relates to:** OUTSTANDING `5L`, the §6 "Credential-risk scoring calibration" ticket, and the cat-tail no-double-count rule.
+**Status:** design + calibration knobs laid out; **numbers are placeholders to be set with the colleague against the anchors below.** Do not ship before the 2-step gate + sanity-check.
+**Relates to:** OUTSTANDING `5L` + **§6b** (full parameter table), the §6 "Credential-risk scoring calibration" ticket, the FIN-9 Pareto memory, and the cat-tail no-double-count rule.
 
 ---
+
+## 0. Current state & session scope (read first — updated 2026-06-03)
+
+**What changed since this doc was first written:** the accuracy back-test + six fix
+waves landed and were verified end-to-end on a fixed-code production scan. The
+single most important consequence for calibration: **Wave 1 wired `_overall_score`
+into the financial calculator for the first time** — `vulnerability` now *couples to
+the real posture score* (it was permanently pinned at 0.5). With the de-inflation
+fixes (SSL no longer auto-"Invalid", DNSBL no longer auto-"blacklisted", the
+Exposed-Admin 403 inversion gone, phantom WAF/CVE-ASN removed), scores dropped to
+their true level — phishield.com now scores **169 (Low)** vs **381 (Medium)** pre-fix.
+
+**So the calibration baseline has shifted.** Every parameter below must be anchored
+to the **corrected fixed-code outputs**, NOT the old inflated ones. The downstream
+constants were never validated against *working* coupling (the coupling was broken),
+so they genuinely need calibration now.
+
+**This session's parameters span five groups** (this doc details the credential one;
+the full table is OUTSTANDING §6b):
+1. **p(breach) core** — the `vulnerability ← _overall_score` curve + the `0.3` in `p_breach = vulnerability × TEF × 0.3`.
+2. **Credential → p(breach) / RSI** — **the focus of this doc** (§1–§9 below).
+3. **RSI factor weights** — the ransomware-vector sizes (+0.25 RDP, etc.).
+4. **SA cost/fine + TEF** — `COST_PER_RECORD`, `REGULATORY_FINE` (POPIA s109 / Information Regulator reality), industry targeting.
+5. **Catastrophe tail / Pareto (FIN-9 core)** — `K_TAIL`, the Pareto alpha + LGB mixture — **your domain; flagged as needs-your-judgement.**
+
+**Prep provided:** a sandbox, research-grounded **best-attempt comparison doc** is
+being prepared (`docs/calibration_prep/` → a consolidated comparison) — for each
+parameter: current value, a proposed value/range anchored to SA + international
+breach data (sources cited), a validation-by-recompute result, a confidence rating,
+and the specific open question. **These are PREP PROPOSALS, not final** — a starting
+point so the session refines rather than starts cold. Final values are set with the
+colleague and pass the 2-step gate before anything ships.
 
 ## 1. One-paragraph problem statement
 
