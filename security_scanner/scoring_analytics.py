@@ -2035,7 +2035,14 @@ class FinancialImpactCalculator:
         # (see GAP-008). TEF is a separate, modest factor based on actual
         # breach frequency data (Verizon DBIR, IBM, Sophos, SABRIC).
         overall_score = categories.get("_overall_score", 500)
-        vulnerability = (100 - overall_score / 10) / 100  # 0.0 (perfect) to 1.0 (worst)
+        # `_overall_score` is the 0-1000 overall RISK score (higher = worse), wired in
+        # at scanner.py. Map it so vulnerability RISES with risk. The previous formula
+        # `(100 - score/10)/100` assumed a posture/security score (higher = better) — the
+        # opposite polarity — so once Wave 1 coupled the real risk score a well-postured
+        # org scored a HIGHER p_breach. This linear map is a CORRECTNESS placeholder; the
+        # curve shape (e.g. convex) and the 0.3 constant below are the FIN-9 calibration
+        # decision (see docs/CALIBRATION_PREP.md §0.1). Default 500 -> 0.5 (unchanged).
+        vulnerability = min(1.0, max(0.0, overall_score / 1000))  # 0.0 (no risk) -> 1.0 (max risk)
 
         # ── Supply-chain vulnerability uplifts ──
         # The overall_score already absorbs some supply-chain signal via the
