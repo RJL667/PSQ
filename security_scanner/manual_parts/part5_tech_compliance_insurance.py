@@ -42,11 +42,24 @@ def build(doc):
     )
 
     add_body(doc,
-        "The scanner maintains 29 end-of-life (EOL) software signatures that are "
-        "checked against every detected component. A component is flagged as EOL "
-        "when its version falls below the vendor's actively supported threshold. "
-        "For example, jQuery versions below 3.x, PHP below 8.1, or WordPress "
-        "major releases that no longer receive security updates."
+        "The scanner maintains a curated end-of-life (EOL) software signature "
+        "table — refreshed against endoflife.date — that is checked against "
+        "every detected component. It spans the server-side and runtime stacks "
+        "most commonly exposed in response headers: PHP, Node.js, Python, "
+        "OpenSSL, Apache httpd, nginx, Microsoft IIS, Apache Tomcat/Coyote, and "
+        "ASP.NET. Only branches that are genuinely past their vendor security-EOL "
+        "date are listed (for example PHP 8.0 and below, OpenSSL 1.1.1 and below, "
+        "or nginx 1.18 and below); still-supported branches are intentionally "
+        "absent so they are not flagged."
+    )
+
+    add_body(doc,
+        "Version matching is anchored on a component boundary: the matched "
+        "version token must be followed by a non-digit, so a signature for a "
+        "branch such as 7.1 matches '7.1' but does NOT spuriously match a newer "
+        "release like 7.10. This prevents a supported version from being "
+        "mislabelled end-of-life because its version string happens to begin "
+        "with an older branch number."
     )
 
     add_warning(doc,

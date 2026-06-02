@@ -543,6 +543,19 @@ def build(doc):
         "it observes regardless of where the header originates."
     )
 
+    add_note(
+        doc,
+        "Blocked or unreachable responses: if the final response to the "
+        "scanner is not a success (2xx) status — for example, a WAF or CDN "
+        "returns a 403 or 503 challenge/block page to the scanner's user "
+        "agent — the headers on that block page do not represent the site's "
+        "real configuration. In that case the check reports 'could not "
+        "assess (blocked/unreachable)' and emits no header score, and "
+        "scoring and remediation fall back to neutral, rather than recording "
+        "every security header as missing. The renderers show this as an "
+        "amber, non-penalising card."
+    )
+
     # ── 4.2.3 WAF / DDoS Protection ────────────────────────────────
     add_h2(doc, "4.2.3  WAF / DDoS Protection")
 
@@ -551,9 +564,12 @@ def build(doc):
         "What it checks:  ",
         "The scanner sends an HTTPS request to the domain and examines the "
         "response for signatures that indicate a Web Application Firewall (WAF) "
-        "or DDoS protection service is in place. Detection is based on three "
-        "categories of evidence: HTTP response headers unique to the WAF vendor, "
-        "cookies set by the WAF, and characteristic content in the response body."
+        "or DDoS protection service is in place. Detection is based strictly on "
+        "transport-layer evidence: HTTP response headers unique to the WAF "
+        "vendor, cookies set by the WAF, and the Server header. Vendor strings "
+        "appearing in the page body are deliberately NOT used as a signal — a "
+        "page that merely mentions a vendor's name (for example in marketing "
+        "copy) must not be reported as protected by that vendor's WAF."
     )
 
     add_body(doc, "The scanner recognises the following WAF and protection services:")
@@ -561,8 +577,14 @@ def build(doc):
     add_bullet(doc, "AWS WAF / CloudFront -- Detected via x-amz-cf-id header, x-amzn-requestid header, and AWS load-balancer cookies.")
     add_bullet(doc, "Imperva / Incapsula -- Detected via x-iinfo header, x-cdn header, and incapsula session cookies.")
     add_bullet(doc, "Akamai -- Detected via x-akamai-transformed header and Akamai bot-management cookies.")
-    add_bullet(doc, "Sucuri -- Detected via x-sucuri-id header, x-sucuri-cache header, and body content.")
-    add_bullet(doc, "F5 BIG-IP ASM -- Detected via proprietary headers and F5 session cookies.")
+    add_bullet(doc, "Sucuri -- Detected via x-sucuri-id and x-sucuri-cache headers.")
+    add_bullet(
+        doc,
+        "F5 BIG-IP ASM -- Detected only via genuine F5 markers: the "
+        "x-wa-info header, BIG-IP / TS01 / F5 session cookies, or a "
+        "Server: BIG-IP header. The ubiquitous x-frame-options header is "
+        "NOT treated as an F5 signal, as almost any hardened site sets it."
+    )
     add_bullet(doc, "Barracuda -- Detected via barracuda session cookies.")
 
     add_bold_body(

@@ -173,12 +173,18 @@ def build(doc):
         doc,
         "How it works: ",
         "For IP-based checks, the scanner reverses the IP address octets "
-        "and performs DNS A-record lookups against five major blacklists: "
-        "Spamhaus ZEN (zen.spamhaus.org), SpamCop (bl.spamcop.net), SORBS "
-        "(dnsbl.sorbs.net), Barracuda (b.barracudacentral.org), and "
-        "UCEProtect (dnsbl-1.uceprotect.net). For domain-based checks, it "
-        "queries Spamhaus DBL (dbl.spamhaus.org) and URIBL (uribl.com). A "
-        "successful DNS resolution means the IP or domain is listed."
+        "and performs DNS A-record lookups against four major blacklists: "
+        "Spamhaus ZEN (zen.spamhaus.org), SpamCop (bl.spamcop.net), "
+        "Barracuda (b.barracudacentral.org), and UCEProtect "
+        "(dnsbl-1.uceprotect.net). For domain-based checks, it queries "
+        "Spamhaus DBL (dbl.spamhaus.org) and URIBL (uribl.com). A bare DNS "
+        "resolution is not by itself treated as a listing: the scanner "
+        "validates each reply against the list's documented return codes "
+        "and only counts a genuine listing code (typically 127.0.0.2 and "
+        "above). Error, blocked, and refused replies — Spamhaus open-"
+        "resolver / rate-limit codes in the 127.255.255.x range and the "
+        "URIBL 127.0.0.1 query-refused code — are explicitly rejected, so "
+        "an infrastructure response is never mistaken for a blacklisting."
     )
 
     add_bold_body(
@@ -212,8 +218,9 @@ def build(doc):
     )
     add_bullet(
         doc,
-        "Listed on dnsbl.sorbs.net — SORBS listings often indicate the IP "
-        "is on a dynamic/residential range or has been an open relay."
+        "Listed on dnsbl-1.uceprotect.net — UCEProtect listings often "
+        "indicate the IP sits on a range with a poor sending reputation or "
+        "has been an open relay."
     )
     add_bullet(
         doc,
@@ -261,12 +268,15 @@ def build(doc):
         "How it works: ",
         "HTTPS GET requests are sent to each path with a four-second timeout "
         "and redirects disabled. Up to 15 paths are probed concurrently using "
-        "a thread pool. An HTTP 200 response means the path is directly "
-        "accessible — this is a confirmed exposure. For critical paths, HTTP "
-        "401 and 403 responses are also flagged because they confirm the path "
-        "exists (a server that returns 403 on /.env has admitted the file is "
-        "there, even if it is access-controlled). Non-critical paths only flag "
-        "on HTTP 200."
+        "a thread pool. Only an HTTP 200 response that also passes a body-"
+        "sanity check counts as an exposure — confirming the path is directly "
+        "accessible and is serving real content rather than a generic landing "
+        "or error page. HTTP 401 and 403 responses are treated as PROTECTED "
+        "(access-controlled) and are NOT counted as findings: a server that "
+        "returns 403 on /.env or /wp-admin is enforcing access control, which "
+        "is the desired posture. This 200-only, body-checked approach mirrors "
+        "the dependency-manifest probe and prevents WAF/CDN-defended sites "
+        "from being penalised for blocking the probe."
     )
 
     add_bold_body(
@@ -311,9 +321,10 @@ def build(doc):
     )
     add_bullet(
         doc,
-        "/.git/HEAD — HTTP 403: The Git repository metadata exists on the "
-        "server. While blocked, its presence confirms a deployment practice "
-        "that may expose source code if misconfigured."
+        "/.git/HEAD — HTTP 200 (CRITICAL): The Git repository metadata is "
+        "publicly readable, allowing an attacker to reconstruct the source "
+        "tree. A path that instead returns 401/403 is reported as protected "
+        "and does not appear as a finding."
     )
 
     add_warning(
@@ -338,14 +349,17 @@ def build(doc):
     add_bold_body(
         doc,
         "What it checks: ",
-        "The scanner discovers subdomains through two methods: Certificate "
-        "Transparency (CT) log scanning via crt.sh and DNS brute-force "
-        "resolution of 50+ common prefixes (www, mail, vpn, dev, staging, "
-        "test, admin, api, beta, backup, jenkins, gitlab, jira, grafana, "
-        "kibana, phpmyadmin, cpanel, owa, exchange, and many more). "
-        "Discovered subdomains are classified as 'risky' if they contain "
-        "keywords associated with development, administration, or internal "
-        "infrastructure."
+        "The scanner discovers subdomains through two methods. Certificate "
+        "Transparency (CT) log scanning via crt.sh is the PRIMARY source — "
+        "it reveals every subdomain that has ever had a public certificate "
+        "issued. DNS brute-force resolution of 50+ common prefixes (www, "
+        "mail, vpn, dev, staging, test, admin, api, beta, backup, jenkins, "
+        "gitlab, jira, grafana, kibana, phpmyadmin, cpanel, owa, exchange, "
+        "and many more) is the secondary source, used to catch subdomains "
+        "that have no certificate. Discovered subdomains are classified as "
+        "'risky' when a risk keyword (dev, staging, admin, backup, etc.) "
+        "appears as a distinct label — the apex itself and the ordinary "
+        "www host are excluded from the risky count."
     )
 
     add_bold_body(
@@ -353,13 +367,21 @@ def build(doc):
         "How it works: ",
         "First, a query to crt.sh retrieves all certificates ever issued "
         "for the domain and its subdomains from public Certificate "
-        "Transparency logs. This reveals subdomains the organisation may "
-        "have forgotten about — old staging servers, decommissioned APIs, "
-        "and test environments. Second, the scanner resolves each of the "
-        "50+ brute-force prefixes via DNS to catch subdomains that may "
-        "not have certificates. Each discovered subdomain is tagged with "
-        "risk keywords (dev, staging, test, admin, backup, database, "
-        "internal, vpn, etc.)."
+        "Transparency logs (the query is retried once before giving up). "
+        "This reveals subdomains the organisation may have forgotten "
+        "about — old staging servers, decommissioned APIs, and test "
+        "environments. The report only narrates results as discovered "
+        "'via Certificate Transparency' when this crt.sh query actually "
+        "succeeded; if CT is unavailable the card does not claim a CT "
+        "source. Second, the scanner resolves each of the 50+ brute-force "
+        "prefixes via DNS. Before doing so it runs a wildcard-DNS guard: "
+        "two random non-existent labels are resolved, and if they answer "
+        "(meaning *.domain is a catch-all wildcard) brute-force discovery "
+        "is suppressed, because every guessed prefix would otherwise "
+        "appear to resolve and fabricate subdomains that do not exist. "
+        "Each genuinely discovered subdomain is tagged with risk keywords "
+        "(dev, staging, test, admin, backup, database, internal, vpn, "
+        "etc.)."
     )
 
     add_bold_body(
@@ -542,6 +564,17 @@ def build(doc):
         "Shodan data reflects what is visible from the internet. Internal "
         "vulnerabilities behind firewalls are not detected. The scanner "
         "complements (but does not replace) internal vulnerability scanning."
+    )
+
+    add_note(
+        doc,
+        "Source-honesty: the free Shodan InternetDB path does not return "
+        "ASN or hosting-country data, so when only InternetDB is available "
+        "the card shows ASN and Country as 'not available' rather than "
+        "inventing a placeholder count. Similarly, when OSV.dev reports a "
+        "vulnerability with no real CVSS score, the severity is shown as "
+        "estimated (derived from the database's own severity label) and "
+        "flagged as such, rather than presenting a fabricated numeric CVSS."
     )
 
     add_tip(
@@ -876,6 +909,21 @@ def build(doc):
 
     add_bold_body(
         doc,
+        "Counting password-bearing records: ",
+        "Where the assessment reports an exposed-credential count, it counts "
+        "the records (mailboxes) that actually carry a password — the "
+        "plaintext- and hashed-password subset from the Dehashed credential "
+        "breakdown — rather than treating a single 'passwords present' "
+        "indicator as if it were a count. The figure is therefore phrased so "
+        "the reader can see both the total exposure and how much of it is "
+        "directly loginable (for example, one mailbox carrying a password "
+        "across thirteen breach-exposure records). Email addresses are "
+        "lower-cased and trimmed before the unique-mailbox tally so that the "
+        "same address in different letter cases is not double-counted."
+    )
+
+    add_bold_body(
+        doc,
         "Risk levels and their meanings: ",
         "CRITICAL — Active infostealer infection detected or credentials "
         "being actively traded on the dark web. Immediate incident "
@@ -1065,12 +1113,17 @@ def build(doc):
         "which ones are registered and actively resolving via DNS. These "
         "lookalike domains can be used for phishing attacks targeting the "
         "organisation's employees, clients, and partners. The scanner "
-        "employs eight generation techniques: character omission, adjacent "
-        "character swap, character duplication, homoglyph substitution "
+        "employs several generation techniques: character omission, adjacent "
+        "character swap, character duplication, ASCII homoglyph substitution "
         "(visually similar characters like 'o' and '0', 'l' and '1'), "
         "adjacent-keyboard typos (fat-finger errors), TLD variants (e.g., "
         ".com to .net, .co, .io, .co.za), dot insertion, and hyphen "
-        "insertion."
+        "insertion. It also generates a bounded set of IDN / homoglyph "
+        "candidates — internationalised-domain lookalikes that substitute "
+        "Unicode characters resembling Latin letters (e.g. a Cyrillic 'а' "
+        "for an ASCII 'a') and are registered in their punycode (xn--) "
+        "form. These are the hardest lookalikes for a human to spot in an "
+        "address bar."
     )
 
     add_bold_body(
@@ -1078,11 +1131,16 @@ def build(doc):
         "How it works: ",
         "First, the domain is split into its name and TLD components "
         "(handling multi-part TLDs like .co.za). The permutation engine "
-        "generates all variants using the eight techniques above. For "
-        "homoglyph substitution, the scanner uses a mapping of visually "
-        "similar characters (a/4/@, b/d/6, e/3, i/1/l/!, o/0, s/5/$, "
-        "etc.). For keyboard typos, it uses an adjacency map of QWERTY "
-        "keyboard neighbours. TLD variants are checked across 17 common "
+        "generates all variants using the techniques above. For "
+        "ASCII homoglyph substitution, the scanner uses a mapping of "
+        "visually similar characters (a/4/@, b/d/6, e/3, i/1/l/!, o/0, "
+        "s/5/$, etc.). IDN / homoglyph candidates are built by swapping a "
+        "Latin letter for a confusable Unicode character and encoding the "
+        "result to its punycode (xn--) label, which is what actually "
+        "appears in DNS; this set is deliberately bounded to keep the "
+        "permutation space manageable. For keyboard typos, it uses an "
+        "adjacency map of QWERTY keyboard neighbours. TLD variants are "
+        "checked across 17 common "
         "TLDs including .com, .net, .org, .co, .dev, .online, .io, .info, "
         ".co.za, and .africa. Each generated permutation is checked via "
         "DNS resolution — if it resolves, the domain is registered and "
@@ -1385,14 +1443,19 @@ def build(doc):
     add_bold_body(
         doc,
         "What it checks: ",
-        "WordPress-only. A cheap discriminator probes /wp-content/, "
-        "/wp-login.php, and /wp-includes/; if none respond the "
-        "checker reports 'skipped' (the site is not WordPress and "
-        "the card does not render in the report). When WordPress is "
-        "detected, the scanner enumerates 25 popular plugin slugs by "
-        "HEADing /wp-content/plugins/<slug>/ and harvests version "
-        "strings from /wp-content/plugins/<slug>/readme.txt via the "
-        "'Stable tag:' header."
+        "WordPress-only. The checker first establishes a genuine WordPress "
+        "fingerprint by probing /wp-content/, /wp-login.php, and "
+        "/wp-includes/, guarded by a random-path catch-all test so a site "
+        "that returns 200 for every URL (a soft-404 / SPA front end behind "
+        "a CDN) is NOT mistaken for WordPress. If no genuine fingerprint is "
+        "found the checker reports 'skipped' (the site is not WordPress and "
+        "the card does not render in the report). Only when WordPress is "
+        "confirmed does the scanner enumerate 25 popular plugin slugs by "
+        "requesting /wp-content/plugins/<slug>/readme.txt; a plugin is "
+        "counted only when that readme returns HTTP 200 AND passes a body-"
+        "sanity check confirming it is a real plugin readme (not a generic "
+        "page). Version strings are harvested from the readme's 'Stable "
+        "tag:' header."
     )
 
     add_bold_body(

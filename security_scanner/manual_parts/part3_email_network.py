@@ -248,7 +248,16 @@ def build(doc):
         "originated from your mail infrastructure."
     )
 
-    add_bullet(doc, "The scanner checks up to 40 common DKIM selector names to locate your published key.")
+    add_bullet(
+        doc,
+        "The scanner checks up to 40 common DKIM selector names to locate "
+        "your published key. A selector is only counted as a real DKIM "
+        "record when its TXT value actually contains a DKIM key — that is, "
+        "a v=DKIM1 tag or a p= public-key tag. A selector name that merely "
+        "resolves (for example, because the domain uses a DNS wildcard) but "
+        "carries no key is ignored, so a wildcard cannot inflate the DKIM "
+        "result with non-existent selectors."
+    )
     add_bullet(doc, "A valid DKIM signature significantly improves email deliverability.")
     add_bullet(doc, "Without DKIM, recipients have no way to verify that your emails are authentic.")
 
@@ -512,7 +521,22 @@ def build(doc):
         "How It Works: ",
         "The scanner performs a TCP port scan against your domain\u2019s resolved IP "
         "addresses, checking for commonly targeted services. Each discovered open "
-        "port is classified into one of three risk tiers."
+        "port is classified into one of three risk tiers. When a domain resolves "
+        "to (or has) more than one IP address, each exposed port is attributed in "
+        "the report to the specific IP it was actually found on \u2014 so, for "
+        "example, an open FTP port on a real origin server is shown against that "
+        "origin's address rather than against the CDN edge address the domain "
+        "name points to."
+    )
+
+    add_bold_body(
+        doc,
+        "DNS Records Surfaced: ",
+        "Alongside the port findings, the card surfaces the domain's core DNS "
+        "posture: whether the zone is DNSSEC-signed (a DNSKEY present at the "
+        "apex), whether AAAA (IPv6) records are published, and the domain's TXT "
+        "records. DNSSEC status is shown explicitly so that a DNSSEC-related "
+        "recommendation is always backed by a visible status in the same card."
     )
 
     # Risk tiers
@@ -889,12 +913,19 @@ def build(doc):
     add_bold_body(
         doc,
         "VPN Gateway Detection: ",
-        "The scanner identifies known VPN and remote access gateways by checking "
-        "for characteristic ports, HTTP response headers, and TLS certificate "
-        "attributes associated with common VPN solutions. Detected platforms "
-        "include Citrix Gateway (NetScaler), Fortinet FortiGate, Pulse Secure "
-        "(now Ivanti Connect Secure), Palo Alto GlobalProtect, Cisco AnyConnect, "
-        "SonicWall, and WireGuard."
+        "The scanner identifies known VPN and remote access gateways by "
+        "checking for characteristic ports, HTTP response headers, and TLS "
+        "certificate attributes associated with common VPN solutions. "
+        "Detected platforms include Citrix Gateway (NetScaler), Fortinet "
+        "FortiGate, Pulse Secure (now Ivanti Connect Secure), Palo Alto "
+        "GlobalProtect, Cisco AnyConnect, SonicWall, and WireGuard. To avoid "
+        "false positives, a vendor is only matched when a genuine vendor "
+        "marker is returned over an HTTP 200 response that also passes a "
+        "body-sanity check — a loose substring appearing in any response "
+        "(such as a CDN challenge page or single-page-app shell) is not "
+        "sufficient. This gate is applied uniformly to all of the supported "
+        "gateways, including Microsoft RDS Web, which additionally requires "
+        "genuine RDWeb tokens."
     )
 
     add_body(
