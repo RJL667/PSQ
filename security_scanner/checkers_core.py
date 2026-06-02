@@ -453,7 +453,12 @@ class EmailSecurityChecker:
             for rdata in answers:
                 txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
                 if txt.startswith("v=spf1"):
-                    has_all = "all" in txt
+                    # Detect the real SPF `all` MECHANISM with its qualifier
+                    # (`-all`/`~all`/`?all`/`+all`), not a bare `"all"` substring
+                    # (which matched incidentally inside e.g. `mx:mail.smallco.com`
+                    # or a domain literally containing "all"). The mechanism is a
+                    # whitespace-delimited token, optionally qualifier-prefixed.
+                    has_all = re.search(r"(?:^|\s)[-~?+]?all(?:\s|$)", txt) is not None
                     has_redirect = "redirect=" in txt
                     valid = has_all or has_redirect
                     # Count DNS lookups in SPF chain (include, a, mx, redirect, exists)
@@ -942,7 +947,8 @@ class WAFChecker:
                              allow_redirects=True, headers={"User-Agent": USER_AGENT})
             headers_lower = {k.lower(): v.lower() for k, v in r.headers.items()}
             cookies_lower = {k.lower(): v.lower() for k, v in r.cookies.items()}
-            body_lower = r.text[:5000].lower()
+            # Body text is no longer scanned for WAF vendor names — see the
+            # detection loop below for why (incidental mentions fabricated hits).
 
             server_hdr = headers_lower.get("server", "")
             detected = []
@@ -958,10 +964,14 @@ class WAFChecker:
                     for c in sigs["cookies"]:
                         if any(name == c or name.startswith(c) for name in cookies_lower):
                             matched = True; break
-                if not matched:
-                    for b in sigs["body"]:
-                        if b in body_lower:
-                            matched = True; break
+                # NOTE: body markers are intentionally NOT used for detection.
+                # Bare vendor names (`cloudflare`, `sucuri`, `incap_ses`) appear
+                # in incidental page text (a blog post, an embedded asset URL),
+                # so a body-substring match fabricated a phantom WAF-positive
+                # and the associated category bonus. WAF presence is now decided
+                # only from authoritative response channels: headers, cookies,
+                # and the Server token. (`sigs["body"]` is retained in the table
+                # for documentation / future error-page-fingerprint use.)
                 if not matched:
                     for sv in sigs.get("server", []):
                         if sv in server_hdr:
@@ -1088,10 +1098,25 @@ class DomainIntelChecker:
                 if days_to_expiry < 30:
                     result["issues"].append(f"Domain expires in {days_to_expiry} days — renewal risk")
 
-            # Detect privacy protection
-            whois_raw = str(w).lower()
+            # Detect privacy protection — scope the keyword match to the
+            # registrant/admin CONTACT fields (org/name/email) only. Matching
+            # against the whole stringified WHOIS blob (`str(w)`) false-fired on
+            # unrelated text: registrar names, status URLs, or a nameserver like
+            # `*.proxy.*` would all trip `"proxy"`/`"protected"` and mislabel a
+            # domain as privacy-protected.
             privacy_keywords = ["redacted", "privacy", "withheld", "protected", "proxy"]
-            result["privacy_protected"] = any(k in whois_raw for k in privacy_keywords)
+            contact_fields = []
+            for attr in ("org", "name", "registrant", "registrant_name",
+                         "registrant_org", "emails", "email"):
+                val = getattr(w, attr, None)
+                if not val:
+                    continue
+                if isinstance(val, (list, tuple, set)):
+                    contact_fields.extend(str(v) for v in val if v)
+                else:
+                    contact_fields.append(str(val))
+            contact_blob = " ".join(contact_fields).lower()
+            result["privacy_protected"] = any(k in contact_blob for k in privacy_keywords)
 
         except ImportError:
             result["status"] = "skipped"

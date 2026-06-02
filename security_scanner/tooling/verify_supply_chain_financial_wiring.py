@@ -44,6 +44,7 @@ Usage:
 import argparse
 import copy
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -222,6 +223,62 @@ def check_vendor_breach_drift() -> list:
             warnings.append(
                 f"NEAR-EXPIRY: {b.get('vendor')} {date_str} is {age}d old; "
                 f"leaves the {VENDOR_BREACH_LOOKBACK_DAYS}d lookback in {remaining}d — refresh or prune deliberately.")
+    return warnings
+
+
+# Curated point-in-time tables carry a `# review-by: YYYY-MM-DD` marker. This
+# guard WARNs (never fails the gate) when any such marker is past due, so a
+# hand-maintained CVSS/EPSS/KEV/ransomware table can't silently rot. Bounded by
+# design: only files that opt in by adding the marker are scanned. Today the
+# markers live on DNSBLChecker.IP_DNSBLS, PORT_INTEL (checkers_network.py) and
+# RANSOMWARE_CVE_MAP (checkers_threats.py); SERVICE_INTEL / EOL_SIGNATURES /
+# SECURITY_INTEL etc. are intentionally NOT yet marked (deferred — add markers
+# opportunistically rather than carpet-bombing every table).
+_REVIEW_BY_FILES = (
+    "checkers_network.py",
+    "checkers_threats.py",
+)
+_REVIEW_BY_RE = re.compile(r"#\s*review-by:\s*(\d{4}-\d{2}-\d{2})")
+# Warn this many days BEFORE the review date, mirroring the vendor-breach nudge.
+REVIEW_BY_WARN_DAYS = 30
+
+
+def check_curated_table_staleness() -> list:
+    """WARN-only staleness guard for `# review-by: YYYY-MM-DD` markers.
+
+    Scans the opted-in source files for review-by markers and warns for any that
+    are past due (or within REVIEW_BY_WARN_DAYS of due). Never changes the exit
+    code — purely an operator nudge so curated point-in-time tables (CVSS/EPSS/
+    KEV/ransomware attribution) are refreshed deliberately, not discovered stale.
+    """
+    warnings: list = []
+    now = datetime.now(timezone.utc)
+    for fname in _REVIEW_BY_FILES:
+        path = ROOT / fname
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception as e:  # pragma: no cover - operator visibility only
+            warnings.append(f"{fname} could not be read ({e}); skipping review-by check.")
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            m = _REVIEW_BY_RE.search(line)
+            if not m:
+                continue
+            date_str = m.group(1)
+            try:
+                due = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                warnings.append(f"{fname}:{lineno} has unparseable review-by date {date_str!r}.")
+                continue
+            remaining = (due - now).days
+            if remaining < 0:
+                warnings.append(
+                    f"OVERDUE: {fname}:{lineno} review-by {date_str} passed "
+                    f"{-remaining}d ago — refresh the curated table.")
+            elif remaining <= REVIEW_BY_WARN_DAYS:
+                warnings.append(
+                    f"DUE-SOON: {fname}:{lineno} review-by {date_str} in {remaining}d "
+                    f"— schedule a refresh of the curated table.")
     return warnings
 
 
@@ -465,6 +522,17 @@ def run(industry: str = "retail",
         print(f"OK   [vendor_breach_drift] no rows within "
               f"{VENDOR_BREACH_DRIFT_WARN_DAYS}d of the "
               f"{VENDOR_BREACH_LOOKBACK_DAYS}d lookback window")
+
+    # Curated-table review-by staleness check (WARN-only — never changes exit).
+    print()
+    print("--- curated-table review-by check (warn-only) ---")
+    review_warnings = check_curated_table_staleness()
+    if review_warnings:
+        for w in review_warnings:
+            print(f"WARN [review_by] {w}")
+    else:
+        print(f"OK   [review_by] no review-by markers overdue or within "
+              f"{REVIEW_BY_WARN_DAYS}d")
 
     print()
     print("=" * 70)

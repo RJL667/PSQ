@@ -107,10 +107,18 @@ class TechStackChecker:
                 )
                 result["score"] -= 5
 
-            # Check for EOL versions
+            # Check for EOL versions.
+            # Anchor the version on a component boundary so a token like
+            # `php/7.1` does NOT match the newer `php/7.10` / `php/7.12` branch
+            # (a raw substring match did — falsely flagging a supported release
+            # as EOL). The matched token must be followed by a non-digit (end of
+            # string, whitespace, a patch dot like `7.1.33`, etc.), never by
+            # another digit that would extend it to a different minor version.
             combined = (all_headers_str + body).lower()
             for sig, info in self.EOL_SIGNATURES.items():
-                if sig.lower() in combined:
+                sig_l = sig.lower()
+                # \D-or-end lookahead anchors the trailing version component.
+                if re.search(re.escape(sig_l) + r"(?!\d)", combined):
                     result["eol_detected"].append({**info, "software": sig})
                     result["issues"].append(f"EOL software detected: {info['note']}")
                     if info["risk"] == "critical":
@@ -667,6 +675,10 @@ class ShodanVulnChecker:
 
     # Ransomware CVE mapping — known CVEs used by ransomware families
     # Source: community-maintained + CISA advisories
+    # review-by: 2026-12-02
+    # Hand-maintained, point-in-time attribution: new CVEs are weaponised by
+    # ransomware affiliates continuously, so this map drifts. Review by the date
+    # above (add newly-weaponised CVEs, retire stale family attributions).
     RANSOMWARE_CVE_MAP = {
         # LockBit
         "CVE-2023-4966": "LockBit (Citrix Bleed)", "CVE-2021-22986": "LockBit",

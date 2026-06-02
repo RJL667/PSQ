@@ -293,7 +293,29 @@ class SubdomainChecker:
             result["score"] = max(0, result["score"] - len(takeover_vulnerable) * 15)
 
         # --- Identify risky subdomains ---
-        risky = [s for s in subdomains if any(k in s for k in self.RISKY_KEYWORDS)]
+        # Match risky keywords on DNS LABEL boundaries (split on "."), not as a
+        # raw substring. The old `any(k in s)` over the whole FQDN flagged the
+        # apex itself and any brand whose name merely contained a token
+        # (`api.takealot.com` tripped by "api"; `olddomain.com` by "old";
+        # a brand literally containing "db"), inflating risky_subdomains, which
+        # feeds sub_risk (*15). We also exclude the scanned apex and a bare
+        # `www.<apex>` — neither is a "risky subdomain".
+        apex = (domain or "").lower().strip(".")
+        risky_kw = set(self.RISKY_KEYWORDS)
+        risky = []
+        for s in subdomains:
+            host = (s or "").lower().strip(".")
+            if not host or host == apex or host == f"www.{apex}":
+                continue
+            # Only consider the sub-domain labels (drop the apex's own labels)
+            # so a risky token appearing inside the registered name can't fire.
+            if apex and (host == apex or host.endswith("." + apex)):
+                prefix = host[: -len(apex)].rstrip(".") if host != apex else ""
+            else:
+                prefix = host
+            labels = set(prefix.split(".")) if prefix else set()
+            if labels & risky_kw:
+                risky.append(s)
         result["risky_subdomains"] = risky
 
         if risky:
@@ -383,7 +405,15 @@ class VPNRemoteAccessChecker:
         except Exception:
             pass
 
-        # Probe VPN login pages
+        # Probe VPN login pages.
+        # 200-only + body-sanity gate applied UNIFORMLY to every vendor (S-3
+        # `_probe` spirit). Previously only the RDS signature carried
+        # `require_200`; the other vendors matched a token in ANY response, so a
+        # soft-404 / redirect / marketing page that merely echoed e.g. "citrix"
+        # or "openvpn access server" produced a false detection. Now every
+        # signature requires a genuine 200 with a non-trivial, non-error body
+        # before a token match counts. (`require_200` is kept in the table for
+        # documentation but is now the universal default.)
         for vpn_name, sigs in self.VPN_SIGNATURES.items():
             for path in sigs["paths"]:
                 try:
@@ -391,12 +421,16 @@ class VPNRemoteAccessChecker:
                         f"https://{domain}{path}", timeout=5,
                         allow_redirects=True, headers={"User-Agent": USER_AGENT}
                     )
-                    # Some fingerprints (e.g. RD Web Access) require a real 200
-                    # login page — a soft-404/redirect that merely echoes the
-                    # product name must not count as a detection.
-                    if sigs.get("require_200") and r.status_code != 200:
+                    # Gate 1: must be a real 200 (not a 3xx/4xx/5xx or soft-404).
+                    if r.status_code != 200:
                         continue
                     body = r.text[:3000].lower()
+                    # Gate 2: body sanity — reject trivial/empty bodies and
+                    # explicit not-found pages served with a 200 status.
+                    if len(body) < 10:
+                        continue
+                    if "not found" in body[:200] or "404" in r.text[:50]:
+                        continue
                     if any(kw in body for kw in sigs["body_keywords"]):
                         result["vpn_detected"] = True
                         result["vpn_name"] = vpn_name
@@ -422,7 +456,12 @@ class DNSInfrastructureChecker:
     INFO_PORTS = {80: "HTTP", 443: "HTTPS", 993: "IMAPS", 995: "POP3S", 8080: "HTTP-Alt", 8443: "HTTPS-Alt"}
     ALL_PORTS = {**HIGH_RISK_PORTS, **MEDIUM_RISK_PORTS, **INFO_PORTS}
 
-    # Per-port exploit intelligence for insurance underwriting context
+    # Per-port exploit intelligence for insurance underwriting context.
+    # review-by: 2026-12-02
+    # Hardcoded CVSS / EPSS / "CISA KEV" strings here are POINT-IN-TIME (EPSS in
+    # particular is recalculated daily). They are narrative enrichment only — the
+    # port-tier, not these strings, drives the score — but they must be reviewed
+    # by the date above so the underwriting copy does not silently go stale.
     PORT_INTEL = {
         21: {
             "risk_level": "CRITICAL RISK",
@@ -948,10 +987,13 @@ class SecurityPolicyChecker:
 # ---------------------------------------------------------------------------
 
 class DNSBLChecker:
+    # review-by: 2026-12-02
+    # Curated DNSBL providers. SORBS (`dnsbl.sorbs.net`) was REMOVED — the
+    # service ceased operation mid-2024 and its zone no longer returns genuine
+    # listing codes, so keeping it only added latency / NXDOMAIN noise.
     IP_DNSBLS = [
         "zen.spamhaus.org",
         "bl.spamcop.net",
-        "dnsbl.sorbs.net",
         "b.barracudacentral.org",
         "dnsbl-1.uceprotect.net",
     ]
