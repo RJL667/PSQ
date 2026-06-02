@@ -780,6 +780,15 @@ def cat_dns(d, S):
         ("Reverse DNS",   dns.get("reverse_dns") or "—"),
         ("Zone transfer (AXFR)", f"VULNERABLE — {zt.get('records_leaked',0)} records leaked via {', '.join(zt.get('vulnerable_ns',[]))}" if zt.get("vulnerable") else ("Protected" if zt.get("tested") else "Not tested")),
     ]
+    # Map each port to the actual back-end IP(s) it was found on. On CDN-fronted
+    # targets the merged port list otherwise reads as if every port sits on the
+    # apex IP, hiding that e.g. FTP lives on a separate origin IP.
+    port_ip_map = {}
+    for _ip, _data in (dns.get("per_ip") or {}).items():
+        for _p in _data.get("dns_infrastructure", {}).get("open_ports", []):
+            port_ip_map.setdefault(_p.get("port"), [])
+            if _ip not in port_ip_map[_p.get("port")]:
+                port_ip_map[_p.get("port")].append(_ip)
     # Per-port exploit intel with group separators and risk-level colours
     risky = [p for p in ports if p.get("risk") in ("high", "medium", "critical")]
     for p in risky:
@@ -787,6 +796,9 @@ def cat_dns(d, S):
         risk = p.get("risk", "medium")
         risk_label = p.get("risk_level", risk.upper() + " RISK")
         rows.append((f"\u25b6{risk}:{p['port']}/{p['service']}", risk_label))
+        owners = port_ip_map.get(p.get("port"), [])
+        if owners:
+            rows.append(("  Found on IP", ", ".join(owners)))
         if p.get("detected_version"):
             rows.append(("  Detected version", p["detected_version"]))
         if p.get("typical_exploits"):

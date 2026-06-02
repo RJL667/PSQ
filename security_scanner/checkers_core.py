@@ -508,8 +508,17 @@ class EmailSecurityChecker:
 
         def _probe(selector):
             try:
-                dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=3)
-                return selector
+                answers = dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=3)
+                for rdata in answers:
+                    txt = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
+                    low = txt.lower()
+                    # Only count a selector when the TXT record actually carries a
+                    # DKIM key. A wildcard `*._domainkey` record (e.g. a generic
+                    # `heritage=external-dns…` TXT) otherwise makes EVERY probed
+                    # selector report "found" — a false "DKIM fully configured".
+                    if "v=dkim1" in low or re.search(r"(^|;|\s)p=", low):
+                        return selector
+                return None
             except Exception:
                 return None
 
@@ -839,9 +848,16 @@ class WAFChecker:
             "body": ["sucuri"],
         },
         "F5 BIG-IP ASM": {
-            "headers": ["x-wa-info", "x-frame-options"],
-            "cookies": ["ts", "f5avr"],
+            # Genuine F5 markers only. `x-frame-options` was removed — it is a
+            # ubiquitous standard clickjacking header, not an F5 fingerprint, and
+            # caused a false "F5 BIG-IP ASM" detection (+ phantom WAF credit) on
+            # any WAF-less site that sets XFO. The generic `ts` cookie was also
+            # removed; F5 persistence cookies are matched via the specific
+            # `bigipserver` / `ts01` / `f5avr` prefixes below.
+            "headers": ["x-wa-info"],
+            "cookies": ["bigipserver", "ts01", "f5avr", "f5_cspm", "f5_st"],
             "body": [],
+            "server": ["big-ip"],
         },
         "Barracuda": {
             "headers": [],
@@ -867,6 +883,7 @@ class WAFChecker:
             cookies_lower = {k.lower(): v.lower() for k, v in r.cookies.items()}
             body_lower = r.text[:5000].lower()
 
+            server_hdr = headers_lower.get("server", "")
             detected = []
             for waf_name, sigs in self.WAF_SIGNATURES.items():
                 matched = False
@@ -874,12 +891,19 @@ class WAFChecker:
                     if h in headers_lower:
                         matched = True; break
                 if not matched:
+                    # Prefix-match cookie names so vendor cookies that carry a
+                    # dynamic suffix (e.g. F5 `BIGipServer<pool>`, `TS01<hex>`)
+                    # are recognised, while exact generic names still match.
                     for c in sigs["cookies"]:
-                        if c in cookies_lower:
+                        if any(name == c or name.startswith(c) for name in cookies_lower):
                             matched = True; break
                 if not matched:
                     for b in sigs["body"]:
                         if b in body_lower:
+                            matched = True; break
+                if not matched:
+                    for sv in sigs.get("server", []):
+                        if sv in server_hdr:
                             matched = True; break
                 if matched:
                     detected.append(waf_name)

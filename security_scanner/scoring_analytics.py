@@ -190,8 +190,16 @@ class ExternalIPAggregator:
         result["total_unique_ips"] = len(seen_ips)
         result["ipv4_count"] = ipv4
         result["ipv6_count"] = ipv6
-        result["unique_asns"] = len(asns) if asns else 1  # at least 1 if IPs found
-        result["unique_countries"] = len(countries) if countries else 1
+        # Report the GENUINE distinct counts. Do NOT fabricate "1" when the free
+        # Shodan InternetDB path returns no ASN/org/geo — a fabricated "1 ASN /
+        # 1 Country" is false data in an underwriting report. 0 means
+        # not-collected, and the renderers show "n/a" rather than a count.
+        result["unique_asns"] = len(asns)
+        result["unique_countries"] = len(countries)
+        # True when IPs were discovered but no ASN/geo enrichment was available
+        # (InternetDB-only path) — lets renderers distinguish "0 = not collected"
+        # from "0 = no IPs".
+        result["asn_geo_unavailable"] = bool(seen_ips) and not asns and not countries
         result["ip_addresses"] = ip_entries
 
         # Scoring

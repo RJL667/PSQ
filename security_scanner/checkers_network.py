@@ -340,7 +340,15 @@ class VPNRemoteAccessChecker:
         },
         "Microsoft RDS Web": {
             "paths": ["/RDWeb/Pages/en-US/login.aspx", "/RDWeb/"],
-            "body_keywords": ["remote desktop", "rdweb"],
+            # Genuine RD Web Access markers only. The old `"remote desktop"`
+            # substring matched any page that merely mentioned the product
+            # category (e.g. a Cloudflare SPA soft-404), producing a false
+            # "Microsoft RDS Web" detection. RD Web's real login page is an
+            # ASP.NET form that ships the `RDWebPage`/`DomainUserNameLabel`
+            # asset IDs and a `Workspace`/`WorkSpaceID` token — require those.
+            "body_keywords": ["rdwebpage", "domainusernamelabel", "workspaceid",
+                              "rdweb/pages", "tswa_winauthcookie"],
+            "require_200": True,
         },
         "OpenVPN Access Server": {
             "paths": ["/"],
@@ -383,6 +391,11 @@ class VPNRemoteAccessChecker:
                         f"https://{domain}{path}", timeout=5,
                         allow_redirects=True, headers={"User-Agent": USER_AGENT}
                     )
+                    # Some fingerprints (e.g. RD Web Access) require a real 200
+                    # login page — a soft-404/redirect that merely echoes the
+                    # product name must not count as a detection.
+                    if sigs.get("require_200") and r.status_code != 200:
+                        continue
                     body = r.text[:3000].lower()
                     if any(kw in body for kw in sigs["body_keywords"]):
                         result["vpn_detected"] = True

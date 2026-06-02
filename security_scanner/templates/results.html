@@ -1335,6 +1335,17 @@
         </table>
         {% endif %}
         {% if dns.open_ports %}
+        {# Build a port -> owning-IP map from per-IP results so each exposed port
+           is attributed to the actual back-end IP it was found on. On CDN-fronted
+           targets the merged port list otherwise reads as if every port sits on
+           the apex (Cloudflare) IP, hiding that e.g. FTP is on a separate origin. #}
+        {% set port_ip_map = {} %}
+        {% for _ip, _data in (dns.per_ip or {}).items() %}
+          {% for _p in (_data.get('dns_infrastructure', {}).get('open_ports', [])) %}
+            {% set _existing = port_ip_map.get(_p.port, []) %}
+            {% if _ip not in _existing %}{% set _ = port_ip_map.update({_p.port: _existing + [_ip]}) %}{% endif %}
+          {% endfor %}
+        {% endfor %}
         <div class="port-list" style="margin-bottom:10px;">{% for p in dns.open_ports %}<span class="port-chip port-{{ p.risk }}">{{ p.port }}/{{ p.service }}</span>{% endfor %}</div>
         {% set risky_ports = dns.open_ports | selectattr('risk', 'ne', 'info') | list %}
         {% if risky_ports %}
@@ -1345,6 +1356,8 @@
               <span class="port-chip port-{{ p.risk }}" style="margin-right:6px;">{{ p.port }}/{{ p.service }}</span>
               <span style="color:{% if p.risk == 'high' %}#e74c3c{% else %}#e67e22{% endif %};">{{ p.risk | upper }} RISK</span>
             </div>
+            {% set _owners = port_ip_map.get(p.port, []) %}
+            {% if _owners %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Found on IP:</span> {% for _oip in _owners %}<span style="font-family:monospace;color:#fbbf24;font-size:0.78rem;margin-right:6px;">{{ _oip }}</span>{% endfor %}</div>{% endif %}
             {% if p.detected_version is defined and p.detected_version %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Detected version:</span> <span style="color:#22d3ee;font-weight:600;font-family:monospace;font-size:0.82rem;">{{ p.detected_version }}</span></div>{% endif %}
             {% if p.typical_exploits is defined %}<div style="margin-bottom:3px;"><span style="color:#94a3b8;">Typical exploits:</span> <span style="color:#cbd5e1;">{{ p.typical_exploits }}</span></div>{% endif %}
             {% if p.vuln_metrics is defined %}
@@ -1512,8 +1525,8 @@
           <div class="mini-stat"><div class="stat-val">{{ extip.total_unique_ips | default(0) }}</div><div class="stat-lbl">Total IPs</div></div>
           <div class="mini-stat"><div class="stat-val">{{ extip.ipv4_count | default(0) }}</div><div class="stat-lbl">IPv4</div></div>
           <div class="mini-stat"><div class="stat-val">{{ extip.ipv6_count | default(0) }}</div><div class="stat-lbl">IPv6</div></div>
-          <div class="mini-stat"><div class="stat-val">{{ extip.unique_asns | default(0) }}</div><div class="stat-lbl">ASNs</div></div>
-          <div class="mini-stat"><div class="stat-val">{{ extip.unique_countries | default(0) }}</div><div class="stat-lbl">Countries</div></div>
+          <div class="mini-stat"><div class="stat-val">{% if extip.asn_geo_unavailable %}n/a{% else %}{{ extip.unique_asns | default(0) }}{% endif %}</div><div class="stat-lbl">ASNs</div></div>
+          <div class="mini-stat"><div class="stat-val">{% if extip.asn_geo_unavailable %}n/a{% else %}{{ extip.unique_countries | default(0) }}{% endif %}</div><div class="stat-lbl">Countries</div></div>
           {% if ea_ips > 0 %}
           <div class="mini-stat"><div class="stat-val color-red">{{ ea_ips }}</div><div class="stat-lbl">IPs w/ CVEs</div></div>
           {% endif %}
