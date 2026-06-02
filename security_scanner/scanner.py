@@ -918,9 +918,15 @@ class SecurityScanner:
         #     SPF vendor surface exists, but no known-breach overlap.
         #     Still strong: review credentials at all detected vendors.
         #   - MEDIUM: A>0 only — HR signal alone; covered by base HR card.
-        # The output drives RSI (P1 factor on CRITICAL/HIGH), FIC vuln
-        # uplift, REMEDIATION_MAP, and is rendered as a cross-correlated
-        # finding in all six broker-facing surfaces.
+        # REPORTING-ONLY: this cross-correlation carries NO scoring weight —
+        # it is deliberately excluded from WEIGHTS, RSI, the FIC vuln uplift,
+        # and REMEDIATION_MAP, because the underlying signals (Hudson Rock,
+        # S-4 email_vendor_surface, S-5 vendor_breach) already score through
+        # their own channels; wiring it in would double-count. It is purely a
+        # representational join rendered in the broker-facing surfaces.
+        # When a vendor-breach overlap is found the card severity tracks the
+        # MOST SEVERE underlying breach (medium overlap -> medium card), not a
+        # blanket CRITICAL on any overlap.
         self._notify(on_progress, "third_party_correlation", "running")
         try:
             # NOTE: EmailVendorSurfaceChecker is already imported at module
@@ -987,17 +993,35 @@ class SecurityScanner:
                 corr["vendor_breach_match_count"] = len(suspected)
 
                 if suspected:
-                    corr["severity"] = "critical"
-                    corr["critical_count"] = 1
+                    # Severity tracks the MOST SEVERE underlying vendor breach,
+                    # not mere presence of an overlap. A single MEDIUM vendor
+                    # incident (e.g. zendesk "no customer data exfiltrated")
+                    # must not render CRITICAL / "rotate TODAY" — that over-
+                    # states a benign-class event (caught in card back-test).
+                    _SEV_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+                    _worst_rank = -1
+                    _worst_sev = "medium"
+                    for s in suspected:
+                        for b in s.get("breaches", []):
+                            bs = (b.get("severity") or "").lower().strip()
+                            if _SEV_RANK.get(bs, -1) > _worst_rank:
+                                _worst_rank = _SEV_RANK[bs] if bs in _SEV_RANK else _worst_rank
+                                if bs in _SEV_RANK:
+                                    _worst_sev = bs
+                    corr["severity"] = _worst_sev
+                    corr["critical_count"] = 1 if _worst_sev == "critical" else 0
+                    corr["high_count"] = 1 if _worst_sev == "high" else 0
+                    corr["medium_count"] = 1 if _worst_sev == "medium" else 0
                     corr["status"] = "completed"
                     vendor_names = ", ".join(s["vendor"] for s in suspected[:5])
+                    _sev_label = _worst_sev.upper()
                     corr["issues"].append(
-                        f"CRITICAL: Hudson Rock reports {hr_tp} third-party "
+                        f"{_sev_label}: Hudson Rock reports {hr_tp} third-party "
                         f"credential exposure(s) for this domain. Your SPF "
                         f"chain authorises {len(suspected)} vendor(s) with "
-                        f"known public breaches ({vendor_names}). High "
-                        "probability these vendors are the source — rotate "
-                        "credentials at them as priority targets."
+                        f"known public breaches ({vendor_names}, worst "
+                        f"severity: {_worst_sev}). Review and rotate "
+                        "credentials at these vendors as priority targets."
                     )
                     corr["rationale"] = (
                         f"Three independent signals align: (A) Hudson Rock "

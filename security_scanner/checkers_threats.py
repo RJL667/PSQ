@@ -1252,12 +1252,15 @@ class DehashedChecker:
             for entry in entries:
                 # v2 API returns email as list, v1 as string
                 em = entry.get("email", "")
+                # Email addresses are case-insensitive on the mailbox side; lower-case
+                # (and strip) before uniqueness so Rudolph@x and rudolph@x don't count
+                # as two distinct mailboxes (also de-dupes the masked staff list).
                 if isinstance(em, list):
                     for e in em:
                         if e:
-                            emails_seen.add(str(e))
+                            emails_seen.add(str(e).strip().lower())
                 elif em:
-                    emails_seen.add(str(em))
+                    emails_seen.add(str(em).strip().lower())
 
                 pw = entry.get("password")
                 hpw = entry.get("hashed_password")
@@ -1861,14 +1864,27 @@ class CredentialRiskClassifier:
         total_leaks = dehashed.get("total_entries", 0)
         has_passwords = dehashed.get("has_passwords", False)
         unique_emails = dehashed.get("unique_emails", 0)
+        # Count password-BEARING records (not just a yes/no over the whole corpus):
+        # only the plaintext+hashed subset actually carries a credential. Mirrors the
+        # build_credential_correlation fix — "has_passwords" alone overstates all
+        # records/mailboxes as password-bearing (caught in card back-test).
+        _cb = dehashed.get("credential_breakdown", {}) or {}
+        pw_records = int(_cb.get("plaintext_count", 0) or 0) + int(_cb.get("hashed_count", 0) or 0)
+        # Distinct mailboxes that actually carry a password (case-insensitive).
+        pw_mailboxes = len({
+            (d.get("email") or "").strip().lower()
+            for d in (dehashed.get("breach_details") or [])
+            if (d.get("has_password") or d.get("has_hash")) and (d.get("email") or "").strip()
+        })
 
         if has_passwords and total_leaks > 0:
             if result["risk_level"] != "CRITICAL":
                 result["risk_level"] = "HIGH"
             result["risk_score"] = max(0, result["risk_score"] - 30)
+            mbx = pw_mailboxes if pw_mailboxes else 1
             result["factors"].append(
-                f"Plaintext or hashed passwords exposed for {unique_emails} email(s) "
-                f"across {total_leaks} breach record(s)"
+                f"Plaintext or hashed passwords exposed for {mbx} mailbox(es) "
+                f"across {pw_records} of {total_leaks} breach record(s)"
             )
         elif total_leaks > 0:
             if result["risk_level"] not in ("CRITICAL", "HIGH"):

@@ -2596,38 +2596,51 @@ def cat_third_party_correlation(d, S):
             f"  {s.get('vendor', '?')}",
             f"{len(breaches)} breach(es) — most recent: {dates or '?'}",
         ))
-    fb = (
-        f"CRITICAL: {hr_n} HR exposure(s) cross-correlate with "
-        f"{len(susp)} breached vendor(s) in your SPF chain — rotate now."
-        if sev == "critical" else
-        (f"HIGH: {hr_n} HR exposure(s) + {spf_n} SPF vendor(s); no S-5 overlap to narrow scope."
-         if sev == "high" else
-         f"MEDIUM: {hr_n} HR exposure(s) detected; no SPF / breach overlap.")
-    )
+    # A vendor-breach overlap (susp) drives severity off the WORST underlying
+    # breach — so an overlap can be medium/high/critical, not blanket critical.
+    if susp:
+        fb = (f"{sev.upper()}: {hr_n} HR exposure(s) cross-correlate with "
+              f"{len(susp)} breached vendor(s) in your SPF chain "
+              f"(worst severity: {sev}).")
+    elif spf_n > 0:
+        fb = f"HIGH: {hr_n} HR exposure(s) + {spf_n} SPF vendor(s); no S-5 overlap to narrow scope."
+    else:
+        fb = f"MEDIUM: {hr_n} HR exposure(s) detected; no SPF / breach overlap."
     parts = build_cat_card("Third-Party Cross-Correlation (HR × SPF × Breach)",
                             col, sev.upper(), rows,
                             tpc.get("issues", []), S, fallback=fb)
 
     parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if sev == "critical":
+    if susp:
         vendor_names = ", ".join(s.get("vendor", "?") for s in susp[:5])
+        # Closing urgency tracks the WORST underlying breach severity — a
+        # medium-class vendor incident is reviewed, not treated as a live
+        # compromise (avoids over-escalating benign overlaps).
+        if sev in ("critical", "high"):
+            _closing = ("these specific vendors are the most likely source of the "
+                        "Hudson Rock harvest and should be treated as already "
+                        "compromised until credentials are rotated.")
+        else:
+            _closing = (f"the underlying vendor breach(es) are {sev}-severity, so "
+                        "these vendors should be reviewed and credentials rotated "
+                        "as a precaution rather than treated as a confirmed live "
+                        "compromise.")
         parts.append(Paragraph(
-            "Three independent signals confirm vendor-channel credential risk: "
+            "Three independent signals align on vendor-channel credential risk: "
             f"Hudson Rock reports {hr_n} infostealer-harvested credential record(s) "
             "for third-party services accessed from this organisation's machines; "
             f"the SPF chain authorises {spf_n} email vendor(s); and {len(susp)} of "
             f"those vendor(s) ({vendor_names}) have confirmed public breaches in "
             "the curated database. The intersection narrows the rotate-list to "
-            "high-probability targets — these specific vendors are the most likely "
-            "source of the Hudson Rock harvest and should be treated as already "
-            "compromised until credentials are rotated.",
+            f"high-probability targets — {_closing}",
             S["body"]))
         parts.append(Spacer(1, 2 * mm))
         parts.append(Paragraph("<b>Recommended Actions</b>", S["cat_title"]))
         parts.append(Spacer(1, 1 * mm))
+        _urgency = "TODAY: " if sev in ("critical", "high") else ""
         parts.append(Paragraph(
-            f"1. TODAY: rotate all API keys, OAuth tokens, and SSO session "
+            f"1. {_urgency}rotate all API keys, OAuth tokens, and SSO session "
             f"secrets at: {vendor_names}.", S["body"]))
         parts.append(Paragraph(
             "2. Force MFA re-enrolment for all staff with accounts at the "

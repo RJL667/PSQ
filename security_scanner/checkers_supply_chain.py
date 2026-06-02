@@ -681,12 +681,21 @@ class EmailVendorSurfaceChecker:
     VENDOR_PATTERNS = [
         ("sendgrid",            ["sendgrid.net", "_spf.sendgrid.net"]),
         ("mailgun",             ["mailgun.org"]),
-        ("mailchimp",           ["servers.mcsv.net", "_spf.mailchimp.com"]),
+        # Mandrill is Mailchimp's (Intuit) transactional-email product and shares
+        # the Mailchimp breach exposure — keep it under the "mailchimp" key so it
+        # correlates against the mailchimp rows in vendor_breaches.json (S-5).
+        ("mailchimp",           ["servers.mcsv.net", "_spf.mailchimp.com",
+                                  "spf.mandrillapp.com", "mandrillapp.com",
+                                  "mandrill.com"]),
         ("amazon_ses",          ["amazonses.com"]),
         ("microsoft_365",       ["spf.protection.outlook.com",
                                   "spf.messaging.microsoft.com"]),
         ("google_workspace",    ["_spf.google.com", "aspmx.googlemail.com"]),
-        ("zoho",                ["zoho.com", "_spf.zoho.eu", "zohomail.com"]),
+        # transmail.net / zeptomail are Zoho's transactional-email service (ZeptoMail,
+        # formerly TransMail) — same vendor, classify under "zoho".
+        ("zoho",                ["zoho.com", "_spf.zoho.eu", "zohomail.com",
+                                  "transmail.net", "zeptomail.com",
+                                  "zeptomail.eu"]),
         ("klaviyo",             ["_spf.klaviyo.com"]),
         ("hubspot",             ["_spf.hubspotemail.net", "mail.hubspot.com"]),
         ("constant_contact",    ["_spf.constantcontact.com"]),
