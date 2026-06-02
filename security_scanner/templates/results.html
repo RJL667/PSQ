@@ -914,7 +914,7 @@
     {% if mit and mit.findings %}
     <div class="cat-card" style="grid-column: 1 / -1;">
       <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Risk Mitigation Recommendations</div></div>
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Risk Mitigation Recommendations (Expected-Loss)</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="cat-grade" style="color:var(--low);">Save R&nbsp;{{ '{:,.0f}'.format(mit.total_potential_savings) }}</span>
           <span class="chevron">&#9660;</span>
@@ -977,17 +977,17 @@
             {% endfor %}
           </tbody>
         </table>
-        <div style="margin-top:10px;font-size:.72rem;color:var(--muted);">Savings estimates are modelled projections based on FAIR methodology. Actual risk reduction depends on implementation quality and scope.</div>
+        <div style="margin-top:10px;font-size:.72rem;color:var(--muted);">Incident-driven view: savings are modelled by reducing the probability of specific incident types (ransomware / breach / DDoS families), based on FAIR methodology and capped at 85% of current loss. The "Remediation Roadmap — RSI Prioritisation" card gives the complementary RSI-point view; the two totals differ because they model different drivers and are not competing figures. Actual risk reduction depends on implementation quality and scope.</div>
       </div>
     </div>
     {% endif %}
 
-    <!-- Before/After Remediation -->
+    <!-- RSI Prioritisation Roadmap -->
     {% set rem = results.insurance.remediation %}
     {% if rem and rem.steps %}
     <div class="cat-card" style="grid-column: 1 / -1;">
       <div class="cat-header" onclick="toggle(this)">
-        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Remediation Roadmap — Before/After Model</div></div>
+        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Remediation Roadmap — RSI Prioritisation</div></div>
         <div style="display:flex;align-items:center;gap:10px;">
           {% set rem_cur = 'R' if results.insurance.financial_impact and results.insurance.financial_impact.currency == 'ZAR' else '$' %}
           <span class="cat-grade">{{ rem.step_count }} steps — {{ rem_cur }} {{ '{:,.0f}'.format(rem.total_potential_savings) }} potential savings</span>
@@ -1027,7 +1027,7 @@
           </tbody>
         </table>
         <p style="font-size:.75rem;color:var(--muted);margin-top:8px;font-style:italic;">
-          Note: Estimated costs are indicative ranges based on typical SA market rates and are intended as a guide for prioritising "bang for buck" and identifying quick wins. Actual implementation costs will vary based on the organisation's size, existing infrastructure, and whether work is performed in-house or outsourced. These figures should be used as a conversation starter, not a project quote.
+          Methodology: this roadmap prioritises fixes by their effect on the Ransomware Susceptibility Index (RSI); the loss reduction shown is RSI-scaled and capped so residual risk cannot fall below a realistic floor. For the incident-driven expected-loss view (current vs mitigated annual loss), see the "Risk Mitigation Recommendations" card — the two are complementary perspectives, not competing totals. Estimated costs are indicative SA-market ranges for prioritising quick wins, a conversation starter rather than a project quote.
         </p>
       </div>
     </div>
@@ -1332,6 +1332,19 @@
             </td>
           </tr>
           {% endif %}
+        </table>
+        {% endif %}
+        {# DNS records (AAAA/TXT) + DNSSEC status. DNSSEC is surfaced because a
+           DNSSEC remediation can fire off dns.dnssec_enabled; the underwriter
+           must see the status the remediation is based on. Reporting-only. #}
+        {% if dns.dns_records is defined or dns.dnssec_enabled is defined %}
+        {% set _recs = dns.dns_records or {} %}
+        <table class="kv-table">
+          <tr><td>DNSSEC</td><td>{% if dns.dnssec_enabled %}<span style="color:var(--low);">Enabled</span>{% else %}<span class="badge badge-amber">Disabled</span>{% endif %}</td></tr>
+          {% set _aaaa = _recs.get('AAAA', []) %}
+          <tr><td>AAAA (IPv6) records</td><td>{% if _aaaa %}{{ _aaaa | join(', ') }}{% else %}None{% endif %}</td></tr>
+          {% set _txt = _recs.get('TXT', []) %}
+          {% if _txt %}<tr><td>TXT records</td><td>{{ _txt | length }} record(s)</td></tr>{% endif %}
         </table>
         {% endif %}
         {% if dns.open_ports %}

@@ -3332,6 +3332,14 @@ class RemediationSimulator:
     financial impact reduction. The highest-value feature for insurance —
     shows 'fix these N items → $X reduction in probable annual loss'.
     """
+    # Ceiling on cumulative modelled RSI reduction. The per-step reductions are
+    # summed arithmetically (no diminishing-returns), so an uncapped sum can
+    # exceed the actual achievable improvement. Floor residual RSI at the larger
+    # of the inherent baseline and a fraction of the current RSI so total
+    # modelled savings cannot exceed ~85% of loss (consistent with the
+    # incident-driven `_build_mitigations` 85% cap).
+    RSI_RESIDUAL_FLOOR = 0.05          # RSI inherent baseline (no posture is risk-free)
+    MAX_RSI_REDUCTION_FRACTION = 0.15  # residual RSI >= 15% of current RSI
     # Remediation catalog: maps issue patterns to actions
     REMEDIATION_MAP = [
         # (checker_key, condition_fn, action, est_cost, rsi_reduction)
@@ -3454,26 +3462,47 @@ class RemediationSimulator:
         # Sort by priority then savings
         steps.sort(key=lambda s: (s["priority"], -s["annual_savings_estimate"]))
 
-        # Simulate improved state
-        simulated_rsi = max(0.0, rsi_result.get("rsi_score", 0.1) - total_rsi_reduction)
-        total_savings = sum(s["annual_savings_estimate"] for s in steps)
+        # Simulate improved state.
+        #
+        # The per-step rsi_reduction values are summed arithmetically, but the
+        # forward RSI model uses diminishing returns + caps, so a raw additive
+        # subtraction overstates achievable improvement. Cap the cumulative
+        # reduction so residual risk floors at a sensible minimum — residual RSI
+        # cannot fall below the larger of the RSI inherent baseline (0.05) and
+        # 15% of the current RSI. This mirrors the 85%-of-loss ceiling used by
+        # `_build_mitigations`, so neither remediation card can imply that more
+        # than ~85% of risk is eliminable.
+        current_rsi_val = rsi_result.get("rsi_score", 0.1)
+        residual_floor = max(self.RSI_RESIDUAL_FLOOR, current_rsi_val * self.MAX_RSI_REDUCTION_FRACTION)
+        simulated_rsi = max(residual_floor, current_rsi_val - total_rsi_reduction)
+        # Report the *effective* (capped) improvement, not the raw additive sum,
+        # so the displayed before/after reduction matches the modelled savings.
+        effective_rsi_reduction = max(0.0, current_rsi_val - simulated_rsi)
 
         # Recalculate financial impact with simulated RSI
         simulated_fin = {}
         if fin_result.get("total"):
-            ratio = simulated_rsi / max(0.01, rsi_result.get("rsi_score", 0.1))
+            ratio = simulated_rsi / max(0.01, current_rsi_val)
             simulated_fin = {
                 "min": round(fin_result["total"]["min"] * ratio),
                 "most_likely": round(fin_result["total"]["most_likely"] * ratio),
                 "max": round(fin_result["total"]["max"] * ratio),
             }
+        # Scale the per-step savings so their sum reflects the capped improvement
+        # (the raw savings were proportional to the uncapped reduction).
+        total_savings = sum(s["annual_savings_estimate"] for s in steps)
+        if total_rsi_reduction > effective_rsi_reduction and total_rsi_reduction > 0:
+            scale = effective_rsi_reduction / total_rsi_reduction
+            for s in steps:
+                s["annual_savings_estimate"] = round(s["annual_savings_estimate"] * scale)
+            total_savings = sum(s["annual_savings_estimate"] for s in steps)
 
         return {
             "steps": steps,
             "step_count": len(steps),
             "current_rsi": rsi_result.get("rsi_score", 0),
             "simulated_rsi": round(simulated_rsi, 3),
-            "rsi_improvement": round(total_rsi_reduction, 3),
+            "rsi_improvement": round(effective_rsi_reduction, 3),
             "current_financial_impact": fin_result.get("total", {}),
             "simulated_financial_impact": simulated_fin,
             "total_potential_savings": total_savings,

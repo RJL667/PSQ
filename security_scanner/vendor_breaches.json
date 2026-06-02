@@ -99,22 +99,6 @@
       "ref": "Zendesk SMS phishing 2022-10"
     },
     {
-      "vendor": "sendgrid",
-      "date": "2018-04-09",
-      "summary": "Twilio SendGrid API keys leaked via misconfiguration at multiple customers; mass-mailing abuse.",
-      "severity": "medium",
-      "exposure_class": "api_key_misuse",
-      "ref": "SendGrid 2018 key leak"
-    },
-    {
-      "vendor": "constant_contact",
-      "date": "2021-05-25",
-      "summary": "USAID Constant Contact account compromised by APT29; phishing campaign sent to 3000+ contacts.",
-      "severity": "medium",
-      "exposure_class": "customer_sender_authority",
-      "ref": "Constant Contact / USAID 2021-05"
-    },
-    {
       "vendor": "marketo",
       "date": "2021-06-22",
       "summary": "Adobe Marketo (BMC, Adobe) employee creds exposed on dark web; Marketo subdomain hosted leaks.",

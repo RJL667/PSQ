@@ -773,11 +773,19 @@ def cat_dns(d, S):
     col  = _tl(len(high) == 0 and len(ports) <= 2, len(high) == 0)
     port_str = ", ".join(f"{p['port']}/{p['service']}" for p in ports) or "None"
     zt = dns.get("zone_transfer", {})
+    recs = dns.get("dns_records", {}) or {}
+    aaaa = recs.get("AAAA", []) or []
+    txt  = recs.get("TXT", []) or []
     rows = [
         ("Open ports",    port_str),
         ("High-risk ports", ", ".join(f"{p['port']}/{p['service']}" for p in high) or "None"),
         ("Server header", dns.get("server_info", {}).get("Server", "—")),
         ("Reverse DNS",   dns.get("reverse_dns") or "—"),
+        # DNSSEC status is surfaced here because a DNSSEC remediation can fire
+        # off dns.dnssec_enabled; the underwriter must see the status it is based on.
+        ("DNSSEC", "Enabled" if dns.get("dnssec_enabled") else "Disabled"),
+        ("AAAA (IPv6) records", ", ".join(aaaa) if aaaa else "None"),
+        ("TXT records", str(len(txt)) + " record(s)" if txt else "None"),
         ("Zone transfer (AXFR)", f"VULNERABLE — {zt.get('records_leaked',0)} records leaked via {', '.join(zt.get('vulnerable_ns',[]))}" if zt.get("vulnerable") else ("Protected" if zt.get("tested") else "Not tested")),
     ]
     # Map each port to the actual back-end IP(s) it was found on. On CDN-fronted
@@ -2846,60 +2854,33 @@ def cat_remediation(results, S):
     rows = [
         ("Current RSI", f"{rem.get('current_rsi', 0):.3f}"),
         ("Projected RSI (after fixes)", f"{rem.get('simulated_rsi', 0):.3f}"),
-        ("Total Potential Savings", f"{cur}&nbsp;{savings:,.0f}/year"),
+        ("RSI-point reduction", f"{rem.get('rsi_improvement', 0):.3f}"),
+        ("Indicative loss reduction (RSI-scaled)", f"{cur}&nbsp;{savings:,.0f}/year"),
         ("", ""),
     ]
     for i, step in enumerate(steps[:10], 1):
         rows.append((f"#{i} (P{step['priority']})", f"{step['action']} — saves {cur}&nbsp;{step['annual_savings_estimate']:,.0f}/yr"))
-    fb = f"{len(steps)} prioritised remediation steps could reduce annual expected loss by {cur}&nbsp;{savings:,.0f}."
-    parts = build_cat_card("Remediation Roadmap — Before/After", col,
-                          f"{len(steps)} steps — {cur}&nbsp;{savings:,.0f} savings",
+    fb = f"{len(steps)} prioritised remediation steps reduce the Ransomware Susceptibility Index from {rem.get('current_rsi', 0):.3f} to {rem.get('simulated_rsi', 0):.3f}."
+    parts = build_cat_card("Remediation Roadmap — RSI Prioritisation", col,
+                          f"{len(steps)} steps — RSI {rem.get('current_rsi', 0):.2f} → {rem.get('simulated_rsi', 0):.2f}",
                           rows, [], S, fallback=fb)
     parts.append(Paragraph(
-        "<i>Note: Estimated costs are indicative ranges based on typical SA market rates and are intended "
-        "as a guide for prioritising quick wins and identifying \"bang for buck\" remediation. Actual costs "
-        "will vary based on the organisation's size, existing infrastructure, and whether work is performed "
-        "in-house or outsourced. These figures should be used as a conversation starter, not a project quote.</i>",
+        "<i>Methodology: this roadmap prioritises fixes by their effect on the Ransomware Susceptibility "
+        "Index (RSI); the loss reduction shown is RSI-scaled and capped so residual risk cannot fall below "
+        "a realistic floor. For the incident-driven expected-loss view (current vs mitigated annual loss), "
+        "see the \"Risk Mitigation Recommendations\" card — the two are complementary perspectives, not "
+        "competing totals. Estimated costs are indicative SA-market ranges for prioritising quick wins, "
+        "a conversation starter rather than a project quote.</i>",
         S["body"]))
     parts.append(Spacer(1, 3 * mm))
     return parts
 
 
-def cat_ransomware_risk(d, S):
-    rsi   = d.get("ransomware_risk", {})
-    score = rsi.get("rsi_score", 0)
-    label = rsi.get("rsi_label", "N/A")
-    col   = (C_CRITICAL if score >= 0.8 else C_RED if score >= 0.5 else
-             C_AMBER if score >= 0.25 else C_GREEN)
-    rows  = [
-        ("RSI Score",       f"{score} / 1.0"),
-        ("Risk Level",      label),
-        ("Industry",        rsi.get("industry", "Other")),
-    ]
-    if rsi.get("annual_revenue_zar"):
-        rows.append(("Annual Revenue", f"R&nbsp;{rsi['annual_revenue_zar']:,.0f}"))
-    for f in rsi.get("contributing_factors", [])[:5]:
-        rows.append((f["factor"], f"+{f['impact']}"))
-    fb = f"RSI {score}/1.0 — {'high susceptibility to ransomware attacks.' if score >= 0.5 else 'moderate ransomware risk.' if score >= 0.25 else 'low ransomware susceptibility.'}"
-    return build_cat_card("Ransomware Susceptibility (RSI)", col, f"{score}", rows, rsi.get("issues", []), S, fallback=fb)
-
-
-def cat_data_breach_index(d, S):
-    dbi   = d.get("data_breach_index", {})
-    score = dbi.get("dbi_score", 0)
-    label = dbi.get("dbi_label", "N/A")
-    col   = (C_CRITICAL if score < 25 else C_RED if score < 50 else
-             C_AMBER if score < 75 else C_GREEN)
-    rows  = [
-        ("DBI Score",              f"{score} / 100"),
-        ("Risk Level",             label),
-        ("Breach Count",           dbi.get("breach_count", 0)),
-        ("Most Recent Breach",     dbi.get("most_recent_breach") or "None"),
-        ("Sensitive Data Exposed", "Yes" if dbi.get("has_sensitive_data") else "No"),
-        ("Credential Leaks",       f"{dbi.get('credential_leaks', 0):,}"),
-    ]
-    fb = f"DBI {score}/100 — {'strong breach resilience.' if score >= 75 else 'moderate risk exposure.' if score >= 50 else 'elevated breach risk based on current posture.'}"
-    return build_cat_card("Data Breach Index (DBI)", col, f"{score}/100", rows, dbi.get("issues", []), S, fallback=fb)
+# NOTE: the legacy `cat_ransomware_risk` and `cat_data_breach_index` renderers
+# were removed (2026-06-02 back-test). They read stale key shapes
+# (`ransomware_risk`/`rsi_label`, `data_breach_index`/`dbi_label`/flat fields)
+# that the live calculators never produce, and were never wired into the story.
+# The live cards are `cat_rsi` (insurance.rsi) and `cat_dbi` (insurance.dbi).
 
 
 def cat_financial_impact(d, S):
@@ -3692,10 +3673,10 @@ def cat_risk_mitigations(d, S):
                       f"{cur}&nbsp;{savings:,.0f}"))
 
     rows.append(("", ""))
-    rows.append(("Note", "Savings are modelled projections based on hybrid financial impact methodology. Cost estimates are indicative SA market ranges for prioritisation, not project quotes."))
+    rows.append(("Note", "Incident-driven view: savings are modelled by reducing the probability of specific incident types (ransomware / breach / DDoS families) and are capped at 85% of current loss. The \"Remediation Roadmap — RSI Prioritisation\" card gives the complementary RSI-point view; the two totals differ because they model different drivers and are not competing figures. Cost estimates are indicative SA market ranges for prioritisation, not project quotes."))
 
     fb = f"Implementing all recommendations could reduce annual expected loss by {cur}&nbsp;{total_savings:,.0f} ({reduction_pct}%)."
-    return build_cat_card("Risk Mitigation Recommendations", C_GREEN,
+    return build_cat_card("Risk Mitigation Recommendations (Expected-Loss)", C_GREEN,
                           f"Save {cur}&nbsp;{total_savings:,.0f}", rows, [], S, fallback=fb)
 
 

@@ -92,10 +92,34 @@ class IntelXProvider(DarkWebProvider):
     name = "intelx"
     env_key_var = "INTELX_API_KEY"
     API_URL = "https://free.intelx.io"
+    # Requested-and-displayed cap; the free API may over-return, so truncate to
+    # this same value (mirrors checkers_threats.IntelXChecker.MAX_RESULTS).
+    MAX_RESULTS = 40
 
     # Media-type code → our normalised category
     _MEDIA_TO_CATEGORY = {1: "paste", 2: "paste", 13: "darkweb"}
     _MEDIA_TO_TYPE = {1: "Paste", 2: "Paste", 5: "Email", 13: "Darkweb", 14: "Document"}
+
+    # Infostealer-log signatures — stealer dumps are served as generic text
+    # (media != 13) so without this they all fall into the "leak" bucket and
+    # darkweb_count stays 0 even for genuine criminal-forum harvest.
+    _STEALER_TOKENS = (
+        "stealer", "redline", "raccoon", "vidar", "lumma",
+        "_default.txt", " default.txt", "/default.txt", "autofill",
+        "passwords.txt", "cookies.txt", "credit_cards", "screenshot",
+    )
+
+    @classmethod
+    def _category_for(cls, rec: dict, media: int) -> str:
+        cat = cls._MEDIA_TO_CATEGORY.get(media)
+        if cat:
+            return cat
+        name = (rec.get("name") or "").lower()
+        bucket = (rec.get("bucket") or "").lower()
+        if any(b in bucket for b in ("darknet", "logs", "stealer")) or \
+           any(tok in name for tok in cls._STEALER_TOKENS):
+            return "darkweb"
+        return "leak"
 
     def query(self, domain, emails=None):
         if not self.is_configured():
@@ -103,7 +127,7 @@ class IntelXProvider(DarkWebProvider):
         try:
             import requests
             r = requests.post(f"{self.API_URL}/intelligent/search",
-                json={"term": domain, "maxresults": 40, "timeout": 5, "sort": 4, "media": 0},
+                json={"term": domain, "maxresults": self.MAX_RESULTS, "timeout": 5, "sort": 4, "media": 0},
                 headers={"X-Key": self.api_key}, timeout=15)
             if r.status_code == 401:
                 return ProviderResult(status="auth_failed")
@@ -124,11 +148,13 @@ class IntelXProvider(DarkWebProvider):
                 if data.get("status") in (1, 2, 4):
                     break
                 time.sleep(2)
+            # Truncate to the requested cap (the free API may over-return).
+            records_raw = records_raw[:self.MAX_RESULTS]
             recs = []
             for rec in records_raw:
                 media = rec.get("media", 0)
                 recs.append(DarkWebRecord(
-                    category=self._MEDIA_TO_CATEGORY.get(media, "leak"),
+                    category=self._category_for(rec, media),
                     name=(rec.get("name") or "Unknown")[:80],
                     source=rec.get("bucket", "intelx"),
                     type_label=self._MEDIA_TO_TYPE.get(media, rec.get("typeh", "Unknown")),

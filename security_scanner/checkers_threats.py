@@ -12,40 +12,58 @@ from scanner_utils import *
 # ---------------------------------------------------------------------------
 
 class TechStackChecker:
+    # EOL signature table. Refreshed 2026-06-02 against endoflife.date.
+    # Substring-matched against Server/X-Powered-By headers + body, so each key
+    # is a header-style "Product/Version" token. Only versions that are genuinely
+    # past their security-EOL date as of the refresh date are listed here; newer
+    # supported branches are intentionally absent so they are not flagged.
     EOL_SIGNATURES = {
         "PHP/5": {"risk": "critical", "note": "PHP 5.x — end-of-life Dec 2018, no security patches"},
-        "PHP/7.0": {"risk": "critical", "note": "PHP 7.0 — end-of-life Dec 2019"},
+        "PHP/7.0": {"risk": "critical", "note": "PHP 7.0 — end-of-life Dec 2018"},
         "PHP/7.1": {"risk": "critical", "note": "PHP 7.1 — end-of-life Dec 2019"},
-        "PHP/7.2": {"risk": "high", "note": "PHP 7.2 — end-of-life Nov 2020"},
+        "PHP/7.2": {"risk": "critical", "note": "PHP 7.2 — end-of-life Nov 2020"},
         "PHP/7.3": {"risk": "high", "note": "PHP 7.3 — end-of-life Dec 2021"},
-        "PHP/7.4": {"risk": "medium", "note": "PHP 7.4 — end-of-life Nov 2022"},
+        "PHP/7.4": {"risk": "high", "note": "PHP 7.4 — end-of-life Nov 2022"},
+        "PHP/8.0": {"risk": "high", "note": "PHP 8.0 — end-of-life Nov 2023"},
+        "PHP/8.1": {"risk": "medium", "note": "PHP 8.1 — security support ended Dec 2025"},
         "ASP.NET/1": {"risk": "critical", "note": "ASP.NET 1.x — end-of-life"},
         "ASP.NET/2": {"risk": "critical", "note": "ASP.NET 2.0 — end-of-life Jul 2011"},
         "ASP.NET/3": {"risk": "critical", "note": "ASP.NET 3.x — end-of-life"},
-        "Apache/2.2": {"risk": "high", "note": "Apache 2.2 — end-of-life Dec 2017"},
-        "nginx/1.14": {"risk": "medium", "note": "nginx 1.14 — legacy stable branch"},
-        "nginx/1.12": {"risk": "high", "note": "nginx 1.12 — end-of-life"},
+        "Apache/2.2": {"risk": "high", "note": "Apache httpd 2.2 — end-of-life Dec 2017"},
         "nginx/1.10": {"risk": "critical", "note": "nginx 1.10 — end-of-life"},
+        "nginx/1.12": {"risk": "high", "note": "nginx 1.12 — end-of-life"},
+        "nginx/1.14": {"risk": "high", "note": "nginx 1.14 — end-of-life Apr 2021"},
+        "nginx/1.16": {"risk": "high", "note": "nginx 1.16 — end-of-life Apr 2021"},
+        "nginx/1.18": {"risk": "medium", "note": "nginx 1.18 — end-of-life May 2021 (legacy stable)"},
         "OpenSSL/1.0": {"risk": "critical", "note": "OpenSSL 1.0.x — end-of-life Dec 2019"},
         "OpenSSL/1.1.0": {"risk": "high", "note": "OpenSSL 1.1.0 — end-of-life Sep 2019"},
-        # Node.js EOL
+        "OpenSSL/1.1.1": {"risk": "high", "note": "OpenSSL 1.1.1 — end-of-life Sep 2023"},
+        # Node.js EOL (endoflife.date, even majors only have LTS)
         "Node.js/12": {"risk": "critical", "note": "Node.js 12.x — end-of-life Apr 2022"},
-        "Node.js/14": {"risk": "high", "note": "Node.js 14.x — end-of-life Apr 2023"},
-        "Node.js/16": {"risk": "medium", "note": "Node.js 16.x — end-of-life Sep 2023"},
+        "Node.js/14": {"risk": "critical", "note": "Node.js 14.x — end-of-life Apr 2023"},
+        "Node.js/16": {"risk": "high", "note": "Node.js 16.x — end-of-life Sep 2023"},
+        "Node.js/18": {"risk": "medium", "note": "Node.js 18.x — end-of-life Apr 2025"},
         "node/12": {"risk": "critical", "note": "Node.js 12.x — end-of-life Apr 2022"},
-        "node/14": {"risk": "high", "note": "Node.js 14.x — end-of-life Apr 2023"},
-        "node/16": {"risk": "medium", "note": "Node.js 16.x — end-of-life Sep 2023"},
-        # Python 2
+        "node/14": {"risk": "critical", "note": "Node.js 14.x — end-of-life Apr 2023"},
+        "node/16": {"risk": "high", "note": "Node.js 16.x — end-of-life Sep 2023"},
+        "node/18": {"risk": "medium", "note": "Node.js 18.x — end-of-life Apr 2025"},
+        # Python 2 / early 3
         "Python/2": {"risk": "critical", "note": "Python 2.x — end-of-life Jan 2020"},
+        "Python/3.6": {"risk": "high", "note": "Python 3.6 — end-of-life Dec 2021"},
+        "Python/3.7": {"risk": "high", "note": "Python 3.7 — end-of-life Jun 2023"},
+        "Python/3.8": {"risk": "medium", "note": "Python 3.8 — end-of-life Oct 2024"},
         # IIS EOL
         "Microsoft-IIS/6": {"risk": "critical", "note": "IIS 6.0 — end-of-life Jul 2015"},
         "Microsoft-IIS/7.0": {"risk": "critical", "note": "IIS 7.0 — end-of-life Jan 2020"},
         "Microsoft-IIS/7.5": {"risk": "high", "note": "IIS 7.5 — end-of-life Jan 2020"},
+        "Microsoft-IIS/8.0": {"risk": "high", "note": "IIS 8.0 — end-of-life Oct 2023"},
+        "Microsoft-IIS/8.5": {"risk": "medium", "note": "IIS 8.5 — end-of-life Oct 2023"},
         # Tomcat EOL
         "Apache-Coyote/1": {"risk": "critical", "note": "Tomcat/Coyote 1.x — end-of-life"},
-        "Tomcat/7": {"risk": "critical", "note": "Apache Tomcat 7.x — end-of-life"},
-        "Tomcat/8.0": {"risk": "high", "note": "Apache Tomcat 8.0 — end-of-life Jun 2018"},
-        "Tomcat/8.5": {"risk": "medium", "note": "Apache Tomcat 8.5 — end-of-life Mar 2024"},
+        "Tomcat/7": {"risk": "critical", "note": "Apache Tomcat 7.x — end-of-life Mar 2021"},
+        "Tomcat/8.0": {"risk": "critical", "note": "Apache Tomcat 8.0 — end-of-life Jun 2018"},
+        "Tomcat/8.5": {"risk": "high", "note": "Apache Tomcat 8.5 — end-of-life Mar 2024"},
+        "Tomcat/9": {"risk": "medium", "note": "Apache Tomcat 9.x — end-of-life Dec 2025"},
     }
 
     CMS_SIGNATURES = {
@@ -1964,6 +1982,35 @@ class IntelXChecker:
     concurrent searches.
     """
     API_URL = "https://free.intelx.io"
+    # Single source of truth for the requested-and-displayed result cap. The
+    # free API does not strictly honour maxresults (it returned 60 for a
+    # maxresults:40 request), so we truncate the returned records to this same
+    # cap — the displayed total is then bounded by the request and reproducible.
+    MAX_RESULTS = 40
+
+    # Infostealer-log filename signatures. IntelX's dominant content is
+    # stealer-log dumps whose media type is generic text (not media==13), so
+    # they would otherwise all fall into `leak_count` and darkweb_count stays 0
+    # even for genuine criminal-forum/market harvest. These tokens identify a
+    # record as dark-web-grade infostealer harvest.
+    _STEALER_TOKENS = (
+        "stealer", "redline", "raccoon", "vidar", "lumma", "meta stealer",
+        "_default.txt", " default.txt", "/default.txt", "autofill",
+        "passwords.txt", "cookies.txt", "credit_cards", "screenshot",
+    )
+
+    @classmethod
+    def _is_darkweb_grade(cls, rec: dict, media: int) -> bool:
+        """True if the record is dark-web-grade (criminal forum/market or
+        infostealer-log harvest) rather than a generic leak-DB entry."""
+        if media == 13:  # IntelX explicit darkweb media type
+            return True
+        name = (rec.get("name") or "").lower()
+        bucket = (rec.get("bucket") or "").lower()
+        # IntelX buckets like "leaks.logs.*" / "darknet.*" carry stealer logs.
+        if any(b in bucket for b in ("darknet", "logs", "stealer")):
+            return True
+        return any(tok in name for tok in cls._STEALER_TOKENS)
 
     def check(self, domain: str, api_key: str = None) -> dict:
         result = {
@@ -1983,7 +2030,7 @@ class IntelXChecker:
         try:
             # Step 1: Initiate search
             r = requests.post(f"{self.API_URL}/intelligent/search",
-                json={"term": domain, "maxresults": 40, "timeout": 5, "sort": 4, "media": 0},
+                json={"term": domain, "maxresults": self.MAX_RESULTS, "timeout": 5, "sort": 4, "media": 0},
                 headers={"X-Key": api_key}, timeout=15)
             if r.status_code == 401:
                 result["status"] = "auth_failed"
@@ -2012,6 +2059,13 @@ class IntelXChecker:
                     break
                 _time.sleep(2)
 
+            # The free API does not strictly honour maxresults, so truncate to
+            # the requested cap — the displayed total is then reproducible and
+            # bounded by the request rather than reflecting an arbitrary
+            # over-return (observed 60 returned for a 40-cap request).
+            if len(records) > self.MAX_RESULTS:
+                result["result_cap_applied"] = True
+            records = records[:self.MAX_RESULTS]
             result["total_results"] = len(records)
 
             # Classify results by type
@@ -2020,7 +2074,11 @@ class IntelXChecker:
                 # media types: 1=paste, 2=paste, 5=email, 13=darkweb, 14=document
                 if media in (1, 2):
                     result["paste_count"] += 1
-                elif media == 13:
+                elif self._is_darkweb_grade(rec, media):
+                    # Genuine criminal-forum/market or infostealer-log harvest —
+                    # darkweb-grade even when media != 13 (stealer dumps are
+                    # served as generic text and would otherwise be miscounted
+                    # as leak-DB entries).
                     result["darkweb_count"] += 1
                 else:
                     result["leak_count"] += 1
@@ -2077,12 +2135,31 @@ class FraudulentDomainChecker:
         ".co.za", ".africa",
     ]
 
-    # Homoglyph map (visually similar characters)
+    # Homoglyph map (visually similar ASCII characters)
     HOMOGLYPHS = {
         "a": ["4", "@"], "b": ["d", "6"], "c": ["k"],
         "e": ["3"], "g": ["q", "9"], "i": ["1", "l", "!"],
         "l": ["1", "i", "|"], "o": ["0"], "s": ["5", "$"],
         "t": ["7"], "u": ["v"], "v": ["u"], "z": ["2"],
+    }
+
+    # IDN / Unicode confusables (homoglyph attack — the dominant real-world
+    # lookalike vector). Cyrillic / Greek look-alikes that render almost
+    # identically to Latin letters. Kept deliberately small and high-confidence
+    # so the candidate count does not explode; one substitution per candidate.
+    IDN_HOMOGLYPHS = {
+        "a": "а",  # Cyrillic a
+        "c": "с",  # Cyrillic es
+        "e": "е",  # Cyrillic ie
+        "i": "і",  # Cyrillic byelorussian-ukrainian i
+        "o": "о",  # Cyrillic o
+        "p": "р",  # Cyrillic er
+        "s": "ѕ",  # Cyrillic dze
+        "x": "х",  # Cyrillic ha
+        "y": "у",  # Cyrillic u
+        "d": "ԁ",  # Cyrillic komi de
+        "n": "ո",  # Armenian vo (looks like n)
+        "g": "ɡ",  # Latin small script g
     }
 
     # Adjacent keyboard keys for fat-finger typos
@@ -2159,6 +2236,30 @@ class FraudulentDomainChecker:
         for i in range(1, len(name)):
             variant = name[:i] + "-" + name[i:]
             add(variant + original_tld, "hyphen-insertion", 80)
+
+        # 9. IDN / Unicode confusable substitution (homoglyph attack).
+        #    Substitute a single Latin letter with a visually-identical
+        #    Cyrillic/Greek/etc. glyph and IDNA-encode to the registrable
+        #    punycode (xn--) form so DNS resolution can be checked. Bounded:
+        #    one substitution per candidate, capped to keep the count sane.
+        idn_added = 0
+        for i, ch in enumerate(name):
+            repl = self.IDN_HOMOGLYPHS.get(ch)
+            if not repl:
+                continue
+            unicode_variant = name[:i] + repl + name[i+1:] + original_tld
+            try:
+                puny = unicode_variant.encode("idna").decode("ascii")
+            except (UnicodeError, ValueError):
+                continue
+            # IDNA round-trips a pure-ASCII string unchanged; only keep genuine
+            # IDN (xn--) candidates so we don't duplicate the ASCII techniques.
+            if "xn--" not in puny:
+                continue
+            add(puny, "idn-homoglyph", 95)
+            idn_added += 1
+            if idn_added >= 12:  # hard cap — don't explode the candidate set
+                break
 
         return perms
 
