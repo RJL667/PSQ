@@ -68,7 +68,11 @@ class SSLChecker:
         scanner.queue_scans([scan_request])
 
         for server_result in scanner.get_results():
-            # Certificate info
+            # Certificate info — sslyze 6.x API.
+            # NOTE: sslyze 5.x exposed dep.leaf_certificate_subject_matches_hostname
+            # and dep.verified_certificate_chain. Both were removed in 6.x: chain
+            # validity now lives per-trust-store in dep.path_validation_results, and
+            # hostname matching must be done by us against the leaf SANs.
             try:
                 cert_result = server_result.scan_result.certificate_info
                 if cert_result and cert_result.result:
@@ -83,8 +87,22 @@ class SSLChecker:
                         pub_key = leaf.public_key()
                         key_size = getattr(pub_key, 'key_size', None)
 
+                        # Chain validity: verified against at least one trust store
+                        # (path_validation_results is a list, one per trust store).
+                        pvr = getattr(dep, "path_validation_results", []) or []
+                        chain_valid = any(
+                            getattr(r, "verified_certificate_chain", None) is not None
+                            for r in pvr
+                        )
+
+                        # Hostname match: check leaf SANs (with wildcard support)
+                        # against the scanned domain.
+                        san_dns_names = self._leaf_san_dns_names(leaf)
+                        hostname_match = self._hostname_matches(domain, san_dns_names)
+                        valid = bool(chain_valid and hostname_match and days_left >= 0)
+
                         result["certificate"] = {
-                            "valid": dep.leaf_certificate_subject_matches_hostname,
+                            "valid": valid,
                             "subject": leaf.subject.rfc4514_string() if leaf.subject else domain,
                             "issuer": leaf.issuer.rfc4514_string() if leaf.issuer else "Unknown",
                             "issuer_cn": str(leaf.issuer) if leaf.issuer else "Unknown",
@@ -92,15 +110,21 @@ class SSLChecker:
                             "days_until_expiry": days_left,
                             "is_expired": days_left < 0,
                             "expiring_soon": 0 <= days_left <= 30,
-                            "san_count": len(leaf.extensions) if leaf.extensions else 0,
+                            "hostname_match": hostname_match,
+                            "san_count": len(san_dns_names),
                             "chain_length": len(dep.received_certificate_chain),
-                            "chain_valid": dep.verified_certificate_chain is not None,
+                            "chain_valid": chain_valid,
                         }
-                        result["cert_chain_valid"] = dep.verified_certificate_chain is not None
+                        result["cert_chain_valid"] = chain_valid
                         result["key_size"] = key_size
-                        result["ocsp_stapling"] = dep.ocsp_response_is_trusted if hasattr(dep, 'ocsp_response_is_trusted') else dep.ocsp_response is not None
-            except Exception:
-                pass
+                        result["ocsp_stapling"] = dep.ocsp_response_is_trusted if getattr(dep, "ocsp_response_is_trusted", None) is not None else (dep.ocsp_response is not None)
+            except Exception as e:
+                # Do not silently swallow: record the parse error so a broken
+                # sslyze cert parse is visible instead of masquerading as an
+                # "Invalid certificate". Leaving certificate={} here would make
+                # _calculate_grade brand every cert Invalid (-40).
+                result.setdefault("issues", []).append(f"sslyze cert parse error: {e}")
+                raise
 
             # TLS versions — check which have accepted cipher suites
             tls_map = {
@@ -147,6 +171,36 @@ class SSLChecker:
                         result["tls_versions"][old_label] = True
                 except Exception:
                     pass
+
+    @staticmethod
+    def _leaf_san_dns_names(leaf) -> list:
+        """Extract DNS-type subjectAltName entries from a cryptography x509 leaf."""
+        try:
+            from cryptography.x509.oid import ExtensionOID
+            from cryptography.x509 import DNSName
+            ext = leaf.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+            return list(ext.value.get_values_for_type(DNSName))
+        except Exception:
+            return []
+
+    @staticmethod
+    def _hostname_matches(hostname: str, san_dns_names: list) -> bool:
+        """RFC 6125-style match of hostname against SAN DNS names (wildcard-aware)."""
+        host = (hostname or "").lower().rstrip(".")
+        for raw in san_dns_names:
+            name = (raw or "").lower().rstrip(".")
+            if not name:
+                continue
+            if name.startswith("*."):
+                # Wildcard matches exactly one left-most label.
+                suffix = name[1:]  # ".example.com"
+                if host == name[2:]:
+                    continue  # bare apex does not match a wildcard
+                if host.endswith(suffix) and host.count(".") == name.count("."):
+                    return True
+            elif host == name:
+                return True
+        return False
 
     def _check_with_stdlib(self, domain: str, result: dict):
         """Fallback SSL check using Python stdlib."""
@@ -1007,15 +1061,36 @@ class ExposedAdminChecker:
             # HEAD-first via HTTP.discover - reduces bandwidth and WAF
             # signature (the previous burst of 38 GETs at 15 workers was
             # textbook directory-enumeration pattern).
-            r = HTTP.discover(f"https://{domain}{path}", timeout=6,
-                              allow_redirects=False)
+            url = f"https://{domain}{path}"
+            r = HTTP.discover(url, timeout=6, allow_redirects=False)
             if r is None:
                 return None
-            # 200 = exposed, 401/403 = exists but auth required (still
-            # noteworthy for critical findings)
-            if r.status_code == 200 or (risk == "critical" and r.status_code in [401, 403]):
-                return {"path": path, "status": r.status_code, "risk": risk}
-            return None
+            # Only HTTP 200 counts as exposure. A 401/403 means the path is
+            # PROTECTED (typically a WAF/CDN blanket-deny) — flagging it as a
+            # "critical exposure" inverts the signal and penalises well-defended
+            # orgs hardest. 404/3xx are likewise not exposures. Mirrors the
+            # WAF-robust 200-only + body-sanity gate in S-3
+            # DependencyManifestChecker._probe (checkers_supply_chain.py).
+            if r.status_code != 200:
+                return None
+            # Body-sanity check: a 200 from a CDN/WAF catch-all (login page,
+            # error page, SPA shell) is not a real sensitive-file exposure.
+            # Confirm with a GET and reject HTML shells / "not found" bodies.
+            body = HTTP.get(url, timeout=6, allow_redirects=False)
+            if body is None or body.status_code != 200:
+                return None
+            try:
+                text = body.text or ""
+            except Exception:
+                text = ""
+            if len(text) < 10:
+                return None
+            head = text.lower()[:300]
+            if "<html" in head or "<!doctype" in head:
+                return None
+            if "not found" in head[:200] or "404" in head[:50]:
+                return None
+            return {"path": path, "status": 200, "risk": risk}
 
         all_paths = [(p, "critical") for p in self.PATHS["critical"]] + \
                     [(p, "high") for p in self.PATHS["high"]] + \

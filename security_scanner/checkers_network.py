@@ -902,6 +902,50 @@ class DNSBLChecker:
         "uribl.com",
     ]
 
+    @staticmethod
+    def _is_genuine_listing(answers, dnsbl: str) -> bool:
+        """Validate DNSBL A-record return codes per each list's documented spec.
+
+        A bare "the lookup resolved" is NOT a listing: several lists return
+        127.x.x.x reply codes for non-listing conditions. We only count
+        genuine listing codes and explicitly reject error/blocked/refused:
+          - Spamhaus (zen.*, dbl.*): valid listings are 127.0.0.2-127.0.0.255
+            (zen IP) and 127.0.1.2-127.0.1.99 (dbl domain). 127.255.255.x is an
+            error code (open resolver / query rate-limited / blocked) — NOT a hit.
+          - URIBL (uribl.com): 127.0.0.1 = query refused (NOT a listing);
+            real listings are 127.0.0.2+.
+          - Generic DNSBLs: a listing is any 127.0.0.x with the last octet >= 2.
+        """
+        ips = []
+        for rdata in answers:
+            try:
+                ips.append(str(rdata.address))
+            except Exception:
+                ips.append(str(rdata))
+        for a in ips:
+            if not a.startswith("127."):
+                continue  # anything outside 127/8 is not a DNSBL reply code
+            octets = a.split(".")
+            if len(octets) != 4:
+                continue
+            try:
+                _, b, c, d = (int(octets[0]), int(octets[1]), int(octets[2]), int(octets[3]))
+            except ValueError:
+                continue
+            # Error / blocked: 127.255.255.x (Spamhaus open-resolver / rate-limit).
+            if b == 255:
+                continue
+            # Refused: 127.0.0.1 is never a listing on any of these lists.
+            if (b, c, d) == (0, 0, 1):
+                continue
+            # Spamhaus dbl domain listings live in the 127.0.1.x sub-zone.
+            if b == 0 and c == 1 and 2 <= d <= 99:
+                return True
+            # Standard listing range: 127.0.0.2 .. 127.0.0.255.
+            if b == 0 and c == 0 and d >= 2:
+                return True
+        return False
+
     def check(self, domain: str, ip: str = None) -> dict:
         result = {
             "status": "completed",
@@ -922,16 +966,18 @@ class DNSBLChecker:
             # IP-based checks
             for dnsbl in self.IP_DNSBLS:
                 try:
-                    dns.resolver.resolve(f"{reversed_ip}.{dnsbl}", "A", lifetime=5)
-                    result["ip_listings"].append(dnsbl)
+                    answers = dns.resolver.resolve(f"{reversed_ip}.{dnsbl}", "A", lifetime=5)
+                    if self._is_genuine_listing(answers, dnsbl):
+                        result["ip_listings"].append(dnsbl)
                 except Exception:
                     pass
 
             # Domain-based checks
             for dnsbl in self.DOMAIN_DNSBLS:
                 try:
-                    dns.resolver.resolve(f"{domain}.{dnsbl}", "A", lifetime=5)
-                    result["domain_listings"].append(dnsbl)
+                    answers = dns.resolver.resolve(f"{domain}.{dnsbl}", "A", lifetime=5)
+                    if self._is_genuine_listing(answers, dnsbl):
+                        result["domain_listings"].append(dnsbl)
                 except Exception:
                     pass
 

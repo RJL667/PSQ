@@ -1080,6 +1080,14 @@ class SecurityScanner:
         results["overall_risk_score"] = risk_score
         results["risk_level"] = risk_level
         results["recommendations"] = recommendations
+        # Expose the computed overall risk score to the insurance analytics
+        # (Phase 6). FinancialImpactCalculator._calculate_zar reads
+        # cat_results["_overall_score"] to derive `vulnerability`; without this
+        # write it defaults to 500 and pins vulnerability at 0.5, decoupling
+        # p_breach / Monte-Carlo tails from the actual scan posture. The
+        # regen/verify harnesses inject this key, which previously masked the
+        # production gap.
+        cat_results["_overall_score"] = risk_score
         # Propagate scan completeness metadata to top level
         if "_scan_completeness" in cat_results:
             results["_scan_completeness"] = cat_results.pop("_scan_completeness")
