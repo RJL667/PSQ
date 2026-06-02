@@ -78,6 +78,30 @@ REVENUE_BAND_DISPLAY = {
 }
 
 
+# Default effective revenue when a scan provides none. MUST mirror the
+# FinancialImpactCalculator fallback in scanner.py
+# (`_zar = annual_revenue_zar if annual_revenue_zar > 0 else 10_000_000`)
+# so the peer-benchmarking card and the financial-impact card resolve the
+# SAME revenue basis for the same scan. Previously peer benchmarking fell
+# back to 0 -> "micro" band while the FIC used R10M -> "small", so the two
+# cards disagreed on revenue band for a no-revenue scan. This constant is
+# the documented single source of the default; it does NOT change the
+# default value, only unifies where the two paths read it.
+DEFAULT_REVENUE_ZAR_WHEN_ABSENT = 10_000_000
+
+
+def resolve_effective_revenue_zar(annual_revenue_zar) -> int:
+    """Resolve the revenue basis used for banding the SAME way the FIC does:
+    use the scan's provided annual revenue (ZAR) when present and positive,
+    otherwise fall back to the documented default. Keeps the peer-benchmark
+    card and the financial-impact card on one consistent revenue basis."""
+    try:
+        rev = int(annual_revenue_zar or 0)
+    except (TypeError, ValueError):
+        rev = 0
+    return rev if rev > 0 else DEFAULT_REVENUE_ZAR_WHEN_ABSENT
+
+
 # ---------------------------------------------------------------------------
 # Critical findings counter (cross-checker aggregator)
 # ---------------------------------------------------------------------------
@@ -273,7 +297,11 @@ def compute_peer_rating(scan_result: dict, conn: sqlite3.Connection) -> dict:
     annual_rev_zar = (scan_result.get("scan_context") or {}).get("annual_revenue_zar") or annual_rev
     own_risk_score = int(scan_result.get("overall_risk_score") or 500)
     own_critical = count_critical_findings(scan_result).get("total", 0)
-    band = revenue_band(annual_rev_zar)
+    # Resolve the banding revenue the SAME way the FinancialImpactCalculator
+    # does (provided revenue when present, else the documented R10M default)
+    # so this card and the financial-impact card never disagree on band.
+    effective_rev_zar = resolve_effective_revenue_zar(annual_rev_zar)
+    band = revenue_band(effective_rev_zar)
 
     cell = get_peer_cell(conn, industry, sub_industry, band)
 

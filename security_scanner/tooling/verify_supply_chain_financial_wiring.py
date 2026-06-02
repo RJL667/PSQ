@@ -45,6 +45,7 @@ import argparse
 import copy
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -174,6 +175,54 @@ def _strip_supply_chain(cats: dict) -> dict:
     for k in SUPPLY_CHAIN_KEYS:
         out.pop(k, None)
     return out
+
+
+# Must match VendorBreachCorrelationChecker.LOOKBACK_DAYS (5 years). Any row
+# older than this is silently dropped by the S-5 join (age > LOOKBACK_DAYS),
+# so the DB quietly under-reports. We can't import the checker class here
+# without pulling its DNS deps, so the constant is mirrored — keep in sync.
+VENDOR_BREACH_LOOKBACK_DAYS = 1825
+# Warn this many days BEFORE a row leaves the window, so an operator can
+# prune/refresh it deliberately rather than discovering silent drift.
+VENDOR_BREACH_DRIFT_WARN_DAYS = 60
+
+
+def check_vendor_breach_drift() -> list:
+    """Lightweight DB-hygiene check (WARN-only, never fails the gate).
+
+    Returns a list of warning strings for vendor_breaches.json rows that are
+    within VENDOR_BREACH_DRIFT_WARN_DAYS of crossing the 5-year lookback (or
+    already expired). Does NOT change runtime behaviour — purely an operator
+    nudge so the DB does not silently drift (e.g. the marketo 2021-06-22 row).
+    """
+    warnings: list = []
+    path = ROOT / "vendor_breaches.json"
+    try:
+        with path.open(encoding="utf-8") as f:
+            db = json.load(f)
+    except Exception as e:  # pragma: no cover - operator visibility only
+        warnings.append(f"vendor_breaches.json could not be read ({e}); skipping drift check.")
+        return warnings
+
+    now = datetime.now(timezone.utc)
+    for b in db.get("breaches", []):
+        date_str = b.get("date", "")
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except Exception:
+            warnings.append(f"vendor_breaches row has unparseable date {date_str!r} (vendor={b.get('vendor')}).")
+            continue
+        age = (now - dt).days
+        remaining = VENDOR_BREACH_LOOKBACK_DAYS - age
+        if remaining <= 0:
+            warnings.append(
+                f"EXPIRED: {b.get('vendor')} {date_str} is {age}d old "
+                f"(> {VENDOR_BREACH_LOOKBACK_DAYS}d lookback) — S-5 already drops it; prune it.")
+        elif remaining <= VENDOR_BREACH_DRIFT_WARN_DAYS:
+            warnings.append(
+                f"NEAR-EXPIRY: {b.get('vendor')} {date_str} is {age}d old; "
+                f"leaves the {VENDOR_BREACH_LOOKBACK_DAYS}d lookback in {remaining}d — refresh or prune deliberately.")
+    return warnings
 
 
 def _run_pipeline(cats: dict, *, industry: str, revenue_zar: int) -> dict:
@@ -404,6 +453,18 @@ def run(industry: str = "retail",
     else:
         failures.append(("worst_stack", "sc_uplift", None, 0, None, True))
         print("FAIL [worst_stack] supply_chain_vulnerability_uplift not applied")
+
+    # DB-hygiene drift check (WARN-only — never changes exit code).
+    print()
+    print("--- vendor_breaches.json drift check (warn-only) ---")
+    drift_warnings = check_vendor_breach_drift()
+    if drift_warnings:
+        for w in drift_warnings:
+            print(f"WARN [vendor_breach_drift] {w}")
+    else:
+        print(f"OK   [vendor_breach_drift] no rows within "
+              f"{VENDOR_BREACH_DRIFT_WARN_DAYS}d of the "
+              f"{VENDOR_BREACH_LOOKBACK_DAYS}d lookback window")
 
     print()
     print("=" * 70)

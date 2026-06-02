@@ -781,6 +781,34 @@ class HTTPHeaderChecker:
         try:
             r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
                              allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            # Status-code guard. `allow_redirects=True` already follows the
+            # apex->www 301/302, but the FINAL response may still be a WAF/CDN
+            # block page (403/503/429) served to the scanner's python
+            # User-Agent. Reading that block page's (empty) headers as the
+            # org's posture falsely reports "CSP/HSTS/XCTO all missing" and
+            # scores ~30 against a well-defended site (the phishield 403
+            # mis-read). Only assess headers from a genuine reachable 2xx.
+            # On a non-2xx final response, report "could not assess
+            # (blocked/unreachable)" and emit NO score/headers map so the
+            # scoring layer falls back to its neutral 50 default rather than
+            # penalising every header as missing. Mirrors the WAF-robust
+            # 200-only gate in ExposedAdminChecker / S-3 _probe.
+            if not (200 <= r.status_code < 300):
+                result["status"] = "unreachable"
+                result["unreachable_reason"] = (
+                    f"Headers could not be assessed — the site returned "
+                    f"HTTP {r.status_code} (WAF/CDN block or unreachable) to "
+                    f"the scanner. No security-header verdict is implied.")
+                result["http_status"] = r.status_code
+                # Drop the placeholder `score`/`headers` so downstream
+                # scoring (`results['http_headers'].get('score', 50)`) and the
+                # remediation map fall back to their NEUTRAL defaults instead
+                # of reading a 0 / empty map as "every header missing" — that
+                # would re-introduce the very penalty this guard removes.
+                result.pop("score", None)
+                result.pop("headers", None)
+                result.pop("csp_quality", None)
+                return result
             headers_lower = {k.lower(): v for k, v in r.headers.items()}
             total_weight, earned = 0, 0
             for key, (label, weight) in self.HEADERS.items():

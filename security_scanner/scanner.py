@@ -1179,9 +1179,16 @@ class SecurityScanner:
             rsi_result = rsi_calc.calculate(cat_results, industry, annual_revenue)
             results["insurance"]["rsi"] = rsi_result
 
-            # Financial Impact — default to ZAR (SA product); use 10M estimate if no revenue given
+            # Financial Impact — default to ZAR (SA product); use 10M estimate if no revenue given.
+            # Resolve the effective revenue via the shared peer_benchmarking
+            # helper so the financial-impact card and the peer-benchmarking
+            # card always use the SAME revenue basis (provided revenue when
+            # present, else the documented R10M default). Previously each path
+            # applied its own fallback (FIC -> R10M, peer -> 0/"micro"), so the
+            # two cards could disagree on revenue band for the same scan.
+            from peer_benchmarking import resolve_effective_revenue_zar
             fin_calc = FinancialImpactCalculator()
-            _zar = annual_revenue_zar if annual_revenue_zar > 0 else 10_000_000
+            _zar = resolve_effective_revenue_zar(annual_revenue_zar)
             _reg_flags = getattr(self, '_regulatory_flags', None)
             _sub_industry = getattr(self, '_sub_industry', None)
             fin_result = fin_calc.calculate(

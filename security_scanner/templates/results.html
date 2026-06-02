@@ -1082,6 +1082,17 @@
 
     <!-- HTTP Headers -->
     {% set hh = results.categories.http_headers %}
+    {% if hh.status == 'unreachable' %}
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-amber"></div><div class="cat-title">HTTP Security Headers</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">N/A</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="color:var(--muted);font-size:.86rem;">Could not assess (blocked/unreachable). {{ hh.unreachable_reason | default('The site returned a WAF/CDN block or was unreachable to the scanner.') }}</p>
+      </div>
+    </div>
+    {% else %}
     {% set hh_tl = 'tl-green' if hh.score >= 80 else ('tl-amber' if hh.score >= 50 else 'tl-red') %}
     <div class="cat-card">
       <div class="cat-header" onclick="toggle(this)">
@@ -1106,6 +1117,7 @@
         </table>
       </div>
     </div>
+    {% endif %}
 
     <!-- Website Security -->
     {% set ws = results.categories.website_security %}

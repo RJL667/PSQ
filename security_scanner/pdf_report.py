@@ -682,6 +682,17 @@ def cat_email_hardening(d, S):
 
 def cat_headers(d, S):
     hh    = d.get("http_headers", {})
+    # "Could not assess" path: the checker reached only a WAF/CDN block page
+    # (non-2xx final response) so there is no genuine header posture to grade.
+    # Render an amber "blocked/unreachable" card instead of a misleading "0%
+    # coverage / all headers missing".
+    if hh.get("status") == "unreachable":
+        reason = hh.get("unreachable_reason",
+                        "Security headers could not be assessed (site blocked or unreachable).")
+        parts = build_cat_card("HTTP Security Headers", C_AMBER,
+                               "Could not assess (blocked/unreachable)",
+                               [], [reason], S, fallback=reason)
+        return parts
     score = hh.get("score", 0)
     col   = _tl(score >= 80, score >= 50)
     rows  = [(name, "Present" if data.get("present") else "MISSING")
