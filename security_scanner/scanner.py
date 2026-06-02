@@ -1160,8 +1160,12 @@ class SecurityScanner:
                 if not issues:
                     affected.append(cname)
             results["_scan_completeness"]["waf_affected_checkers"] = affected
-            # Coverage estimate: assessable - affected / assessable
-            total = results["_scan_completeness"].get("total_checkers", 27)
+            # Coverage estimate: assessable - affected / assessable.
+            # Fallback derives from the authoritative WEIGHTS count (the
+            # scorer sets total_checkers to len(WEIGHTS) upstream) rather
+            # than a hardcoded literal that silently goes stale.
+            total = results["_scan_completeness"].get(
+                "total_checkers", len(RiskScorer.WEIGHTS))
             cov = max(0, total - len(affected))
             results["_scan_completeness"]["coverage_pct"] = (
                 round(cov / total * 100) if total else 100

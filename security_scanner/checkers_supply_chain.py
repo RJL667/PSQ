@@ -1114,7 +1114,12 @@ class VendorBreachChecker:
                 sev = b.get("severity", "medium")
                 # Linear decay: full penalty at age=0, zero at LOOKBACK_DAYS.
                 decay = max(0.0, 1.0 - (age / self.LOOKBACK_DAYS))
-                pen = self.SEVERITY_PENALTY.get(sev, 5) * decay
+                # Clamp an unknown/blank severity to "low" (3) so a malformed
+                # or unrecognised row can never out-score an explicit "low".
+                # Named severities keep their calibrated penalties unchanged.
+                sev_penalty = self.SEVERITY_PENALTY.get(
+                    sev, self.SEVERITY_PENALTY["low"])
+                pen = sev_penalty * decay
                 penalty += pen
                 match = {
                     "vendor": v,

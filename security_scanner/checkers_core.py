@@ -157,7 +157,7 @@ class SSLChecker:
                 weak = any(w in cipher_name.upper() for w in self.WEAK_CIPHERS)
                 result["cipher_suite"] = {
                     "name": cipher_name, "protocol": best[0],
-                    "bits": 256 if "256" in cipher_name else (128 if "128" in cipher_name else 0),
+                    "bits": self._cipher_bits(cipher_name),
                     "is_weak": weak,
                     "total_accepted": len(all_accepted),
                     "weak_count": sum(1 for _, c in all_accepted if any(w in c.upper() for w in self.WEAK_CIPHERS)),
@@ -171,6 +171,39 @@ class SSLChecker:
                         result["tls_versions"][old_label] = True
                 except Exception:
                     pass
+
+    @staticmethod
+    def _cipher_bits(cipher_name: str) -> int:
+        """Symmetric key size (bits) parsed from the cipher-family token.
+
+        Must NOT key off a bare "256" substring: TLS suite names carry a
+        SHA-256 MAC suffix (e.g. TLS_AES_128_CCM_SHA256), so "256 in name"
+        mislabels a 128-bit AES cipher as 256-bit. We read the bit-length
+        from the bulk-cipher token (AES_128 / AES256 / CHACHA20 / 3DES /
+        RC4_128 …) instead. Rendered value only — not a score input.
+        """
+        name = (cipher_name or "").upper()
+        # ChaCha20(-Poly1305) is a 256-bit stream cipher.
+        if "CHACHA20" in name:
+            return 256
+        # AES key size: AES_128 / AES128 / AES-256 etc. The trailing
+        # `(?!\d)` rejects a longer run of digits (so we read the bulk-cipher
+        # key size, never the SHA-256 / SHA-384 MAC suffix — note `_` is a
+        # word char so `\b` would NOT separate `128` from `_CCM`).
+        aes = re.search(r"AES[_-]?(128|192|256)(?!\d)", name)
+        if aes:
+            return int(aes.group(1))
+        # Other legacy bulk ciphers with conventional key sizes.
+        if "3DES" in name or "DES_EDE3" in name:
+            return 168
+        rc4 = re.search(r"RC4[_-]?(40|128)(?!\d)", name)
+        if rc4:
+            return int(rc4.group(1))
+        # Generic fallback: a bit-length token attached to a key word.
+        generic = re.search(r"(?:CAMELLIA|ARIA|SEED|RC2)[_-]?(128|192|256)(?!\d)", name)
+        if generic:
+            return int(generic.group(1))
+        return 0
 
     @staticmethod
     def _leaf_san_dns_names(leaf) -> list:

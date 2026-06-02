@@ -1076,13 +1076,16 @@ class OSVChecker:
         for v in vulns[:20]:  # Cap per-package
             severity = "medium"  # default
             cvss_score = None
+            cvss_estimated = False
             cve_id = None
             # Extract CVE alias
             for alias in v.get("aliases", []):
                 if alias.startswith("CVE-"):
                     cve_id = alias
                     break
-            # Extract CVSS from severity
+            # Extract a REAL numeric CVSS only (never fabricate one from the
+            # vector string — that synthesises a precise score the source
+            # never stated).
             for sev in v.get("severity", []):
                 if sev.get("type") == "CVSS_V3":
                     score_str = sev.get("score", "")
@@ -1091,31 +1094,22 @@ class OSVChecker:
                         cvss_score = float(score_str) if score_str.replace(".", "").isdigit() else None
                     except (ValueError, TypeError):
                         pass
-                    # Parse CVSS vector string (e.g., "CVSS:3.1/AV:N/AC:L/...")
-                    if cvss_score is None and score_str.startswith("CVSS:"):
-                        # Use a simple heuristic based on vector components
-                        # AV:N = network, AC:L = low complexity, etc.
-                        av = "N" if "AV:N" in score_str else ("A" if "AV:A" in score_str else "L")
-                        ac = "L" if "AC:L" in score_str else "H"
-                        pr = "N" if "PR:N" in score_str else ("L" if "PR:L" in score_str else "H")
-                        ui = "N" if "UI:N" in score_str else "R"
-                        ci = score_str.count(":H")  # Count High impacts
-                        # Approximate score based on attack surface
-                        base = 5.0
-                        if av == "N": base += 1.5
-                        if ac == "L": base += 1.0
-                        if pr == "N": base += 1.0
-                        elif pr == "L": base += 0.5
-                        if ui == "N": base += 0.5
-                        base += ci * 0.5
-                        cvss_score = min(10.0, round(base, 1))
-            # Determine severity from CVSS or database_specific
+            # Determine severity. Prefer a real CVSS; otherwise fall back to
+            # the source's own database_specific.severity, else "unknown".
+            # We do NOT invent a numeric CVSS from the vector — when only a
+            # qualitative severity is available the field is flagged
+            # `cvss_estimated` so renderers/score can tell it apart from a
+            # real measured score.
             db_sev = v.get("database_specific", {}).get("severity")
             if cvss_score:
                 severity = ("critical" if cvss_score >= 9.0 else "high" if cvss_score >= 7.0
                            else "medium" if cvss_score >= 4.0 else "low")
             elif db_sev:
                 severity = db_sev.lower()
+                cvss_estimated = True
+            else:
+                severity = "unknown"
+                cvss_estimated = True
 
             # Filter out very old advisories (pre-2015) — likely false positives
             published = v.get("published", "")
@@ -1128,6 +1122,9 @@ class OSVChecker:
                 "summary": (v.get("summary") or v.get("details", ""))[:200],
                 "severity": severity,
                 "cvss_score": cvss_score,
+                "cvss_estimated": cvss_estimated,  # True when severity is
+                                                   # qualitative/unknown, not a
+                                                   # measured numeric CVSS
                 "epss": None,  # populated during merge if available
                 "published": published,
                 "source": "osv.dev",

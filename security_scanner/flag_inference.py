@@ -227,7 +227,10 @@ ACCOUNTABLE_INSTITUTION_LABELS = {
 
 def infer_b2c(sub_industry: Optional[str], payment_form_detected: bool = False,
               ecommerce_tech_detected: bool = False,
-              insurance_subtype: Optional[str] = None) -> dict:
+              insurance_subtype: Optional[str] = None,
+              payment_processor_detected: bool = False,
+              account_login_detected: bool = False,
+              generic_commerce_detected: bool = False) -> dict:
     """Infer B2C status from sub-industry + supporting signals.
 
     Honours a regulatory-structure override via `insurance_subtype`:
@@ -235,7 +238,15 @@ def infer_b2c(sub_industry: Optional[str], payment_form_detected: bool = False,
     SA insurance regulation and cannot transact directly with consumers,
     so when the insurance-subtype classifier detects either of those
     the function returns B2C=False with explicit regulatory evidence,
-    regardless of other signals."""
+    regardless of other signals.
+
+    Supporting-signal auto-tick requires >=2 INDEPENDENT B2C-specific
+    signals (a real payment processor / card field, a detected e-commerce
+    platform, or a consumer account/login affordance). A single
+    generic-commerce hint (`/cart`, "add to cart", Product JSON-LD) does
+    NOT alone flip B2C: those strings appear on B2B wholesale catalogues
+    too, and a false B2C tick adds CPA s112 (10% turnover / R1M) to the
+    cat stack. The broker-confirmation override remains authoritative."""
     result = {"auto_detected": False, "evidence": "Sub-industry not flagged as B2C"}
 
     # Strongest negative: SA insurance regulatory structure
@@ -255,15 +266,31 @@ def infer_b2c(sub_industry: Optional[str], payment_form_detected: bool = False,
         result.update(auto_detected=True,
                       evidence=f"Sub-industry '{sub_industry}' is consumer-facing")
         return result
-    # Supporting signals can flip even ambiguous sub-industries to B2C
-    if payment_form_detected:
-        result.update(auto_detected=True,
-                      evidence="Payment form detected on site (consumer checkout)")
-        return result
+
+    # --- Supporting signals (require >=2 independent B2C-specific) -------
+    # An e-commerce platform fingerprint is independently strong (processes
+    # consumer cards). The legacy `payment_form_detected` flag is broad, so
+    # it is treated as a generic-commerce signal unless a granular strong
+    # signal is also supplied — preventing a lone `/cart` string from
+    # flipping B2C.
+    strong_signals = []
+    if payment_processor_detected:
+        strong_signals.append("payment processor / card-input field")
     if ecommerce_tech_detected:
+        strong_signals.append("e-commerce platform (Shopify / WooCommerce / etc.)")
+    if account_login_detected:
+        strong_signals.append("consumer account / login")
+    has_generic_commerce = bool(generic_commerce_detected or payment_form_detected)
+
+    # B2C only on >=2 independent strong signals, OR one strong + a
+    # generic-commerce corroborator. Never on generic commerce alone.
+    flip = len(strong_signals) >= 2 or (len(strong_signals) >= 1 and has_generic_commerce)
+    if flip:
+        ev = "; ".join(strong_signals)
+        if has_generic_commerce:
+            ev += "; commerce/checkout UI"
         result.update(auto_detected=True,
-                      evidence="E-commerce platform detected (Shopify / WooCommerce / etc.)")
-        return result
+                      evidence=f"Multiple independent consumer-facing signals: {ev}")
     return result
 
 
@@ -428,6 +455,13 @@ EU_LANGUAGE_HINTS = re.compile(
 # cover SA-local gateways, card-input field markers, storefront/checkout UI
 # text, and structured-data commerce markers (the last work on SPA shells
 # where the rendered checkout lives client-side / on a subpath).
+#
+# NOTE: this combined regex is retained for the PCI *suggestion* (broker-
+# confirmed) only. The B2C auto-tick now requires >=2 independent
+# B2C-specific signals (see the STRONG/GENERIC split below), because a
+# single generic-commerce hit (`/cart`, "add to cart", Product JSON-LD)
+# also appears on B2B wholesale catalogues and must NOT alone flip B2C —
+# which would add CPA s112 (10% turnover) to a B2B insured's cat stack.
 PAYMENT_FORM_HINTS = re.compile(
     r"stripe|paypal|payfast|peach[- ]?payments?|yoco|ozow|snapscan|zapper"
     r"|netcash|paygate|dpo[- ]?pay|\bpayu\b|paystack|flutterwave|razorpay"
@@ -435,6 +469,28 @@ PAYMENT_FORM_HINTS = re.compile(
     r"|squareup|mollie|klarna|afterpay"
     r"|cc-number|card[-_ ]?number|cardnumber|\bcvv\b|\bcvc\b|data-stripe|card-element"
     r"|add[ -]to[ -](?:cart|basket)|proceed to checkout|view cart"
+    r"|/(?:cart|checkout|basket)\b"
+    r'|"@type"\s*:\s*"(?:Product|Offer|Store|OnlineStore)"',
+    re.IGNORECASE)
+# --- B2C signal split (correctness, not calibration) ---------------------
+# STRONG = B2C-PII-specific: a real consumer payment-processor reference or
+# a card-input field. These individually indicate consumer card handling.
+PAYMENT_PROCESSOR_HINTS = re.compile(
+    r"stripe|paypal|payfast|peach[- ]?payments?|yoco|ozow|snapscan|zapper"
+    r"|netcash|paygate|dpo[- ]?pay|\bpayu\b|paystack|flutterwave|razorpay"
+    r"|adyen|braintree|checkout\.com|2checkout|sagepay|opayo|worldpay"
+    r"|squareup|mollie|klarna|afterpay"
+    r"|cc-number|card[-_ ]?number|cardnumber|\bcvv\b|\bcvc\b|data-stripe|card-element",
+    re.IGNORECASE)
+# STRONG = a consumer account / login affordance (sign-in/register/my-account).
+ACCOUNT_LOGIN_HINTS = re.compile(
+    r"my[- ]?account|sign[ -]?in|log[ -]?in|register|create[ -]an?[ -]account"
+    r"|/(?:account|login|signin|register|my-account)\b",
+    re.IGNORECASE)
+# GENERIC = e-commerce-generic, NOT B2C-PII-specific on its own. Appears on
+# B2B wholesale portals and catalogues just as readily as consumer stores.
+GENERIC_COMMERCE_HINTS = re.compile(
+    r"add[ -]to[ -](?:cart|basket)|proceed to checkout|view cart"
     r"|/(?:cart|checkout|basket)\b"
     r'|"@type"\s*:\s*"(?:Product|Offer|Store|OnlineStore)"',
     re.IGNORECASE)
@@ -525,7 +581,10 @@ def run_preflight(domain: str, sub_industry: Optional[str] = None,
                                                 page_text_sample=html_content)
     b2c = infer_b2c(
         sub_industry,
-        payment_form_detected=bool(html_content and PAYMENT_FORM_HINTS.search(html_content)),
+        # Granular B2C-specific signals (>=2 independent required to flip).
+        payment_processor_detected=bool(html_content and PAYMENT_PROCESSOR_HINTS.search(html_content)),
+        account_login_detected=bool(html_content and ACCOUNT_LOGIN_HINTS.search(html_content)),
+        generic_commerce_detected=bool(html_content and GENERIC_COMMERCE_HINTS.search(html_content)),
         ecommerce_tech_detected=bool(html_content and ECOMMERCE_PLATFORM_HINTS.search(html_content)),
         insurance_subtype=insurance_subtype.get("insurance_subtype"),
     )
