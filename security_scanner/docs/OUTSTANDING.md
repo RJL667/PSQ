@@ -181,6 +181,7 @@ coupling (the coupling was broken until Wave 1), so they now genuinely need cali
 | HIBP scenario `p_breach` step thresholds (0.35 / 0.20 / 0.08) | `scoring_analytics.py:1664` | heuristic step function |
 | `COST_PER_RECORD`, `REGULATORY_FINE` tables | `scoring_analytics.py` | per-industry SA values |
 | `K_TAIL = 1.20` (catastrophe tail widening) | `_calculate_zar` | heuristic |
+| Risk-level bands `200 / 400 / 600` (Low/Med/High/Crit on the 0-1000 score) | `scoring_analytics.py:806` | fixed even split, set against the OLD inflated distribution; de-inflation lowered scores (phishield 381->169) so they may now mis-bucket — re-fit to the corrected distribution + align to the calibrated p(breach) tiers |
 
 **Pre-session action:** regenerate the reference loss curves on the FIXED code (a clean
 post-fix scan of takealot + 1–2 references) so the calibration anchors to the corrected

@@ -46,6 +46,7 @@ The recompute surfaced two structural problems. Calibrating *around* them would 
 | | LGB mixture weight | n/a | **0.25–0.35** | needs-colleague | Q-E confirm Pareto-mixture on SC-slice |
 | | SC-vectored fraction f_sc | n/a | **0.12** (IBM CoDB) | med-high | Q-C 12% strict vs 20% |
 | | K_TAIL | 1.20 | **hold** (epistemic/WAF — keep separate from FIN-9) | n/a | — |
+| **Risk-level bands** | Low/Med/High/Crit cut-offs (on the 0–1000 score) | **200 / 400 / 600** (fixed even split, `scoring_analytics.py:806`) | **re-fit to the de-inflated distribution; map to breach-prob tiers** | med | de-inflation lowered scores (phishield 381→169), so the bands were set against the *old inflated* distribution — an org that belonged in "High" can now land in "Medium". Re-fit the cut-offs to the corrected distribution and align them to the calibrated p(breach) tiers (Low/Med/High/Crit ≈ defensible annual breach-probability bands), rather than a blind even split. |
 
 **Recompute sanity (with proposed values, on phishield):** p_breach 0.36 → ~0.018 (after polarity + convex); credential class → LOW (was HIGH; the "12 darkweb mentions" were low-confidence Slow-dom/History noise — de-escalation is correct); RSI rebalance net-neutral on the headline but fixes the RDP-alone > critical-credential-alone inversion; tail lifts 1-in-250 +18–50% with the median <2% (no double-count, ordering preserved).
 
@@ -53,7 +54,7 @@ The recompute surfaced two structural problems. Calibrating *around* them would 
 
 1. **Item 0.1 (polarity) is already fixed** (`1cc204d`, linear placeholder; verifier passed unchanged) — **calibrate its SHAPE** (linear vs convex k≈1.8) here. **Fix item 0.2 (dead USD path)** still to do.
 2. **Decide the p(breach) base rate** (the single highest-leverage choice — §1 row 1).
-3. Set, in order: vulnerability curve shape → the `0.3` → credential class (K1–K7) → RSI rebalance → SA fine expected-value → TEF → **tail/Pareto with the colleague** (their domain).
+3. Set, in order: vulnerability curve shape → the `0.3` → credential class (K1–K7) → RSI rebalance → SA fine expected-value → TEF → **tail/Pareto with the colleague** (their domain) → **re-fit the risk-level bands** (200/400/600) to the corrected score distribution + the calibrated p(breach) tiers (do this last — it depends on the curve + base rate).
 4. **Overall-outcome panel:** map the *combined* calibration to real-world SA loss benchmarks (IBM SA R44.1M, Coveware ransom distributions, the return-period ladder) and the peer pool; iterate until the headline ZAR + 1-in-100/200/250 land defensibly.
 5. **Gate:** `verify_supply_chain_financial_wiring.py` (re-baselined) + `verify_scan_smoke.py`; present per-checker p_breach deltas; colleague sign-off; THEN ship (both remotes).
 
