@@ -767,6 +767,18 @@ def build(doc):
         "password reset combined with mandatory multi-factor authentication."
     )
 
+    add_note(doc,
+        "Credential signals are combined conservatively. When multiple "
+        "weaker credential indicators co-occur, their combined "
+        "contribution is discounted by a flat factor of 0.3 rather than "
+        "summed, reflecting the empirically low validity of leaked-"
+        "credential corpora in credential-stuffing attacks (roughly 1 to 3 "
+        "per cent of leaked pairs still authenticate). Recency of "
+        "publication is deliberately not used as a freshness proxy, "
+        "because the publication date of a breach list is not the age of "
+        "the underlying credentials."
+    )
+
     # ==================================================================
     # 5.3  Financial Impact (Hybrid Model)
     # ==================================================================
@@ -807,21 +819,45 @@ def build(doc):
         "The anchored magnitude is then decomposed into five cost components:"
     )
     add_bullet(doc,
-        "C1: Post-breach liability (residual) — notification costs, credit "
-        "monitoring, legal fees, reputational damage, and customer churn. "
-        "This is the residual after C2-C5 are allocated."
+        "C1: Post-breach liability - notification costs, credit monitoring, "
+        "legal fees, reputational damage, and customer churn. The central "
+        "(expected-loss) view computes C1 as the residual of the IBM SA "
+        "breach anchor after C2-C5 are allocated. The catastrophe view "
+        "computes C1 instead as a records-driven stand-alone liability: a "
+        "realised catastrophe breach exposes approximately the full record "
+        "base, so catastrophe-C1 equals the estimated records held "
+        "multiplied by a per-record liability of R90, carrying a lognormal "
+        "heavy tail, floored at the central residual. The R90 figure is the "
+        "international class-action settlement anchor (Anthem approximately "
+        "R27, Capital One approximately R33 and Equifax approximately R53 "
+        "per affected person, plus legal and credit-monitoring load). For "
+        "smaller organisations the residual floor dominates; for large "
+        "consumer record-holders the records-driven term dominates."
     )
     add_bullet(doc,
-        "C2: Regulatory fines per jurisdiction — POPIA fines (up to "
-        "R10 million), GDPR exposure (4% of global turnover, uncapped) if "
-        "applicable, and PCI DSS fines if applicable. Jurisdiction-specific "
-        "calculations based on the scan input toggles."
+        "C2: Regulatory fines per jurisdiction. The expected (P50) POPIA "
+        "figure is enforcement-anchored as the probability of a fine given "
+        "a breach (0.02) multiplied by the expected fine given that a fine "
+        "is levied (R5 million), giving R100 000 expected. Both inputs are "
+        "anchored to POPIA's entire administrative-fine record to date: two "
+        "Section 109 fines (Department of Justice 2023 and Department of "
+        "Basic Education 2024), each R5 million, both public-sector and "
+        "both for failure to comply with an enforcement notice, with zero "
+        "private-commercial fines. The catastrophe view uses the full "
+        "R10 million Section 109 statutory ceiling. GDPR exposure (4% of "
+        "global turnover, uncapped) and PCI DSS fines are added where the "
+        "scan input toggles indicate they apply."
     )
     add_bullet(doc,
-        "C3: Business interruption — revenue loss during recovery. Uses a "
-        "SA-calibrated PERT distribution for recovery time: PERT(3, 25, 120) "
-        "days, reflecting the Sophos SA 2025 finding that SA organisations "
-        "take a median of 25 days to recover from ransomware."
+        "C3: Business interruption - revenue loss during recovery. The "
+        "Monte Carlo recovery-time distribution is PERT(2, 14, 90) days "
+        "(mode 14, mean approximately 24.7, maximum 90): the 14-day mode "
+        "reflects a good incident-response / Sophos Rapid Response "
+        "recovery, the approximately 25-day mean matches the Coveware and "
+        "IBM 2025 average of around 24 days, and the 90-day maximum is the "
+        "insurance indemnity-period cap. The central business-interruption "
+        "figure retains a 25-day point estimate, equal to the new "
+        "distribution mean."
     )
     add_bullet(doc,
         "C4: Ransom/extortion — set at 10.40% of total breach magnitude, "
@@ -877,6 +913,22 @@ def build(doc):
     )
 
     add_body(doc,
+        "Vulnerability is a convex function of the 0-1000 risk score, the "
+        "score divided by 1000 and raised to the power 1.8, so the "
+        "modelled breach probability accelerates only toward the Critical "
+        "band rather than rising linearly. The curve shape and the 0.30 "
+        "loss-event-frequency scalar are anchored to published breach-"
+        "likelihood evidence: the Cyentia IRIS small-and-medium-business "
+        "annual loss-event rate (under 2%), BitSight and Marsh rating-to-"
+        "incident absolutes (a rating above 700 corresponds to under 1%, "
+        "and below 500 to roughly 3%), and the SecurityScorecard A-to-F "
+        "breach-likelihood ladder, which is steeply convex. At a neutral "
+        "threat environment the calibrated curve places a well-postured "
+        "organisation under 2%, a mid-posture organisation around 5%, and "
+        "a Critical-posture organisation at 12% and above."
+    )
+
+    add_body(doc,
         "The RSI score drives ransomware-family incidents specifically. "
         "Ransomware initial access vector weights are calibrated to Sophos "
         "SA 2025 survey data:"
@@ -893,6 +945,17 @@ def build(doc):
         "secondary indicators like missing headers or weak DNS."
     )
 
+    add_body(doc,
+        "Ransomware enters the expected annual loss as a FAIR loss-event "
+        "frequency: the RSI score is multiplied by the same 0.30 loss-event-"
+        "frequency scalar used for the data-breach leg, then partitioned across "
+        "the ransomware incident types by their conditional shares. Reusing the "
+        "breach scalar - rather than adding a separate threat-frequency term - "
+        "keeps the ransomware and breach legs on a common FAIR basis and the "
+        "expected annual loss internally consistent with the reported breach "
+        "probability."
+    )
+
     add_h2(doc, "Monte Carlo simulation")
 
     add_body(doc,
@@ -907,7 +970,7 @@ def build(doc):
     )
 
     add_body(doc,
-        "Key PERT parameters include SA recovery time PERT(3, 25, 120) "
+        "Key PERT parameters include SA recovery time PERT(2, 14, 90) "
         "days, cost-per-record ranges by industry, and ransom demand "
         "distributions calibrated to the Sophos SA 2025 median payment "
         "data. Catastrophe-leg PERT upper bounds were widened 2.5x to 5x "
@@ -920,13 +983,50 @@ def build(doc):
     add_body(doc,
         "The simulation produces a full probability distribution from which "
         "percentiles are extracted at five reference percentiles (P5, P25, "
-        "P50, P75, P95) plus three return-period percentiles (P99 = 1-in-"
-        "100 year, P99.5 = 1-in-200, P99.6 = 1-in-250). A pure-numpy "
+        "P50, P75, P95) plus three catastrophe-severity tiers (P99, P99.5, "
+        "P99.6, reported as the 1-in-100 / 1-in-200 / 1-in-250 cover tiers). A pure-numpy "
         "Generalised Pareto Distribution Peaks-Over-Threshold fit is "
         "applied above P95 for defensible extrapolation at the longest "
         "return period; the fit falls back to raw percentiles if it fails "
         "sanity checks. Both raw and fitted values are recorded in the "
         "JSON output for audit."
+    )
+
+    add_h2(doc, "Catastrophe tail: severity of a single severe event")
+
+    add_body(doc,
+        "The expected-loss and most-likely figures are computed by "
+        "probability-weighting each incident type (annual probability "
+        "multiplied by severity) - the expected annual loss. The catastrophe "
+        "and cover-sizing figures are constructed differently: they report the "
+        "SEVERITY of a single severe event - a full-stack double-extortion "
+        "breach - at increasing percentiles of a severity distribution. They "
+        "answer the question 'if a severe event occurs, how large would it "
+        "be?', and are therefore CONDITIONAL on a severe event occurring and "
+        "INDEPENDENT of security posture: posture changes the frequency of "
+        "loss events, not the size of a realised one. A compound, loss-given-"
+        "event annual distribution (each incident type drawn as a Bernoulli "
+        "occurrence, full severity on occurrence) is also computed and "
+        "retained in the JSON output for audit; its mean equals the "
+        "probability-weighted expected loss, so the expected-loss and "
+        "remediation figures are unchanged. Reporting the catastrophe tail as "
+        "conditional severity prevents the cover view from collapsing toward "
+        "zero as an organisation improves its posture: a realised data-breach "
+        "or ransomware event remains expensive even for a well-defended firm."
+    )
+
+    add_note(doc,
+        "Supply-chain catastrophe is handled without double-counting. The "
+        "severity of a supplier-vectored breach is already inside the "
+        "records-driven C1 liability, and the supply-chain signal raises "
+        "the breach probability through a single vulnerability uplift. A "
+        "correlated systemic supply-chain catastrophe, in which many "
+        "insureds are compromised through one shared vendor (as in the "
+        "MOVEit 2023 event), is an accumulation risk that is disclosed and "
+        "managed at portfolio level rather than priced into an individual "
+        "insured's loss number, mirroring the South African Covid-19 "
+        "business-interruption precedent of disclosing rather than "
+        "modelling correlated systemic loss."
     )
 
     add_h2(doc, "Loss Exposure Scenarios (FAIS-safe cover sizing)")
@@ -938,7 +1038,10 @@ def build(doc):
         "constitutes financial advice; the scanner provides analytical inputs "
         "to support a broker / client cover-sizing decision rather than making "
         "that decision on behalf of the insured. The output therefore presents "
-        "a Loss Exposure Scenarios table with five named figures:"
+        "a Loss Exposure Scenarios table with five named figures - the first "
+        "two are annual-loss scenarios; the last three are the SEVERITY of a "
+        "single severe event, conditional on it occurring and therefore "
+        "posture-independent:"
     )
     add_bullet(doc,
         "Most Likely (mode) — the peak of the loss distribution; the single "
@@ -949,17 +1052,21 @@ def build(doc):
         "Reasonable anchor for premium-rating calculations."
     )
     add_bullet(doc,
-        "1-in-100 event (P99) — the loss level expected to be exceeded once in "
-        "100 years (1% annual exceedance probability). Standard reinsurance / "
-        "underwriting convention for cover sizing."
+        "Severe event (P99 severity) — the severity of a single severe event at "
+        "the 99th percentile of the severity distribution, conditional on a "
+        "severe event occurring. A cover-sizing figure (how large a severe loss "
+        "could be), NOT an annual frequency. Standard reinsurance / underwriting "
+        "convention; reported under the 1-in-100 cover tier."
     )
     add_bullet(doc,
-        "1-in-200 event (P99.5) — aligned with the FSCA SAM (Solvency Assessment "
-        "and Management) regime's catastrophe scenario."
+        "Extreme event (P99.5 severity) — the next severity tier, aligned with "
+        "the FSCA SAM (Solvency Assessment and Management) regime's catastrophe "
+        "benchmark; reported under the 1-in-200 cover tier."
     )
     add_bullet(doc,
-        "1-in-250 event (P99.6) — extreme tail view requested for catastrophe-"
-        "cover discussions. GPD-fitted from the right tail of the simulation."
+        "Catastrophic event (P99.6 severity) — the extreme severity tier and the "
+        "standard SAM / reinsurance catastrophe benchmark (reported as 1-in-250), "
+        "GPD-fitted from the right tail of the severity distribution."
     )
     add_note(doc,
         "Headline consistency: wherever a single 'Estimated Annual Loss' figure "
@@ -974,6 +1081,105 @@ def build(doc):
         "Selection of the appropriate cover limit from these scenarios is the "
         "responsibility of the insured in consultation with the broker. The "
         "report presents the analysis; the broker structures the cover."
+    )
+
+    add_h2(doc, "Probability and cover reporting views (FAIR decomposition)")
+
+    add_body(doc,
+        "The financial impact is reported across the three axes of the FAIR "
+        "decomposition: a frequency view (annual probability), a severity view "
+        "(the cover-sizing ladder below), and an expected-loss view (the "
+        "estimated annual loss). These are presentation re-expressions of "
+        "signals already scored elsewhere in the model; they introduce no new "
+        "weighting and no double-counting."
+    )
+
+    add_body(doc,
+        "Two annual-probability figures are reported, nested and separately "
+        "defined, so that frequency is not confused with severity and the two "
+        "probabilities are not confused with each other."
+    )
+    add_bullet(doc,
+        "Data-breach probability is the FAIR loss-event frequency p_breach "
+        "(Vulnerability x TEF x 0.30) defined above - the annual likelihood "
+        "specifically of a data breach, meaning a confidentiality loss or "
+        "exfiltration of records."
+    )
+    add_bullet(doc,
+        "Total cyber-incident probability is the annual likelihood of any "
+        "modelled cyber incident. It combines the breach channel and the "
+        "ransomware channel as an independent union - one minus the product "
+        "of one-minus-each-channel-probability - where the ransomware-channel "
+        "frequency is the RSI score multiplied by the same 0.30 loss-event-"
+        "frequency scalar used for the breach leg. It nests above the data-"
+        "breach figure and is by construction always greater than or equal to "
+        "it."
+    )
+
+    add_body(doc,
+        "Each probability is graded against its own band set; reusing one band "
+        "set across both figures would mislabel a typical multi-channel rate."
+    )
+    add_bullet(doc,
+        "The data-breach probability is graded on firm public breach-rate "
+        "bands: below 1% Strong, 1 to 2% Good, 2 to 3% Typical, 3 to 6% "
+        "Elevated, 6 to 12% High, and above 12% Critical. These cut-offs "
+        "follow the same published evidence as the probability curve - the "
+        "Cyentia IRIS small-and-medium-business annual loss-event rate (under "
+        "2%), and the BitSight and SecurityScorecard rating-to-breach ladders."
+    )
+    add_bullet(doc,
+        "The total cyber-incident probability is graded on a separate, "
+        "provisional multi-channel band set: below 5% Low, 5 to 15% Typical, "
+        "15 to 30% Elevated, and above 30% High. These bands are provisional "
+        "pending a dedicated multi-channel calibration and are labelled as "
+        "provisional in the report."
+    )
+
+    add_body(doc,
+        "A third and separate line reports an availability resilience "
+        "indicator. It spans outage and availability risk arising from both "
+        "denial-of-service and system or infrastructure-failure causes, and is "
+        "derived heuristically from the WAF, CDN, hosting-concentration (single "
+        "autonomous system) and DNS-blocklist signals. It is reported as an "
+        "indicative measure only: it is not a calibrated probability, and "
+        "because outage and system-failure cover varies between policies and "
+        "over time it carries no statement of policy coverage. It describes the "
+        "risk - the stable and prevalent fact - and is kept on its own line "
+        "because it is a different risk type (availability rather than breach or "
+        "extortion) measured on different signals."
+    )
+    add_note(doc,
+        "The availability resilience indicator is flagged in the JSON output as "
+        "not calibrated. A FAIR re-anchoring of this figure is a recorded future "
+        "step and is required before it is ever presented as a calibrated rate."
+    )
+
+    add_body(doc,
+        "The cover-sizing ladder is a simplified three-tier view drawn from the "
+        "same severity distribution as the Loss Exposure Scenarios table: a "
+        "typical severe breach at the median severity (P50), a bad breach at "
+        "the P95 severity, and a catastrophic breach at the 1-in-250 (P99.6) "
+        "severity. The three tiers are used because the top return-period "
+        "percentiles (P99, P99.5 and P99.6) compress to within roughly 7% of "
+        "one another, so a P50-to-P99.6 spread gives the broker a more "
+        "meaningful cover band. The ladder reports the severity of a single "
+        "severe event and is therefore posture-independent: the figures do not "
+        "move with the security score, consistent with the compound catastrophe "
+        "construction described above. Cover selection remains the "
+        "responsibility of the insured in consultation with the broker."
+    )
+
+    add_body(doc,
+        "The expected-loss remediation panel is presented frequency-first. It "
+        "leads with the movement in the data-breach probability and its grade, "
+        "before and after the modelled remediations, with the percentage "
+        "reduction in modelled annual exposure and the catastrophe cover figure "
+        "(the 1-in-250 severity) as context. Because severity is posture-"
+        "independent, the catastrophe cover figure is unchanged by remediation - "
+        "remediation lowers the likelihood of a loss, not the worst-case "
+        "severity of one. The absolute Rand saving is retained as a secondary "
+        "figure."
     )
 
     add_h2(doc, "Coverage-adjusted tail (WAF blind-spot)")

@@ -316,6 +316,10 @@ def _run_pipeline(cats: dict, *, industry: str, revenue_zar: int) -> dict:
                      if "data_breach" in fin else
                      (fin.get("scenarios", {}) or {})
                          .get("data_breach", {}).get("probability", 0),
+        # NOTE (item #15, 2026-06-05): return_periods are now the severity-PML
+        # (single severe event), which is POSTURE-INDEPENDENT. SC probability
+        # signals deliberately do NOT move fin_p99/p99_5 (asserted invariant in
+        # the worst-stack block); they move the ALE (fin_most_likely) + scores.
         "fin_p99": ((fin.get("return_periods", {}) or {})
                      .get("1_in_100", {}) or {}).get("loss_zar", 0),
         "fin_p99_5": ((fin.get("return_periods", {}) or {})
@@ -399,7 +403,9 @@ def run(industry: str = "retail",
             ("overall_risk_score", True, 0, 1.0),
             ("rsi_score", True, 0.01, 0),  # +0.05 base before diminishing/multipliers
             ("fin_most_likely", True, 0, 0.5),
-            ("fin_p99", True, 0, 0.5),
+            # fin_p99 (cat) is now severity-PML - posture-independent, so SC
+            # probability signals correctly do NOT move it (locked invariant in
+            # the worst-stack block). It moves the ALE + scores instead.
         ],
         "dependency_manifests": [
             ("overall_risk_score", True, 0, 1.0),
@@ -421,13 +427,9 @@ def run(industry: str = "retail",
         ],
         "vendor_breach": [
             ("overall_risk_score", True, 0, 0.5),
-            # No separate K_TAIL_SC widening — supply-chain effect flows
-            # through the vulnerability uplift only (per 2026-05-27 design
-            # review). The MC distribution shifts up naturally, so any
-            # positive movement on fin_p99 proves wiring without needing
-            # a large delta threshold.
-            ("fin_p99", True, 0, 0.1),
-            ("fin_p99_5", True, 0, 0.1),
+            # Cat (fin_p99/p99_5) is now severity-PML - posture-independent, so
+            # SC probability signals do NOT move it (locked invariant in the
+            # worst-stack block). SC flows through the ALE + scores instead.
             ("fin_most_likely", True, 0, 0.1),
         ],
         # Phase 4f cross-correlation — REPORTING-ONLY (intentionally
@@ -490,9 +492,16 @@ def run(industry: str = "retail",
     _assert_moves("worst_stack", baseline, after_all, "fin_most_likely",
                    must_increase=True, min_delta_pct=2.0,
                    passes=passes, failures=failures)
-    _assert_moves("worst_stack", baseline, after_all, "fin_p99",
-                   must_increase=True, min_delta_pct=5.0,
-                   passes=passes, failures=failures)
+    # Cat return periods are now severity-PML (posture-independent): the SC
+    # stack raises p_breach / rsi / the ALE, but must leave the cat UNCHANGED
+    # (a realised catastrophe is severe regardless of how likely it was).
+    if abs((after_all["fin_p99"] or 0) - (baseline["fin_p99"] or 0)) < 1.0:
+        passes.append(("worst_stack", "fin_p99 invariant (severity-PML)", None, True, None))
+        print("PASS [worst_stack] fin_p99 invariant under SC stack (severity-PML, posture-independent)")
+    else:
+        failures.append(("worst_stack", "fin_p99 not invariant", None, after_all["fin_p99"], None, False))
+        print(f"FAIL [worst_stack] fin_p99 moved under SC stack (should be invariant): "
+              f"{baseline['fin_p99']:,.0f} -> {after_all['fin_p99']:,.0f}")
     # K_TAIL_SC removed (2026-05-27): supply-chain effect flows through
     # vulnerability uplift only — no separate cat-tail widening.
     # supply_chain_tail_adjustment.applied is expected to be False now.

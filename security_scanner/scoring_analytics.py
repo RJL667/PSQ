@@ -7,6 +7,30 @@ plus COMPLIANCE_MAP and SA_INDUSTRY_COSTS constants.
 from scanner_utils import *
 
 
+# --- Cyber-risk probability grading bands (reporting-only FAIR view; item #17) ---
+# Segregated public-anchor bands, one per probability metric. Firm breach-rate
+# anchors: Cyentia IRIS (SMB material breach <2%/yr), BitSight, SecurityScorecard.
+# The breach band is deliberately NOT reused on the multi-channel total
+# cyber-incident metric (reusing it mislabels a typical multi-channel rate as
+# 'High'). Bands are (upper_exclusive_pct, label); the last bucket is open-ended.
+_BREACH_PROB_BANDS = (
+    (1.0, "Strong"), (2.0, "Good"), (3.0, "Typical"),
+    (6.0, "Elevated"), (12.0, "High"), (float("inf"), "Critical"),
+)
+# Provisional total cyber-incident bands (multi-channel: breach + ransomware).
+_CYBER_INCIDENT_BANDS = (
+    (5.0, "Low"), (15.0, "Typical"), (30.0, "Elevated"), (float("inf"), "High"),
+)
+
+
+def _grade_probability(pct, bands):
+    """Map a percentage probability to its segregated band label (reporting-only)."""
+    for upper, label in bands:
+        if pct < upper:
+            return label
+    return bands[-1][1]
+
+
 # ---------------------------------------------------------------------------
 # External IP Aggregator
 # ---------------------------------------------------------------------------
@@ -529,6 +553,8 @@ class RiskScorer:
         "TLS 1.1 supported — deprecated": "Disable TLS 1.1. Modern clients support TLS 1.2+.",
         "No SPF record — spoofing risk": "Add an SPF record (e.g. 'v=spf1 include:_spf.google.com -all') to prevent email spoofing.",
         "SPF uses '+all'": "Change SPF to use '-all' (hard fail) or '~all' (soft fail) — '+all' is extremely dangerous.",
+        "SPF ends with '~all'": "Change SPF to a hard-fail policy ending in '-all' so receivers reject mail from unauthorised servers; '~all' (soft-fail) only marks it. Lower priority if DMARC is already at quarantine or reject, which enforces regardless of the SPF qualifier.",
+        "SPF ends with '?all'": "Change SPF from '?all' (neutral, which asserts nothing) to a hard-fail '-all' so receivers reject spoofed mail.",
         "No DMARC record — phishing risk": "Add a DMARC record: 'v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com'.",
         "DMARC policy is 'none'": "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to enforce email authentication.",
         "No DKIM selectors found": "Configure DKIM signing for outbound email and publish the public key in DNS.",
@@ -671,10 +697,18 @@ class RiskScorer:
         elif shodan.get("poc_public_count", 0) > 0:
             shodan_risk = min(100, shodan_risk * 1.1)
 
-        # Dehashed credential leak risk
+        # Credential-leak posture contribution. CredentialRiskClassifier
+        # (checkers_threats.py) turns the DeHashed/IntelX/Hudson-Rock corpus
+        # into a confidence-weighted class (K1-K7) and maps it to a 0-100
+        # posture slot (pbreach_contribution). Replaces the confidence-blind
+        # `total_entries * 2`, which moved 13 stale email-only appearances as
+        # hard as 13 fresh passwords. Falls back to 0 when DeHashed returned
+        # no usable result. (Weight key stays "dehashed".)
         dehashed = results.get("dehashed", {})
-        dehashed_total = dehashed.get("total_entries", 0)
-        dehashed_risk = min(100, dehashed_total * 2) if dehashed.get("status") not in ("no_api_key", "auth_failed") else 0
+        if dehashed.get("status") in ("no_api_key", "auth_failed"):
+            dehashed_risk = 0
+        else:
+            dehashed_risk = results.get("credential_risk", {}).get("pbreach_contribution", 0)
 
         # VirusTotal risk
         vt = results.get("virustotal", {})
@@ -803,6 +837,33 @@ class RiskScorer:
 
         risk_score = min(1000, risk_score)
 
+        # Risk-level bands - anchored to annual loss-event probability tiers,
+        # NOT a blind even split (FIN-9 band re-fit, 2026-06-03). Each cut-off is
+        # the score at which the calibrated convex vulnerability curve
+        # (vulnerability = (score/1000)**1.8) crosses a defensible breach-prob
+        # boundary. p_breach = vulnerability * TEF * 0.3; the bands are stated at
+        # the NEUTRAL threat environment (TEF=1.0) so the posture label is
+        # industry-independent (per-industry TEF re-scales the ACTUAL p_breach
+        # later, in FinancialImpactCalculator). FS (TEF=1.45, core SA-FSP market)
+        # shown in brackets for reference.
+        #
+        #   Band      score      p_breach@TEF1.0   (@TEF1.45 FS)   tier anchor
+        #   Low       <200          <1.7%            (<2.4%)       BitSight strong <1% / Cyentia SMB <2%
+        #   Medium    200-399        1.7-5.8%        (2.4-8.4%)    elevated
+        #   High      400-599        5.8-12%         (8.4-17.3%)   BitSight weak ~3%+ / SecurityScorecard mid grades
+        #   Critical  >=600          >=12%           (>=17.3%)     Cyentia F1000 ~25%; weak-posture tail
+        #
+        # RE-FIT = RETAIN. Run through the calibrated curve the prior 200/400/600
+        # cut-offs already match the p_breach tiers (inverse of {2%,6%,12%} neutral
+        # = {222,409,601}); they were just undocumented. Validated on the de-inflated
+        # distribution: phishield 164 / example.com 145 = Low; a genuinely bad org
+        # (avg category-risk >=45/100 over the 31 weighted checkers, score ~= avg*13.2)
+        # still reaches >=600 = Critical, so the upper bands stay reachable. De-inflation
+        # removed false-positive inflation concentrated on clean orgs (ghost checkers,
+        # polarity inversions, SSL/DNSBL/exposed-admin FPs); lowering the cut-offs to
+        # recapture those orgs would re-introduce the removed inflation. COLLEAGUE note:
+        # tiers track the same base-rate choice as the vuln curve + the 0.3 (doc 01);
+        # re-confirm if the base rate moves. docs/calibration_prep/00_CALIBRATION_SUMMARY.md.
         risk_level = (
             "Critical" if risk_score >= 600 else
             "High"     if risk_score >= 400 else
@@ -912,7 +973,12 @@ class RiskScorer:
 # ---------------------------------------------------------------------------
 # 29. Ransomware Susceptibility Index (RSI)
 # ---------------------------------------------------------------------------
-# South African industry breach cost data (IBM 2025, translated to ZAR)
+# South African industry breach cost data - IBM Cost of a Data Breach 2025 (SA),
+# translated to ZAR. cost_per_record is back-derived as breach_cost_zar / 23,445
+# (IBM SA 2025 avg breach size); "Other" = R44.1M national avg; FS/Hospitality/
+# Services match IBM 2025 reported. Values HELD this round (high-confidence,
+# sourced); only this sourcing/refresh stamp was added. REFRESH ANNUALLY against
+# the next IBM SA report (last stamped 2026-06-03, FIN-9 calibration prep).
 SA_INDUSTRY_COSTS = {
     "Public Sector":              {"breach_cost_zar": 76_730_000, "cost_per_record": 3273, "multiplier": 1.74},
     "Healthcare":                 {"breach_cost_zar": 73_650_000, "cost_per_record": 3141, "multiplier": 1.67},
@@ -1005,15 +1071,24 @@ class RansomwareIndex:
 
         # --- P1: Critical findings (strongest ransomware signals) ---
 
-        # RDP exposed: +0.25 (strongest single signal — #1 ransomware vector)
+        # RDP exposed: +0.20. A strong CONFIRMED-OBSERVABLE signal but a remote-
+        # access SURFACE, not an independent root cause - CISA #StopRansomware
+        # shows RDP is breached *via* stolen creds / brute-force / VPN-software
+        # exploit, overlapping the credential + vuln channels. Trimmed from +0.25
+        # (FIN-9) so the dominant SA root cause (credentials 34%, Sophos SA 2025)
+        # is >= the RDP surface, while keeping an observability premium over the
+        # probabilistic credential signal. Range 0.18-0.22.
         if categories.get("vpn_remote", {}).get("rdp_exposed"):
-            base += 0.25
-            factors.append({"factor": "RDP (port 3389) exposed to internet", "impact": 0.25, "priority": 1})
+            base += 0.20
+            factors.append({"factor": "RDP (port 3389) exposed to internet", "impact": 0.20, "priority": 1})
 
-        # Exposed database/service ports: +0.10 each, cap 0.20
+        # Exposed database/service ports: +0.08 each, cap 0.16. Trimmed from
+        # +0.10/0.20 (FIN-9): a DB port is an exposure SURFACE that overlaps the
+        # RDP/remote-access narrative, not a named ransomware root cause, and it
+        # is better weighted in DBI (data-breach) than here. Range 0.06-0.08.
         exposed = categories.get("high_risk_protocols", {}).get("exposed_services", [])
         db_ports = [s for s in exposed if s.get("port") in (27017, 6379, 9200, 5432, 1433, 5984, 3306)]
-        db_impact = min(0.20, len(db_ports) * 0.10)
+        db_impact = min(0.16, len(db_ports) * 0.08)
         if db_impact > 0:
             base += db_impact
             factors.append({"factor": f"{len(db_ports)} exposed database port(s)", "impact": round(db_impact, 2), "priority": 1})
@@ -1026,23 +1101,33 @@ class RansomwareIndex:
         cred_risk = categories.get("credential_risk", {})
         cred_level = cred_risk.get("risk_level", "LOW")
         if cred_level == "CRITICAL":
-            # Active infostealer or real-time credential exfiltration
-            base += 0.20
-            factors.append({"factor": "CRITICAL credential risk — active compromise detected (infostealer/dark web)", "impact": 0.20, "priority": 1})
+            # Active infostealer / fresh high-confidence capture. CRITICAL is now
+            # gated by the K1-K7 confidence model (W>=4 or a confirmed live HR
+            # infection), so the tier is genuinely active. +0.20 -> +0.22 (FIN-9)
+            # so the #1 SA root cause (credentials 34%) >= the RDP surface (0.20).
+            base += 0.22
+            factors.append({"factor": "CRITICAL credential risk — active compromise detected (infostealer/dark web)", "impact": 0.22, "priority": 1})
         elif cred_level == "HIGH":
-            # Recent breaches with passwords, dark web mentions, or high volume leaks
-            base += 0.15
-            factors.append({"factor": "HIGH credential risk — recent breaches with password exposure or dark web trading", "impact": 0.15, "priority": 1})
+            # Confirmed credential exposure (passwords/hashes) or a stale HR
+            # infection, per the K1-K7 model. +0.15 -> +0.18 (FIN-9): the model
+            # fixes the count-vs-boolean input bug that used to over-set HIGH, so
+            # the weight can now safely match the SA evidence (creds #1 at 34%).
+            base += 0.18
+            factors.append({"factor": "HIGH credential risk — recent breaches with password exposure or dark web trading", "impact": 0.18, "priority": 1})
         elif cred_level == "MEDIUM":
             # Historical exposure, email-only leaks, older breaches
             base += 0.08
             factors.append({"factor": "MEDIUM credential risk — historical credential exposure detected", "impact": 0.08, "priority": 2})
         # LOW = no contribution to RSI
 
-        # KEV CVEs: +0.08 each, cap 0.20 (confirmed actively exploited)
+        # KEV CVEs: +0.10 each, cap 0.24. Lifted from +0.08/0.20 (FIN-9): vuln-
+        # exploitation is co-dominant with credentials in ransomware intrusions
+        # (Sophos SA 28% #2; M-Trends 21% tied; DBIR +34% YoY on edge/VPN), and a
+        # CISA KEV is a CONFIRMED-exploited CVE. Cap keeps the vuln channel from
+        # dominating. Range per-CVE 0.08-0.10, cap 0.20-0.24.
         cves = categories.get("shodan_vulns", {}).get("cves", [])
         kev_count = sum(1 for c in cves if c.get("in_kev"))
-        kev_impact = min(0.20, kev_count * 0.08)
+        kev_impact = min(0.24, kev_count * 0.10)
         if kev_impact > 0:
             base += kev_impact
             factors.append({"factor": f"{kev_count} CISA KEV CVE(s) — actively exploited", "impact": round(kev_impact, 2), "priority": 1})
@@ -1086,16 +1171,22 @@ class RansomwareIndex:
             base += 0.05
             factors.append({"factor": "DMARC policy is 'none' — not enforced", "impact": 0.05, "priority": 3})
 
-        # No WAF: +0.05
+        # No WAF: +0.04. Trimmed from +0.05 (FIN-9): WAF absence is a hygiene
+        # proxy, not a named ransomware vector, and WAF *detection* itself has
+        # known false-positives (back-test Theme-1) - don't over-weight a noisy
+        # input. Range 0.03-0.05.
         if not categories.get("waf", {}).get("detected"):
-            base += 0.05
-            factors.append({"factor": "No WAF detected", "impact": 0.05, "priority": 3})
+            base += 0.04
+            factors.append({"factor": "No WAF detected", "impact": 0.04, "priority": 3})
 
-        # Weak SSL: +0.05
+        # Weak SSL: +0.03. Trimmed from +0.05 (FIN-9): weak TLS is rarely the
+        # ransomware ENTRY vector (mostly hygiene/MITM), and SSL grading has a
+        # known sslyze-6.x scoring bug (back-test) - keep it light here and let
+        # posture/DBI carry it. Range 0.02-0.03.
         ssl_grade = categories.get("ssl", {}).get("grade", "F")
         if ssl_grade in ("D", "E", "F"):
-            base += 0.05
-            factors.append({"factor": f"Weak SSL (grade {ssl_grade})", "impact": 0.05, "priority": 3})
+            base += 0.03
+            factors.append({"factor": f"Weak SSL (grade {ssl_grade})", "impact": 0.03, "priority": 3})
 
         # NOTE: third_party_correlation (Phase 4f) is intentionally
         # NOT a factor here. The cross-correlation is reporting-only —
@@ -1630,20 +1721,6 @@ class FinancialImpactCalculator:
         pct = cls._rsi_deductible_pct(rsi)
         return round(max(10000, coverage_limit) * pct, -3)
 
-    # Industry cost-per-record (IBM/Ponemon averages)
-    COST_PER_RECORD = {
-        "healthcare": 239, "finance": 219, "tech": 183,
-        "education": 173, "manufacturing": 165, "retail": 157,
-        "legal": 190, "government": 155, "other": 165,
-    }
-    # Regulatory fine estimates (typical ranges)
-    REGULATORY_FINE = {
-        "healthcare": 1_000_000, "finance": 750_000, "legal": 500_000,
-        "government": 250_000, "other": 250_000,
-    }
-    # Average ransom demand as % of revenue (capped)
-    RANSOM_PCT = 0.03  # 3% of annual revenue
-
     # ------------------------------------------------------------------
     # Regulatory exposure: Each jurisdiction computed independently and
     # summed. POPIA capped at R10M, GDPR at 4% uncapped, PCI at R1M
@@ -1658,175 +1735,18 @@ class FinancialImpactCalculator:
                   sub_industry: str = None,
                   scan_completeness: dict = None) -> dict:
 
-        # Use ZAR path when ZAR revenue is provided (SA-specific model)
-        if annual_revenue_zar > 0:
-            return self._calculate_zar(categories, rsi_result, annual_revenue_zar, industry,
-                                       regulatory_flags, sub_industry,
-                                       scan_completeness=scan_completeness)
-
-        daily_revenue = annual_revenue / 365 if annual_revenue > 0 else 5_000
-
-        # --- Scenario 1: Data Breach ---
-        breach_count = categories.get("breaches", {}).get("breach_count", 0)
-        tech_score = categories.get("ssl", {}).get("score", 50)
-        if breach_count > 3:
-            p_breach = 0.35
-        elif breach_count > 0:
-            p_breach = 0.20
-        else:
-            p_breach = 0.08
-        p_breach = min(0.5, p_breach + (100 - tech_score) / 500)
-
-        cost_per_record = self.COST_PER_RECORD.get(industry, 165)
-        est_records = max(1000, int(annual_revenue / 50_000)) if annual_revenue > 0 else 5000
-        reg_fine = self.REGULATORY_FINE.get(industry, self.REGULATORY_FINE["other"])
-
-        breach_most_likely = p_breach * (est_records * cost_per_record + reg_fine)
-        breach_min = breach_most_likely * 0.3
-        breach_max = breach_most_likely * 3.0
-
-        data_breach = {
-            "probability": round(p_breach, 3),
-            "estimated_records": est_records,
-            "cost_per_record": cost_per_record,
-            "regulatory_fine": reg_fine,
-            "min": round(breach_min),
-            "most_likely": round(breach_most_likely),
-            "max": round(breach_max),
-        }
-
-        # --- Scenario 2: Ransomware ---
-        rsi = rsi_result.get("rsi_score", 0.1)
-        downtime_days = 22
-        ransom_demand = min(5_000_000, annual_revenue * self.RANSOM_PCT) if annual_revenue > 0 else 50_000
-        ir_cost = min(500_000, max(50_000, annual_revenue * 0.005)) if annual_revenue > 0 else 75_000
-
-        ransom_most_likely = rsi * (downtime_days * daily_revenue + ransom_demand + ir_cost)
-        ransom_min = ransom_most_likely * 0.4
-        ransom_max = ransom_most_likely * 2.5
-
-        ransomware = {
-            "probability": round(rsi, 3),
-            "downtime_days": downtime_days,
-            "daily_revenue_loss": round(daily_revenue),
-            "ransom_estimate": round(ransom_demand),
-            "ir_cost": round(ir_cost),
-            "min": round(ransom_min),
-            "most_likely": round(ransom_most_likely),
-            "max": round(ransom_max),
-        }
-
-        # --- Scenario 3: Business Interruption ---
-        # P(interruption) from infrastructure signals
-        p_interrupt = 0.05
-        if not categories.get("waf", {}).get("detected"):
-            p_interrupt += 0.05
-        if categories.get("ssl", {}).get("grade", "A") in ("D", "E", "F"):
-            p_interrupt += 0.03
-        exposed_svc = len(categories.get("high_risk_protocols", {}).get("exposed_services", []))
-        p_interrupt += min(0.10, exposed_svc * 0.02)
-        if categories.get("dnsbl", {}).get("blacklisted"):
-            p_interrupt += 0.05
-        p_interrupt = min(0.30, p_interrupt)
-
-        bi_downtime = 5  # Average BI days
-        impact_factor = 0.6  # Proportion of revenue lost during interruption
-
-        bi_most_likely = p_interrupt * (bi_downtime * daily_revenue * impact_factor)
-        bi_min = bi_most_likely * 0.3
-        bi_max = bi_most_likely * 4.0
-
-        business_interruption = {
-            "probability": round(p_interrupt, 3),
-            "downtime_days": bi_downtime,
-            "impact_factor": impact_factor,
-            "min": round(bi_min),
-            "most_likely": round(bi_most_likely),
-            "max": round(bi_max),
-        }
-
-        # --- Monte Carlo Simulation (USD) ---
-        import numpy as np
-        np.random.seed(42)
-        N = self.MC_ITERATIONS
-
-        mc_p_br = np.clip(self._pert_sample(p_breach * 0.5, p_breach, min(1.0, p_breach * 2.0), N), 0, 1)
-        mc_rec = self._pert_sample(est_records * 0.3, est_records, est_records * 3.0, N)
-        mc_cpr = self._pert_sample(cost_per_record * 0.6, cost_per_record, cost_per_record * 1.5, N)
-        mc_fine = self._pert_sample(reg_fine * 0.5, reg_fine, reg_fine * 2.0, N)
-        mc_breach_s = mc_p_br * (mc_rec * mc_cpr + mc_fine)
-
-        mc_rsi = np.clip(self._pert_sample(rsi * 0.5, rsi, min(1.0, rsi * 2.0), N), 0, 1)
-        mc_dt = self._pert_sample(7, downtime_days, 45, N)
-        mc_rd = self._pert_sample(ransom_demand * 0.3, ransom_demand, ransom_demand * 3.0, N)
-        mc_ir = self._pert_sample(ir_cost * 0.5, ir_cost, ir_cost * 2.5, N)
-        mc_ransom_s = mc_rsi * (mc_dt * daily_revenue + mc_rd + mc_ir)
-
-        mc_pi = np.clip(self._pert_sample(p_interrupt * 0.3, p_interrupt, min(0.8, p_interrupt * 3.0), N), 0, 1)
-        mc_bd = self._pert_sample(1, bi_downtime, 14, N)
-        mc_if = np.clip(self._pert_sample(impact_factor * 0.5, impact_factor, min(1.0, impact_factor * 1.5), N), 0, 1)
-        mc_bi_s = mc_pi * (mc_bd * daily_revenue * mc_if)
-
-        mc_total_s = mc_breach_s + mc_ransom_s + mc_bi_s
-        mc_stats = self._mc_percentiles(mc_total_s)
-        mc_breach_stats = self._mc_percentiles(mc_breach_s)
-        mc_ransom_stats = self._mc_percentiles(mc_ransom_s)
-        mc_bi_stats = self._mc_percentiles(mc_bi_s)
-
-        # Use MC percentiles
-        total_min = mc_stats["p5"]
-        total_likely = mc_stats["p50"]
-        total_max = mc_stats["p95"]
-
-        # Insurance recommendations from MC distribution
-        expected_annual = round(mc_stats["p50"], -3)
-        coverage_limit = round(mc_stats["p95"] * 1.2, -3)
-
-        # RSI-driven deductible as % of recommended coverage limit
-        deductible_pct = self._rsi_deductible_pct(rsi)
-        deductible = self._rsi_deductible(rsi, coverage_limit)
-
-        # Add MC stats to scenario dicts
-        data_breach["monte_carlo"] = mc_breach_stats
-        ransomware["monte_carlo"] = mc_ransom_stats
-        business_interruption["monte_carlo"] = mc_bi_stats
-
-        output = {
-            "scenarios": {
-                "data_breach": data_breach,
-                "ransomware": ransomware,
-                "business_interruption": business_interruption,
-            },
-            "monte_carlo": {
-                "iterations": N,
-                "method": "PERT distribution (lambda=4)",
-                "total": mc_stats,
-                "confidence_interval_90": {
-                    "lower": mc_stats["p5"],
-                    "upper": mc_stats["p95"],
-                },
-                "confidence_interval_50": {
-                    "lower": mc_stats["p25"],
-                    "upper": mc_stats["p75"],
-                },
-            },
-            "total": {
-                "min": round(total_min),
-                "most_likely": round(total_likely),
-                "max": round(total_max),
-            },
-            "insurance_recommendations": {
-                "suggested_deductible": max(1000, deductible),
-                "deductible_pct": round(deductible_pct * 100, 1),
-                "expected_annual_loss": max(1000, expected_annual),
-                "recommended_coverage": max(10000, coverage_limit),
-            },
-            "annual_revenue": annual_revenue,
-            "industry": industry,
-            "currency": "ZAR",
-        }
-        output["risk_mitigations"] = self._build_mitigations(categories, output)
-        return output
+        # Production always uses the SA ZAR model. The scanner resolves the
+        # revenue basis via resolve_effective_revenue_zar() (peer_benchmarking),
+        # which floors an absent / non-positive value to R10M, so in production
+        # annual_revenue_zar is always > 0. We floor here too, so any direct
+        # caller (tests / tooling) routes through the same SA model rather than
+        # the legacy USD scenario branch that previously lived here. The USD
+        # `annual_revenue` argument is now vestigial (kept for call-site compat).
+        if annual_revenue_zar <= 0:
+            annual_revenue_zar = 10_000_000  # peer_benchmarking.DEFAULT_REVENUE_ZAR_WHEN_ABSENT
+        return self._calculate_zar(categories, rsi_result, annual_revenue_zar, industry,
+                                   regulatory_flags, sub_industry,
+                                   scan_completeness=scan_completeness)
 
     # ------------------------------------------------------------------
     # Threat Event Frequency (TEF) multipliers per industry
@@ -1834,13 +1754,24 @@ class FinancialImpactCalculator:
     # TEF reflects how often an industry is targeted by threat actors,
     # independent of the organisation's security posture (Vulnerability).
     # Range: 0.80-1.45 (deliberately modest to avoid probability inflation).
-    # Sources: Verizon DBIR 2025, IBM 2025, Sophos SA 2025, SABRIC 2024.
+    # Sources: Verizon DBIR 2025, IBM 2025, Sophos SA 2025, SABRIC 2024,
+    # Check Point SA 2025 (sector attack-volume telemetry).
+    # FIN-9 (2026-06-03) SA-telemetry tilt: Check Point SA ranks Government #1
+    # (3,480 attacks/org/wk) and Communications #2 (1,062/wk) - both were under-
+    # weighted vs the global DBIR order. Gov/Public Sector 1.35 -> 1.45 (TIE with
+    # FS, NOT above: attack VOLUME != loss-event frequency, and inverting the
+    # global FS-#1 order is EXPERT-gated); Communications 1.05 -> 1.25; Consumer
+    # 0.95 -> 1.10 (SA top-3 consumer goods). FS HELD 1.45 (in 1.30-1.45 band;
+    # trimming would couple into the phishield headline p_breach). Healthcare
+    # HELD 1.40 (global #2 cost but thin SA attack data - colleague to confirm a
+    # possible trim to 1.20-1.35). TEF is a RELATIVE tilt; the absolute p_breach
+    # level is set by the 0.3 LEF constant (calibrated separately, doc 01).
     # Tuneable via FAIR parameters doc Section 12.
     # ------------------------------------------------------------------
     THREAT_EVENT_FREQUENCY = {
         "Financial Services": 1.45, "Finance": 1.45,
         "Healthcare": 1.40,
-        "Public Sector": 1.35, "Government": 1.35,
+        "Public Sector": 1.45, "Government": 1.45,
         "Retail": 1.25,
         "Hospitality": 1.20,
         "Manufacturing": 1.15, "Industrial": 1.15, "Industrial / Manufacturing": 1.15,
@@ -1848,9 +1779,9 @@ class FinancialImpactCalculator:
         "Energy": 1.10,
         "Education": 1.10, "Research": 0.90,
         "Services": 1.05, "Legal": 1.05,
-        "Communications": 1.05,
+        "Communications": 1.25,
         "Media": 1.00, "Entertainment": 1.00, "Pharmaceuticals": 1.00,
-        "Transportation": 0.95, "Consumer": 0.95,
+        "Transportation": 0.95, "Consumer": 1.10,
         "Mining": 0.90,
         "Wholesale Trade": 0.85,
         "Agriculture": 0.80,
@@ -2035,14 +1966,18 @@ class FinancialImpactCalculator:
         # (see GAP-008). TEF is a separate, modest factor based on actual
         # breach frequency data (Verizon DBIR, IBM, Sophos, SABRIC).
         overall_score = categories.get("_overall_score", 500)
-        # `_overall_score` is the 0-1000 overall RISK score (higher = worse), wired in
-        # at scanner.py. Map it so vulnerability RISES with risk. The previous formula
-        # `(100 - score/10)/100` assumed a posture/security score (higher = better) — the
-        # opposite polarity — so once Wave 1 coupled the real risk score a well-postured
-        # org scored a HIGHER p_breach. This linear map is a CORRECTNESS placeholder; the
-        # curve shape (e.g. convex) and the 0.3 constant below are the FIN-9 calibration
-        # decision (see docs/CALIBRATION_PREP.md §0.1). Default 500 -> 0.5 (unchanged).
-        vulnerability = min(1.0, max(0.0, overall_score / 1000))  # 0.0 (no risk) -> 1.0 (max risk)
+        # `_overall_score` is the 0-1000 overall RISK score (higher = worse), wired in at
+        # scanner.py. vulnerability = P(a threat event succeeds | posture) and must RISE
+        # with the risk score. CONVEX map (s/1000)^k, k=1.8 (FIN-9 calibration): a Low-
+        # posture org is genuinely safe; risk accelerates only toward Critical. Anchors:
+        # SecurityScorecard A->F breach-likelihood ladder 1.0->13.8x (steeply convex);
+        # BitSight/Marsh absolutes (>=700 rating <1%, <500 ~3%); Cyentia IRIS SMB loss-
+        # event <2%/yr. With the 0.3 scalar below: 169(Low)->1.8%, 300(Med)->5.0%,
+        # 450(High)->10.3%, 650(Crit)->20%, worst->36% (TEF=1.45). Bands: k in [1.5,2.0],
+        # 0.3 in [0.20,0.35]. COLLEAGUE-GATED: the absolute SME loss-event base rate
+        # (~1-3%) is triangulated, not firm; confirm we underwrite to loss-event vs
+        # material-incident (docs/calibration_prep/01_p_breach_core.md). 500 -> vuln 0.287.
+        vulnerability = (min(1000.0, max(0.0, overall_score)) / 1000.0) ** 1.8  # convex (s/1000)^k, k=1.8
 
         # ── Supply-chain vulnerability uplifts ──
         # The overall_score already absorbs some supply-chain signal via the
@@ -2271,13 +2206,32 @@ class FinancialImpactCalculator:
         # POPIA: Administrative fine under Section 109 - statutory ceiling R10M.
         # Section 109(3) factors (nature, duration, extent, number of subjects,
         # public importance, prevention, risk assessment, prior offences) govern
-        # the actual amount imposed. The 2%-of-turnover figure used here is an
-        # internal capacity-scaling heuristic, NOT a statutory formula -
-        # POPIA does not specify a percentage-based trigger. Section 107 (the
-        # previous reference) is criminal penalties (court-imposed, post-conviction).
+        # the actual amount imposed; POPIA specifies no percentage-based trigger.
+        # Section 107 is criminal penalties (court-imposed, post-conviction).
+        #
+        # EXPECTED (P50) fine - enforcement-anchored expected value (FIN-9,
+        # 2026-06-03). POPIA's entire enforcement record is TWO administrative
+        # fines, both R5M, both public-sector, both for non-compliance with an
+        # enforcement notice (not the breach itself), ZERO private-commercial.
+        # So model E[fine] = P(fine|breach) x E[fine|fine], anchored to that
+        # record, instead of the previous unsourced 2%-of-turnover (which over-
+        # priced large firms: rev x 0.02 sent a R500M org to the full R10M
+        # statutory ceiling on the *expected* line - a catastrophe-tier value,
+        # not a P50). Revenue-scaling of regulatory risk still lives in the
+        # catastrophe tier (capacity_factor below) and in C1 liability.
+        #   RECORD-ANCHORED (not colleague-gated): POPIA's entire administrative-
+        #   fine record is two s109 fines - DoJ (2023) and DBE (2024), R5M each,
+        #   both public-sector, both recalcitrance-driven (failure to comply with
+        #   an enforcement notice), ZERO private-commercial. So E[fine|fine] = R5M
+        #   (both actual fines) and P(fine|breach) = 0.02, anchored to that record
+        #   (0 private fines to date; recalcitrance-driven enforcement). E[fine] =
+        #   0.02 x R5M = R100k expected. Range R100k-R250k.
         # For catastrophe-view modelling the full R10M statutory ceiling is used.
-        c2_popia = min(10_000_000, annual_revenue_zar * 0.02)
-        c2_popia_statutory_max = 10_000_000  # used by cat-view modelling
+        POPIA_P_FINE_GIVEN_BREACH = 0.02      # record-anchored (DoJ-2023 / DBE-2024; 0 private fines to date)
+        POPIA_E_FINE_GIVEN_FINE = 5_000_000   # both actual s109 fines were R5M
+        c2_popia_statutory_max = 10_000_000   # s109 ceiling; used by cat-view modelling
+        c2_popia = min(c2_popia_statutory_max,
+                       POPIA_P_FINE_GIVEN_BREACH * POPIA_E_FINE_GIVEN_FINE)
 
         # GDPR: 4% of global turnover, uncapped (if EU data processed)
         c2_gdpr = annual_revenue_zar * 0.04 if reg_flags.get("gdpr") else 0
@@ -2417,6 +2371,18 @@ class FinancialImpactCalculator:
         # ── Split ratios ──
         R = self.INCIDENT_SPLIT_RATIOS
 
+        # ── FAIR-restore (SANDBOX PROTOTYPE, finding #6 - NOT shipped) ──
+        # Ransomware legs used rsi_score directly as a frequency (an index, not
+        # TEF x Vulnerability), running ~8x the breach LEF. Recast as a proper
+        # FAIR annual loss-event frequency p_ransomware = rsi_score x RW_LEF,
+        # partitioned across the 3 ransomware types by their conditional shares
+        # (so the legs sum to p_ransomware). rsi_score already carries a modest
+        # industry/size tilt, so NO extra TEF (avoids double-counting targeting).
+        # RW_LEF reuses the breach 0.3 LEF constant (colleague-gated lever).
+        RW_LEF = 0.30
+        _rw_share_sum = R["double_extortion"] + R["ransomware_only"] + R["wiper_destructive"]
+        rsi_freq = rsi_score * RW_LEF / _rw_share_sum
+
         # ── Incident Type Definitions ──
         # Each incident type assembles a subset of C1-C5 with its own
         # probability driver. C3 uses SA_AVG_DOWNTIME × IMPACT_FACTOR × BI_factor
@@ -2426,7 +2392,7 @@ class FinancialImpactCalculator:
         incidents = {}
 
         # 1. Double extortion ransomware: exfiltration + encryption + demand
-        p_dbl = rsi_score * R["double_extortion"]
+        p_dbl = rsi_freq * R["double_extortion"]
         cost_dbl = c1_liability + c2_regulatory_fine + c3_bi + c4_ransom + c5_ir
         incidents["double_extortion"] = {
             "label": "Double Extortion Ransomware",
@@ -2440,7 +2406,7 @@ class FinancialImpactCalculator:
 
         # 2. Ransomware (no exfiltration): encryption + demand, no data stolen
         #    No C1 (no data exfiltrated, no third-party liability)
-        p_rw = rsi_score * R["ransomware_only"]
+        p_rw = rsi_freq * R["ransomware_only"]
         cost_rw = c3_bi + c4_ransom + c5_ir
         incidents["ransomware_only"] = {
             "label": "Ransomware (No Exfiltration)",
@@ -2452,7 +2418,7 @@ class FinancialImpactCalculator:
         }
 
         # 3. Destructive attack (wiper): no ransom, severe downtime, IR only
-        p_wiper = rsi_score * R["wiper_destructive"]
+        p_wiper = rsi_freq * R["wiper_destructive"]
         cost_wiper = c3_bi + c5_ir
         incidents["wiper_destructive"] = {
             "label": "Destructive Attack (Wiper)",
@@ -2559,6 +2525,7 @@ class FinancialImpactCalculator:
 
         # Probability driver samples
         mc_rsi = np.clip(self._pert_sample(rsi_score * 0.5, rsi_score, min(1.0, rsi_score * 2.0), N), 0, 1)
+        mc_rsi_freq = np.clip(mc_rsi * RW_LEF / _rw_share_sum, 0, 1)  # FAIR-restore (finding #6, sandbox)
         mc_p_breach = np.clip(self._pert_sample(p_breach * 0.5, p_breach, min(1.0, p_breach * 2.0), N), 0, 1)
         mc_p_int = np.clip(self._pert_sample(p_interruption * 0.3, p_interruption, min(0.8, p_interruption * 3.0), N), 0, 1)
 
@@ -2586,12 +2553,31 @@ class FinancialImpactCalculator:
         mc_c4 = mc_total_base * C4_PROPORTION  # Ransom NOT industry-scaled
         mc_c5 = self._pert_sample(c5_ir * 0.5, c5_ir, c5_ir * 2.5, N)
 
-        # C3: downtime sampled with SA empirical PERT(3, 25, 120) days
-        mc_dt = self._pert_sample(3, SA_AVG_DOWNTIME, 120, N)
+        # C3: downtime sampled with SA empirical PERT(2, 14, 90) days (FIN-9
+        # cat re-anchor): mode 14 = good-IR / Sophos Rapid Response ~2 weeks,
+        # mean ~24.7 = Coveware / IBM 2025 average ~24 days, max 90 = insurance
+        # indemnity-period cap. The central c3_bi above keeps SA_AVG_DOWNTIME=25
+        # (= the new mean, 24.7) so the analytical most-likely is unchanged.
+        mc_dt = self._pert_sample(2, 14, 90, N)
         mc_c3_full = mc_dt * daily_revenue * IMPACT_FACTOR * bi_factor
 
-        # C1: residual (clamped to >= 0)
-        mc_c1 = np.maximum(0, mc_total_breach - mc_c2 - mc_c3_full - mc_c4 - mc_c5)
+        # C1 (catastrophe view): records-driven stand-alone liability, floored
+        # at the central IBM residual (FIN-9 cat redesign). A realised cat breach
+        # exposes ~100% of the records held (Yahoo / Capital One / Marriott /
+        # Optus all lost the full historical DB), so cat-C1 scales with the record
+        # count, NOT as the IBM-anchor residual. Per-record R90 is the
+        # international class-action settlement anchor (Anthem ~R27, Capital One
+        # ~R33, Equifax ~R53 per affected person + legal / credit-monitoring load)
+        # - i.e. the settlement evidence itself, ~5.5% of the IBM all-in per-record
+        # cost, not a modelled fraction of it. lognormal(0, 0.25) is the per-record
+        # cat heavy tail (median = R90). records_held = estimated_records, the
+        # revenue/divisor model estimate (a future client-override field will
+        # supply total records held incl. historical). The np.maximum floor keeps
+        # the old IBM residual for small orgs, where it dominates the records term.
+        records_held = estimated_records
+        residual_floor = np.maximum(0, mc_total_breach - mc_c2 - mc_c3_full - mc_c4 - mc_c5)
+        mc_c1 = np.maximum(records_held * 90.0 * np.random.lognormal(0, 0.25, N),
+                           residual_floor)
 
         # Per-iteration totals for each reporting category (4 categories)
         mc_breach_total = np.zeros(N)
@@ -2600,20 +2586,20 @@ class FinancialImpactCalculator:
         mc_bi_total = np.zeros(N)
 
         # 1. Double extortion ransomware (C1+C2+C3+C4+C5)
-        mc_p = mc_rsi * R["double_extortion"]
+        mc_p = mc_rsi_freq * R["double_extortion"]
         mc_breach_total += mc_p * (mc_c1 + mc_c2)
         mc_ransom_demand_total += mc_p * mc_c4
         mc_detection_total += mc_p * mc_c5
         mc_bi_total += mc_p * mc_c3_full
 
         # 2. Ransomware (no exfiltration) (C3+C4+C5)
-        mc_p = mc_rsi * R["ransomware_only"]
+        mc_p = mc_rsi_freq * R["ransomware_only"]
         mc_ransom_demand_total += mc_p * mc_c4
         mc_detection_total += mc_p * mc_c5
         mc_bi_total += mc_p * mc_c3_full
 
         # 3. Wiper / destructive (C3+C5)
-        mc_p = mc_rsi * R["wiper_destructive"]
+        mc_p = mc_rsi_freq * R["wiper_destructive"]
         mc_detection_total += mc_p * mc_c5
         mc_bi_total += mc_p * mc_c3_full
 
@@ -2648,6 +2634,75 @@ class FinancialImpactCalculator:
 
         # Total and per-category stats
         mc_total = mc_breach_total + mc_detection_total + mc_ransom_demand_total + mc_bi_total
+
+        # --- Compound (loss-given-event) aggregation for the catastrophe tail ---
+        # The four per-category accumulators above are PROBABILITY-WEIGHTED (each
+        # scenario contributes p_scenario x severity) - correct for the EXPECTED /
+        # most-likely card, wrong for the return-period tail. A prob-weighted P99.6
+        # scales with p_breach, so improving posture mechanically COLLAPSES the
+        # 1-in-250 cat view - the opposite of how catastrophe cover behaves. A cat
+        # event is a REALISED severe year and its severity is posture-independent
+        # (posture moves the FREQUENCY, not the loss-given-event).
+        #
+        # So the return periods are computed from a separate COMPOUND distribution:
+        # each scenario either occurs this simulated year (a Bernoulli draw against
+        # its per-iteration probability) or not, and on occurrence the FULL scenario
+        # severity is realised (not p x severity). The compound MEAN equals the
+        # prob-weighted expected loss (E[1{u<p} x s] = E[p x s]), so the expected /
+        # most-likely card is preserved exactly; only the tail percentiles change.
+        # The central / median / CI stats and every per-category breakdown keep
+        # using the prob-weighted arrays above. Draws are placed after every
+        # prob-weighted draw so those arrays are unchanged. Aggregation choice +
+        # proof: docs/calibration_prep/05_tail_pareto.md, _proto_compound_tail.py.
+        mc_compound_total = np.zeros(N)
+        for _p_occ, _sev in (
+            (mc_rsi_freq * R["double_extortion"],         (mc_c1 + mc_c2) + mc_c4 + mc_c5 + mc_c3_full),
+            (mc_rsi_freq * R["ransomware_only"],           mc_c4 + mc_c5 + mc_c3_full),
+            (mc_rsi_freq * R["wiper_destructive"],         mc_c5 + mc_c3_full),
+            (mc_p_breach * R["silent_breach"],        (mc_c1 + mc_c2) + mc_c5 * 0.60 + mc_c3_silent),
+            (mc_p_breach * R["data_extortion"],       (mc_c1 + mc_c2) + mc_c4 * 0.40 + mc_c5 + mc_c3_extort),
+            (mc_p_breach * R["opportunistic_breach"], (mc_c1 * 0.50 + mc_c2) + mc_c5 * 0.40 + mc_c3_opp),
+            (mc_p_int,                                mc_c3_ddos),
+        ):
+            _occurs = np.random.random(N) < _p_occ
+            mc_compound_total += np.where(_occurs, _sev, 0.0)
+
+        # Severity-PML (posture-independent cover view): the loss distribution
+        # of a single severe (double-extortion full-stack) event. Severities do
+        # NOT depend on the risk score, so these return periods are FLAT across
+        # posture - a realised catastrophe is severe regardless of how likely it
+        # was. Frequency is reported separately (breach / cyber-incident
+        # probability). These are severity percentiles CONDITIONAL on a severe
+        # breach, NOT literal annual-frequency return periods.
+        mc_pml_severity = mc_c1 + mc_c2 + mc_c4 + mc_c5 + mc_c3_full
+
+        # Systemic supply-chain catastrophe exposure - DISCLOSURE ONLY (not a loss
+        # contribution). FIN-9's Pareto-mixture severity widening was RETIRED:
+        # supply-chain severity is already inside the records-driven cat-C1 (a
+        # supplier-vectored breach still exposes the insured's record base), and the
+        # supply-chain SIGNAL moves PROBABILITY via supply_chain_vulnerability_uplift
+        # - one signal, one channel. A correlated SYSTEMIC SC catastrophe (many
+        # insureds compromised through one shared vendor, e.g. MOVEit 2023) is a
+        # portfolio accumulation risk disclosed here and managed at portfolio level,
+        # not priced into a single insured's loss number (mirrors the SA Covid-19
+        # business-interruption precedent: disclose correlated systemic loss rather
+        # than model it per policy).
+        systemic_supply_chain_exposure = {
+            "modelled_as_loss": False,
+            "channel": "disclosure",
+            "basis": (
+                "Supply-chain severity is captured in the records-driven "
+                "catastrophe C1 (a supplier-vectored breach still exposes the "
+                "insured's record base) and the supply-chain signal raises "
+                "p_breach via supply_chain_vulnerability_uplift (one signal, one "
+                "channel). A correlated SYSTEMIC supply-chain catastrophe - many "
+                "insureds compromised through a single shared vendor (MOVEit 2023 "
+                "class) - is a portfolio accumulation risk disclosed here and "
+                "managed at portfolio level, not modelled as an individual "
+                "insured's loss (SA Covid-19 BI precedent: disclose correlated "
+                "systemic loss rather than price it per policy)."
+            ),
+        }
 
         # ── Scan-coverage uncertainty loading (WAF blind-spot) ──
         # When a WAF / bot-manager blocked the scan, the path-prober checkers
@@ -2688,6 +2743,17 @@ class FinancialImpactCalculator:
                 mc_breach_total = np.where(mc_breach_total > med_b,
                                            med_b + (mc_breach_total - med_b) * infl,
                                            mc_breach_total)
+                # Compound tail feeds the return periods; widen it identically so
+                # a WAF-blinded scan still loads the 1-in-100/200/250 rows.
+                med_c = float(np.median(mc_compound_total))
+                mc_compound_total = np.where(mc_compound_total > med_c,
+                                             med_c + (mc_compound_total - med_c) * infl,
+                                             mc_compound_total)
+                # PML severity feeds the return periods; widen it identically.
+                med_p = float(np.median(mc_pml_severity))
+                mc_pml_severity = np.where(mc_pml_severity > med_p,
+                                           med_p + (mc_pml_severity - med_p) * infl,
+                                           mc_pml_severity)
                 cov_adj = {
                     "applied": True,
                     "waf_kind": _waf_st.get("kind"),
@@ -2744,6 +2810,8 @@ class FinancialImpactCalculator:
 
         mc_stats = self._mc_percentiles(mc_total)
         mc_breach_stats = self._mc_percentiles(mc_breach_total)
+        mc_compound_stats = self._mc_percentiles(mc_compound_total)
+        mc_pml_stats = self._mc_percentiles(mc_pml_severity)
         if cov_adj.get("applied"):
             # Catastrophe-only loading: restore mode + downside/central
             # percentiles (P5/P25/P50) from the pre-widening distribution so
@@ -2803,6 +2871,19 @@ class FinancialImpactCalculator:
             fin_score = 70
         else:
             fin_score = 90
+
+        # --- Probability cards (reporting-only FAIR frequency view; item #17) ---
+        # Ransomware annual frequency = the three ransomware legs summed =
+        # rsi_score x RW_LEF (RW_LEF 0.30, already in the model). Total cyber-
+        # incident combines the breach + ransomware channels as an independent
+        # union. p_interruption stays the SEPARATE indicative availability
+        # indicator (NOT FAIR-treated this pass). No scoring contribution.
+        p_ransomware = min(1.0, max(0.0, rsi_score * 0.30))
+        p_cyber_incident = 1.0 - (1.0 - p_breach) * (1.0 - p_ransomware)
+        _breach_pct = p_breach * 100.0
+        _cyber_pct = p_cyber_incident * 100.0
+        _breach_grade = _grade_probability(_breach_pct, _BREACH_PROB_BANDS)
+        _cyber_grade = _grade_probability(_cyber_pct, _CYBER_INCIDENT_BANDS)
 
         output = {
             "currency": "ZAR",
@@ -2931,6 +3012,87 @@ class FinancialImpactCalculator:
                 "p_breach": round(p_breach, 4),
                 "formula": "p_breach = vulnerability × TEF × 0.3",
             },
+            # --- Cyber-risk probability cards (reporting-only; item #17) ---
+            # New presentation of already-scored signals; NO scoring weight
+            # (one-of-four anchoring channel = reporting-only, no double-count).
+            # THREE distinct annual-likelihood concepts, each with its own
+            # definition and segregated grading band - never conflate them.
+            "risk_probability": {
+                "_note": (
+                    "Reporting-only FAIR loss-event-frequency view. Three "
+                    "distinct annual-likelihood concepts with segregated bands. "
+                    "No scoring weight - new view of already-scored signals."
+                ),
+                "data_breach": {
+                    "label": "Data-breach probability (annual)",
+                    "definition": (
+                        "Annual likelihood of a data breach - confidentiality "
+                        "loss / exfiltration of sensitive records. FAIR loss-"
+                        "event frequency p_breach = vulnerability x TEF x 0.30."
+                    ),
+                    "probability": round(p_breach, 4),
+                    "probability_pct": round(_breach_pct, 2),
+                    "grade": _breach_grade,
+                    "bands": [
+                        {"upper_pct": 1, "grade": "Strong"},
+                        {"upper_pct": 2, "grade": "Good"},
+                        {"upper_pct": 3, "grade": "Typical"},
+                        {"upper_pct": 6, "grade": "Elevated"},
+                        {"upper_pct": 12, "grade": "High"},
+                        {"upper_pct": None, "grade": "Critical"},
+                    ],
+                    "band_anchor": (
+                        "Firm public breach-rate anchors: Cyentia IRIS (SMB "
+                        "material breach <2%/yr), BitSight, SecurityScorecard."
+                    ),
+                },
+                "cyber_incident": {
+                    "label": "Total cyber-incident probability (annual)",
+                    "definition": (
+                        "Annual likelihood of ANY modelled cyber incident - "
+                        "nested ABOVE the data-breach figure and always >= it. "
+                        "Independent union of the breach and ransomware channels: "
+                        "1 - (1 - p_breach) * (1 - rsi_score x 0.30)."
+                    ),
+                    "probability": round(p_cyber_incident, 4),
+                    "probability_pct": round(_cyber_pct, 2),
+                    "grade": _cyber_grade,
+                    "channels": {
+                        "data_breach": round(p_breach, 4),
+                        "ransomware": round(p_ransomware, 4),
+                    },
+                    "bands": [
+                        {"upper_pct": 5, "grade": "Low"},
+                        {"upper_pct": 15, "grade": "Typical"},
+                        {"upper_pct": 30, "grade": "Elevated"},
+                        {"upper_pct": None, "grade": "High"},
+                    ],
+                    "band_anchor": (
+                        "PROVISIONAL multi-channel bands (not yet firm-anchored). "
+                        "The breach band is deliberately NOT reused - that "
+                        "mislabels a typical multi-channel rate as 'High'."
+                    ),
+                },
+                "availability_resilience": {
+                    "label": "Availability resilience indicator (INDICATIVE)",
+                    "definition": (
+                        "Indicative resilience signal for outage / availability "
+                        "risk spanning DDoS and system / infrastructure-failure "
+                        "causes. Describes the RISK only - it is NOT a coverage "
+                        "statement (outage / system-failure cover varies by "
+                        "policy and over time). Heuristic; NOT a calibrated "
+                        "probability."
+                    ),
+                    "indicator": round(p_interruption, 4),
+                    "indicator_pct": round(p_interruption * 100, 1),
+                    "calibrated": False,
+                    "basis": (
+                        "Heuristic over WAF / CDN / single-ASN / DNSBL "
+                        "availability signals. Indicative-only pending FAIR "
+                        "re-anchoring (deferred)."
+                    ),
+                },
+            },
             "regulatory_exposure": {
                 "flags": reg_flags,
                 "c2_popia": round(c2_popia),
@@ -2976,6 +3138,8 @@ class FinancialImpactCalculator:
                 "iterations": N,
                 "method": "PERT distribution (lambda=4), incident-type decomposition",
                 "total": mc_stats,
+                "compound_total": mc_compound_stats,
+                "severity_pml": mc_pml_stats,
                 "confidence_interval_90": {
                     "lower": mc_stats["p5"],
                     "upper": mc_stats["p95"],
@@ -2995,6 +3159,13 @@ class FinancialImpactCalculator:
             # supplier findings. FAIS audit trail — surfaces the numeric basis
             # for the widened tail.
             "supply_chain_tail_adjustment": sc_tail_adj,
+            # Systemic supply-chain catastrophe exposure - DISCLOSURE ONLY
+            # (modelled_as_loss=False). FIN-9's Pareto-mixture severity widening
+            # was retired: SC severity lives in the records-driven cat-C1 and the
+            # SC signal moves p_breach via supply_chain_vulnerability_uplift (one
+            # signal, one channel). Correlated systemic SC catastrophe is a
+            # portfolio accumulation risk disclosed here, not priced per insured.
+            "systemic_supply_chain_exposure": systemic_supply_chain_exposure,
             # Supply-chain vulnerability uplift applied to p_breach (S-1, S-2,
             # S-5). Visible in audit trail; 0.0 when no triggers fired.
             "supply_chain_vulnerability_uplift": {
@@ -3005,10 +3176,29 @@ class FinancialImpactCalculator:
             # P99/P99.5/P99.6 correspond to 1-in-100 / 1-in-200 / 1-in-250 year
             # exceedance probabilities. At N=10,000 the P99.6 sample count is
             # ~40 - treat as indicative until B3 raises iterations.
+            # Return periods are the SEVERITY of a single severe (double-extortion
+            # full-stack) event - a PML / cover-sizing view. Severities are
+            # posture-independent, so these are FLAT across the risk score: a
+            # realised catastrophe is severe regardless of how likely it was. The
+            # annual frequency is reported separately (breach / cyber-incident
+            # probability outputs). NOTE: these are severity percentiles
+            # CONDITIONAL on a severe breach, NOT literal annual-frequency return
+            # periods - the percentile labels describe the severity tier.
             "return_periods": {
-                "1_in_100": {"loss_zar": mc_stats["p99"],   "exceedance_prob": 0.01,  "percentile": "P99"},
-                "1_in_200": {"loss_zar": mc_stats["p99_5"], "exceedance_prob": 0.005, "percentile": "P99.5"},
-                "1_in_250": {"loss_zar": mc_stats["p99_6"], "exceedance_prob": 0.004, "percentile": "P99.6"},
+                "1_in_100": {"loss_zar": mc_pml_stats["p99"],   "exceedance_prob": 0.01,  "percentile": "P99"},
+                "1_in_200": {"loss_zar": mc_pml_stats["p99_5"], "exceedance_prob": 0.005, "percentile": "P99.5"},
+                "1_in_250": {"loss_zar": mc_pml_stats["p99_6"], "exceedance_prob": 0.004, "percentile": "P99.6"},
+                "basis": "severity-PML (single severe event); posture-independent; conditional on a severe breach, not an annual frequency",
+            },
+            # Cover-sizing ladder - the USEFUL spread of the severity-PML
+            # (P50/P95/P99). The top percentiles (P99/P99.5/P99.6 in
+            # return_periods) compress to within ~7%, so the laddered tiers
+            # below give meaningful cover bands. Posture-independent.
+            "cover_ladder": {
+                "typical_severe": {"loss_zar": mc_pml_stats["p50"], "label": "Typical severe breach (P50 severity)"},
+                "bad":            {"loss_zar": mc_pml_stats["p95"], "label": "Bad breach (P95 severity)"},
+                "catastrophic":   {"loss_zar": mc_pml_stats["p99_6"], "label": "Catastrophic breach (1-in-250 / P99.6 severity)"},
+                "basis": "single-severe-event severity percentiles; cover-sizing tiers; posture-independent",
             },
             # Loss exposure scenarios — informational presentation for broker
             # / client cover-sizing decision. Phishield does not recommend a
@@ -3018,9 +3208,9 @@ class FinancialImpactCalculator:
                 "scenarios": {
                     "most_likely":  {"loss_zar": mc_stats["mode"],  "label": "Most likely (mode)", "annual_prob": None},
                     "median":       {"loss_zar": mc_stats["p50"],   "label": "Median (P50)",      "annual_prob": 0.50},
-                    "return_1_100": {"loss_zar": mc_stats["p99"],   "label": "1-in-100 event",     "annual_prob": 0.01},
-                    "return_1_200": {"loss_zar": mc_stats["p99_5"], "label": "1-in-200 event",     "annual_prob": 0.005},
-                    "return_1_250": {"loss_zar": mc_stats["p99_6"], "label": "1-in-250 event",     "annual_prob": 0.004},
+                    "return_1_100": {"loss_zar": mc_pml_stats["p99"],   "label": "Severe event (P99 severity)",   "annual_prob": None},
+                    "return_1_200": {"loss_zar": mc_pml_stats["p99_5"], "label": "Extreme event (P99.5 severity)", "annual_prob": None},
+                    "return_1_250": {"loss_zar": mc_pml_stats["p99_6"], "label": "Catastrophic (P99.6 severity)",  "annual_prob": None},
                 },
                 "disclaimer": (
                     "Figures presented are statistical model output and exclude civil liability "
@@ -3078,6 +3268,12 @@ class FinancialImpactCalculator:
         {"pattern": r"high.severity CVE|high CVE",            "severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.04, "label": "Patch high-severity CVEs within 30 days"},
         {"pattern": r"No WAF detected",                       "severity": "High",     "scenario": "both",                   "rsi_reduction": 0.05, "bi_reduction": 0.05, "label": "Deploy a Web Application Firewall (WAF)"},
         {"pattern": r"No SPF record|No DMARC record",         "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Implement email authentication (SPF/DMARC/DKIM)"},
+        # DMARC published but NOT enforcing (p=none): the primary anti-spoofing
+        # control is in monitor-only mode (BEC vector). probability_reduction
+        # CONSERVATIVE + CALIBRATION-GATED - half the full-absence rung (0.08),
+        # double the SPF-qualifier rung (0.02); CISA BOD 18-01 / NIST SP 800-177
+        # / M3AAWG target p=reject. Unconditional (nothing above DMARC moots it).
+        {"pattern": r"DMARC policy is 'none'",                "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.04, "label": "Enforce DMARC (move policy from p=none to quarantine or reject)"},
         {"pattern": r"password.*leaked|Plaintext.*password",   "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Force password resets for all leaked credentials"},
         {"pattern": r"credential record.*found in Dehashed",  "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.06, "label": "Audit and rotate credentials exposed in data leaks"},
         {"pattern": r"admin.*exposed|login.*exposed",          "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.04, "label": "Restrict access to admin and login panels"},
@@ -3096,6 +3292,10 @@ class FinancialImpactCalculator:
         {"pattern": r"single ASN|unique_asns.*1",              "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.05, "label": "Add hosting redundancy across multiple providers"},
         {"pattern": r"No VPN.*detected",                       "severity": "Medium",   "scenario": "ransomware",             "rsi_reduction": 0.03, "label": "Implement VPN or Zero Trust Network Access for remote workers"},
         {"pattern": r"No DKIM",                                "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Enable DKIM signing on your mail server"},
+        # SPF present but non-enforcing (~all/?all) with no enforcing DMARC -
+        # harden to -all. probability_reduction CONSERVATIVE + CALIBRATION-GATED
+        # (anchored to the secondary email-hardening rung; tune at calibration).
+        {"pattern": r"SPF ends with '[~?]all'",          "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Harden SPF to a hard-fail policy ('-all')"},
         {"pattern": r"No CDN detected",                        "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.03, "label": "Deploy a CDN for DDoS resilience and availability"},
     ]
 
@@ -3211,7 +3411,38 @@ class FinancialImpactCalculator:
                 summary[key]["count"] += 1
                 summary[key]["total_savings_zar"] += f["estimated_annual_savings_zar"]
 
+        # --- Remediation re-portrayal (reporting-only; item #17) ---
+        # Lead with breach-probability/grade movement + %-exposure reduction +
+        # the (severity-driven, posture-INDEPENDENT) catastrophe cover figure.
+        # Breach-family savings reduce breach-family loss proportionally, and
+        # breach-family loss scales linearly with p_breach, so the fractional
+        # breach-loss reduction maps directly to a p_breach (frequency) movement.
+        _breach_savings = sum(f["estimated_annual_savings_zar"] for f in findings
+                              if f.get("scenario_impact") == "data_breach")
+        _breach_red_frac = (min(0.85, _breach_savings / breach_family_loss)
+                            if breach_family_loss > 0 else 0.0)
+        _breach_after = p_breach * (1.0 - _breach_red_frac)
+        _cover_ladder = fin_output.get("cover_ladder", {}) or {}
+        _cat_cover = (_cover_ladder.get("catastrophic", {}) or {}).get("loss_zar", 0)
+        remediation_summary = {
+            "breach_probability_before": round(p_breach, 4),
+            "breach_probability_after": round(_breach_after, 4),
+            "breach_probability_before_pct": round(p_breach * 100, 2),
+            "breach_probability_after_pct": round(_breach_after * 100, 2),
+            "breach_grade_before": _grade_probability(p_breach * 100, _BREACH_PROB_BANDS),
+            "breach_grade_after": _grade_probability(_breach_after * 100, _BREACH_PROB_BANDS),
+            "exposure_reduction_pct":
+                round(100.0 * total_savings / current_loss, 1) if current_loss > 0 else 0.0,
+            "catastrophe_cover_zar": _cat_cover,
+            "catastrophe_note": (
+                "The 1-in-250 catastrophe cover requirement is severity-driven "
+                "and posture-independent - remediation lowers the LIKELIHOOD of "
+                "loss, not the worst-case severity, so the cover figure is "
+                "unchanged."
+            ),
+        }
         return {
+            "remediation_summary": remediation_summary,
             "current_annual_loss": current_loss,
             "mitigated_annual_loss": current_loss - total_savings,
             "total_potential_savings": total_savings,

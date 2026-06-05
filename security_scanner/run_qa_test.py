@@ -174,20 +174,20 @@ p(f"Worst company:  RSI {rsi_worst['rsi_score']} ({rsi_worst['risk_label']}) | T
 p(f"\nClean/Worst ratio: {fin_worst['total']['most_likely'] / fin_clean['total']['most_likely']:.1f}x")
 
 # ══════════════════════════════════════════════════════════════
-# TEST 6: Standard FAIR comparison
+# TEST 6: Legacy USD path removed (item 0.2) — zar<=0 falls back to R10M ZAR
 # ══════════════════════════════════════════════════════════════
 p("\n" + "=" * 80)
-p("TEST 6: Standard FAIR (USD) vs Hybrid (ZAR) — R10M Financial Services")
+p("TEST 6: USD path removed — annual_revenue_zar<=0 floors to R10M ZAR model")
 p("=" * 80)
 
-usd_rev = 10_000_000 / 18.02
-rsi_usd = rsi_calc.calculate(cats, industry='Financial Services', annual_revenue=usd_rev)
-fin_usd = calc.calculate(cats, rsi_usd, usd_rev, 'Financial Services', annual_revenue_zar=0)
-usd_total = fin_usd.get('total', {}).get('most_likely', 0)
+fin_zero  = calc.calculate(cats, rsi, 0, 'Financial Services', annual_revenue_zar=0)
+fin_floor = calc.calculate(cats, rsi, 0, 'Financial Services', annual_revenue_zar=10_000_000)
+zero_total  = fin_zero.get('total', {}).get('most_likely', 0)
+floor_total = fin_floor.get('total', {}).get('most_likely', 0)
 
-p(f"\nStandard FAIR (USD):  ${usd_total:,.0f} (R{usd_total*18.02:,.0f} at R18.02)")
-p(f"Hybrid model (ZAR):   R{total:,}")
-p(f"Delta: {((total - usd_total*18.02) / (usd_total*18.02) * 100) if usd_total > 0 else 0:+.1f}%")
+p(f"\nzar=0     -> R{zero_total:,} (currency {fin_zero.get('currency')})")
+p(f"zar=R10M  -> R{floor_total:,} (currency {fin_floor.get('currency')})")
+p(f"Floor fallback: {'OK (identical to explicit R10M)' if zero_total == floor_total else 'MISMATCH'}")
 
 # ══════════════════════════════════════════════════════════════
 # TEST 7: Max p_breach sanity

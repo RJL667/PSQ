@@ -1364,12 +1364,15 @@ def build(doc):
         (
             "Return Period",
             "An actuarial / reinsurance term denoting the average "
-            "interval between events of a given severity. A 1-in-100 "
-            "year event has a 1% annual exceedance probability "
-            "(P99 percentile of the loss distribution); 1-in-200 = "
-            "0.5% (P99.5); 1-in-250 = 0.4% (P99.6). These figures "
-            "are surfaced as Loss Exposure Scenarios for catastrophe "
-            "cover-sizing discussion.",
+            "interval between events of a given severity (a 1-in-100 "
+            "year event classically carries a 1% annual exceedance "
+            "probability). In this report the 1-in-100 / 1-in-200 / "
+            "1-in-250 names are used for the P99 / P99.5 / P99.6 "
+            "SEVERITY tiers - the severity of a single severe event, "
+            "conditional on it occurring and therefore posture-"
+            "independent - NOT literal annual frequencies. They are "
+            "surfaced as the Loss Exposure Scenarios and Cover-Sizing "
+            "Ladder for catastrophe cover-sizing discussion.",
         ),
         (
             "Scan Duration Profile",

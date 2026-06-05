@@ -629,6 +629,52 @@
           <tr><td>Annual Revenue</td><td><strong>R&nbsp;{{ '{:,.0f}'.format(fin.annual_revenue_zar | default(0)) }}</strong></td></tr>
         </table>
 
+        {# Cyber-Risk Probability — reporting-only FAIR frequency view (item #17). #}
+        {# THREE distinct, separately-graded annual-likelihood concepts. #}
+        {% set rp = fin.risk_probability if fin.risk_probability is defined else {} %}
+        {% if rp %}
+        {% set rp_db = rp.data_breach if rp.data_breach is defined else {} %}
+        {% set rp_ci = rp.cyber_incident if rp.cyber_incident is defined else {} %}
+        {% set rp_av = rp.availability_resilience if rp.availability_resilience is defined else {} %}
+        <div style="background:linear-gradient(135deg, rgba(99,102,241,0.08), rgba(99,102,241,0.02));border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:4px;">Cyber-Risk Probability</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+            Modelled annual likelihood of a cyber loss event, shown as three distinct and separately-graded measures. A frequency view of signals already scored elsewhere in this report &mdash; it carries no additional scoring weight.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="background:rgba(99,102,241,0.12);">
+                <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Annual cyber-risk probability</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Likelihood</th>
+                <th style="text-align:center;padding:8px 10px;font-weight:600;color:var(--text);">Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;font-weight:700;color:var(--text);">Total cyber-incident <span style="color:var(--muted);font-weight:400;">(breach + ransomware)</span></td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">{{ '%.1f'|format(rp_ci.probability_pct | default(0)) }}%</td>
+                <td style="padding:8px 10px;text-align:center;">{{ rp_ci.grade | default('—') }}</td>
+              </tr>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px 8px 28px;color:var(--muted);">of which: data breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">{{ '%.2f'|format(rp_db.probability_pct | default(0)) }}%</td>
+                <td style="padding:8px 10px;text-align:center;">{{ rp_db.grade | default('—') }}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 10px;color:var(--muted);">Availability resilience <span style="font-size:.7rem;">(indicative)</span></td>
+                <td style="padding:8px 10px;text-align:right;white-space:nowrap;">{{ '%.0f'|format(rp_av.indicator_pct | default(0)) }}%</td>
+                <td style="padding:8px 10px;text-align:center;color:var(--muted);">Indicative</td>
+              </tr>
+            </tbody>
+          </table>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:10px;line-height:1.55;">
+            <strong style="color:var(--text);">Total cyber-incident probability</strong> &mdash; likelihood of ANY modelled cyber incident, combining the breach and ransomware channels; nests above the data-breach figure (always &ge; it). Provisional bands: &lt;5% Low / 5-15% Typical / 15-30% Elevated / &gt;30% High.<br>
+            <strong style="color:var(--text);">Data-breach probability</strong> &mdash; likelihood specifically of a data breach (record exfiltration). Firm public bands (Cyentia IRIS SMB &lt;2%/yr, BitSight, SecurityScorecard): &lt;1% Strong / 1-2% Good / 2-3% Typical / 3-6% Elevated / 6-12% High / &gt;12% Critical.<br>
+            <strong style="color:var(--text);">Availability resilience indicator</strong> &mdash; an indicative signal of outage / availability risk (DDoS + system / infrastructure failure). Describes the risk only; not a calibrated probability and not a coverage statement.
+          </div>
+        </div>
+        {% endif %}
+
         {# Estimated Annual Loss range #}
         <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Estimated Annual Loss</div>
         <table class="kv-table" style="margin-bottom:14px;">
@@ -702,7 +748,7 @@
                 <td style="padding:8px 10px;color:{{ row_color }};{% if key in ['return_1_100','return_1_200','return_1_250'] %}font-weight:700;{% endif %}">{{ sc_row.label }}</td>
                 <td style="padding:8px 10px;text-align:right;color:{{ row_color }};font-weight:700;white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(sc_row.loss_zar | default(0)) }}</td>
                 <td style="padding:8px 10px;text-align:right;color:var(--muted);">
-                  {% if sc_row.annual_prob is none %}Most likely (peak){% else %}{{ '%.1f'|format(sc_row.annual_prob * 100) if sc_row.annual_prob < 0.01 else '%.0f'|format(sc_row.annual_prob * 100) }}%{% endif %}
+                  {% if sc_row.annual_prob is none %}{% if key == 'most_likely' %}Most likely (peak){% else %}&mdash;{% endif %}{% else %}{{ '%.1f'|format(sc_row.annual_prob * 100) if sc_row.annual_prob < 0.01 else '%.0f'|format(sc_row.annual_prob * 100) }}%{% endif %}
                 </td>
               </tr>
               {% endif %}
@@ -726,6 +772,43 @@
           <div style="font-size:.7rem;color:var(--muted);font-style:italic;margin-top:10px;line-height:1.5;">
             Figures presented are statistical model output. Selection of cover limit is the responsibility of the insured in consultation with the broker. Phishield does not recommend a specific cover amount.
           </div>
+        </div>
+        {% endif %}
+
+        {# Cover-Sizing Ladder — severity-PML tiers (P50/P95/P99.6), posture-independent. Item #17. #}
+        {% set cl = fin.cover_ladder if fin.cover_ladder is defined else {} %}
+        {% if cl %}
+        <div style="background:linear-gradient(135deg, rgba(29,78,216,0.08), rgba(29,78,216,0.02));border:1px solid rgba(29,78,216,0.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:4px;">Cover-Sizing Ladder</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+            The modelled severity of a single severe cyber event across three cover tiers &mdash; the simplified client-facing companion to the Loss Exposure Scenarios above. These are the magnitude of a realised event and do not move with security posture.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="background:rgba(29,78,216,0.15);">
+                <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Cover tier</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Modelled severity</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);">Reference</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;">Typical severe breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(cl.typical_severe.loss_zar | default(0)) }}</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">P50 severity</td>
+              </tr>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;">Bad breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(cl.bad.loss_zar | default(0)) }}</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">P95 severity</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 10px;font-weight:700;color:var(--critical);">Catastrophic breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;color:var(--critical);white-space:nowrap;">R&nbsp;{{ '{:,.0f}'.format(cl.catastrophic.loss_zar | default(0)) }}</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--critical);">1-in-250 / P99.6</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         {% endif %}
 
@@ -773,7 +856,7 @@
           {% endif %}
           <tr style="border-bottom:2px solid var(--border);">
             <td style="font-weight:600;">Bus. Interruption</td>
-            <td>R&nbsp;{{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }} <span style="color:var(--muted);">(P={{ '%.1f'|format((bi.probability | default(0)) * 100) }}%)</span></td>
+            <td>R&nbsp;{{ '{:,.0f}'.format(bi.estimated_loss | default(0)) }} <span style="color:var(--muted);">(indicative outage risk)</span></td>
           </tr>
         </table>
 
@@ -882,7 +965,7 @@
             {% set rw = fin.scenarios.ransomware %}
             <tr><td>Ransomware</td><td>{{ '%.1f'|format((rw.probability | default(0)) * 100) }}%</td><td>{{ cur }}{{ '{:,.0f}'.format(rw.min | default(0)) }}</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(rw.most_likely | default(0)) }}</strong></td><td>{{ cur }}{{ '{:,.0f}'.format(rw.max | default(0)) }}</td></tr>
             {% set bi = fin.scenarios.business_interruption %}
-            <tr><td>Business Interruption</td><td>{{ '%.1f'|format((bi.probability | default(0)) * 100) }}%</td><td>{{ cur }}{{ '{:,.0f}'.format(bi.min | default(0)) }}</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(bi.most_likely | default(0)) }}</strong></td><td>{{ cur }}{{ '{:,.0f}'.format(bi.max | default(0)) }}</td></tr>
+            <tr><td>Business Interruption</td><td>{{ '%.1f'|format((bi.probability | default(0)) * 100) }}% <span style="color:var(--muted);font-size:.85em;">(indicative)</span></td><td>{{ cur }}{{ '{:,.0f}'.format(bi.min | default(0)) }}</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(bi.most_likely | default(0)) }}</strong></td><td>{{ cur }}{{ '{:,.0f}'.format(bi.max | default(0)) }}</td></tr>
             <tr style="border-top:2px solid var(--border);font-weight:700;"><td>Total</td><td></td><td>{{ cur }}{{ '{:,.0f}'.format(fin.total.min) }}</td><td style="color:var(--critical);">{{ cur }}{{ '{:,.0f}'.format(fin.total.most_likely) }}</td><td>{{ cur }}{{ '{:,.0f}'.format(fin.total.max) }}</td></tr>
           </tbody>
         </table>
@@ -891,12 +974,14 @@
         <div style="margin-top:14px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Loss Exposure Scenarios</div>
         {% set mc = fin.monte_carlo if fin.monte_carlo is defined else {} %}
         {% set mc_t = mc.total if mc.total is defined else {} %}
+        {# Catastrophe rows use severity-PML (single severe event), mirroring the ZAR path. #}
+        {% set mc_pml = mc.severity_pml if mc.severity_pml is defined else mc_t %}
         <table class="kv-table" style="margin-top:6px;margin-bottom:8px;">
           <tr><td style="width:220px;">Most Likely (mode)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.mode | default(mc_t.p50 | default(0))) }}</strong></td></tr>
           <tr><td>Median (P50)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p50 | default(0)) }}</strong></td></tr>
-          <tr><td>1-in-100 event (P99)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p99 | default(0)) }}</strong></td></tr>
-          <tr><td>1-in-200 event (P99.5)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p99_5 | default(0)) }}</strong></td></tr>
-          <tr><td>1-in-250 event (P99.6)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_t.p99_6 | default(0)) }}</strong></td></tr>
+          <tr><td>Severe event (P99 severity)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_pml.p99 | default(0)) }}</strong></td></tr>
+          <tr><td>Extreme event (P99.5 severity)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_pml.p99_5 | default(0)) }}</strong></td></tr>
+          <tr><td>Catastrophic event (P99.6 severity, 1-in-250)</td><td><strong>{{ cur }}{{ '{:,.0f}'.format(mc_pml.p99_6 | default(0)) }}</strong></td></tr>
           <tr><td>Suggested Deductible</td><td>{{ cur }}{{ '{:,.0f}'.format(ins.suggested_deductible | default(0)) }}</td></tr>
           <tr><td>Cover Sizing</td><td><span style="color:var(--muted);">See scenarios above</span></td></tr>
         </table>
@@ -921,6 +1006,25 @@
         </div>
       </div>
       <div class="cat-body">
+        {# Re-portrayed lead (item #17): breach-grade movement + %-reduction + posture-independent catastrophe cover. #}
+        {% set rs = mit.remediation_summary if mit.remediation_summary is defined else {} %}
+        {% if rs %}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:10px;margin-bottom:6px;">
+          <div style="padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--low);">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Data-breach likelihood</div>
+            <div style="font-size:.98rem;font-weight:800;margin-top:4px;line-height:1.4;">{{ '%.2f'|format(rs.breach_probability_before_pct | default(0)) }}% <span style="color:var(--muted);font-size:.78rem;font-weight:600;">({{ rs.breach_grade_before }})</span> &rarr; <span style="color:var(--low);">{{ '%.2f'|format(rs.breach_probability_after_pct | default(0)) }}%</span> <span style="color:var(--muted);font-size:.78rem;font-weight:600;">({{ rs.breach_grade_after }})</span></div>
+          </div>
+          <div style="padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Reduction in modelled exposure</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--low);margin-top:4px;">{{ rs.exposure_reduction_pct | default(0) }}%</div>
+          </div>
+          <div style="padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Catastrophe cover (1-in-250)</div>
+            <div style="font-size:1.2rem;font-weight:800;margin-top:4px;">R&nbsp;{{ '{:,.0f}'.format(rs.catastrophe_cover_zar | default(0)) }}</div>
+            <div style="font-size:.66rem;color:var(--muted);margin-top:2px;">Unchanged &mdash; severity-driven</div>
+          </div>
+        </div>
+        {% endif %}
         <!-- Impact summary strip -->
         <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-top:10px;">
           <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;">

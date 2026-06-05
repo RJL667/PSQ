@@ -236,6 +236,23 @@ def build(doc):
     add_bullet(doc, "Prevents attackers from sending email that appears to come from your domain.")
     add_bullet(doc, "Should end with -all (hard fail) rather than ~all (soft fail) for strongest protection.")
     add_bullet(doc, "Overly broad SPF records (such as including large cloud provider IP ranges) weaken protection.")
+    add_bullet(
+        doc,
+        "The scanner scores the SPF qualifier, not merely the record's "
+        "presence. A terminal -all (fail) is the secure target; ~all (soft-"
+        "fail) and ?all (neutral) do not instruct receivers to reject spoofed "
+        "mail (RFC 7208; NIST SP 800-177 Trustworthy Email; M3AAWG). Because a "
+        "DMARC policy of quarantine or reject governs the disposition of "
+        "failing mail regardless of the SPF qualifier, the soft-qualifier "
+        "penalty is applied only when DMARC is not at enforcement - so a "
+        "deliberate ~all paired with an enforcing DMARC policy, a common and "
+        "valid configuration for large senders, is not penalised. A bare all "
+        "is treated as +all (Pass) per RFC 7208. The penalty magnitudes are "
+        "conservative and calibration-gated. Where a non-enforcing soft-fail "
+        "or neutral SPF is found, the report's remediation recommends "
+        "hardening the policy to a terminal -all and includes it in the "
+        "expected-loss mitigation estimate."
+    )
 
     # DKIM
     add_bold_body(
@@ -316,7 +333,9 @@ def build(doc):
         "protection against email spoofing. Attackers actively scan for these "
         "domains and use them in targeted phishing campaigns. Business email "
         "compromise attacks that exploit missing DMARC are among the most "
-        "financially damaging cyber incidents."
+        "financially damaging cyber incidents. The scanner scores a 'none' "
+        "policy as non-enforcing and includes moving it to quarantine or "
+        "reject in the expected-loss remediation estimate."
     )
 
     add_bold_body(

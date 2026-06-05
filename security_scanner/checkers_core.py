@@ -463,17 +463,25 @@ class EmailSecurityChecker:
                     valid = has_all or has_redirect
                     # Count DNS lookups in SPF chain (include, a, mx, redirect, exists)
                     dns_lookups = self._count_spf_lookups(txt, depth=0)
+                    # Capture the `all` qualifier (-/~/?/+). RFC 7208 sec 4.6.2:
+                    # a bare `all` carries the implicit `+` (Pass) qualifier, i.e.
+                    # it is equivalent to `+all` and equally dangerous - map it so
+                    # it is not read as benign.
+                    _allm = re.search(r"(?:^|\s)([-~?+]?)all(?:\s|$)", txt)
+                    all_qualifier = (_allm.group(1) or "+") if _allm else None
                     return {
                         "present": True, "valid": valid, "record": txt,
-                        "dangerous": "+all" in txt,
+                        "all_qualifier": all_qualifier,
+                        "dangerous": all_qualifier == "+",
                         "has_redirect": has_redirect,
                         "dns_lookups": dns_lookups,
                         "exceeds_lookup_limit": dns_lookups > 10,
                     }
         except Exception:
             pass
-        return {"present": False, "valid": False, "record": None, "dangerous": False,
-                "has_redirect": False, "dns_lookups": 0, "exceeds_lookup_limit": False}
+        return {"present": False, "valid": False, "record": None, "all_qualifier": None,
+                "dangerous": False, "has_redirect": False, "dns_lookups": 0,
+                "exceeds_lookup_limit": False}
 
     def _count_spf_lookups(self, spf_record: str, depth: int = 0) -> int:
         """Count DNS lookup mechanisms in SPF chain (max 10 per RFC 7208)."""
@@ -584,6 +592,22 @@ class EmailSecurityChecker:
             score -= 3; issues.append("SPF uses '+all' — allows any server to send on your behalf")
         elif not spf["valid"]:
             score -= 1; issues.append("SPF record may be invalid (no 'all' or 'redirect=' mechanism)")
+        else:
+            # Present + valid + not '+all': the `all` qualifier sets the
+            # enforcement strength. `-all` (fail) is the secure terminal (RFC 7208;
+            # NIST SP 800-177; M3AAWG); `~all` (soft-fail) and `?all` (neutral) do
+            # NOT instruct receivers to reject spoofed mail. A DMARC quarantine/
+            # reject policy governs failing-mail disposition REGARDLESS of the SPF
+            # qualifier, so the soft-qualifier penalty is gated on DMARC NOT being
+            # at enforcement (a deliberate `~all` + enforcing DMARC, common for
+            # large senders, is correct and is not penalised). Magnitudes are
+            # conservative + calibration-gated (they move p_breach).
+            _dmarc_enforcing = dmarc.get("present") and dmarc.get("policy") in ("quarantine", "reject")
+            _qual = spf.get("all_qualifier")
+            if not _dmarc_enforcing and _qual == "?":
+                score -= 2; issues.append("SPF ends with '?all' (neutral) and no enforcing DMARC policy - provides no spoofing protection")
+            elif not _dmarc_enforcing and _qual == "~":
+                score -= 1; issues.append("SPF ends with '~all' (soft-fail) and no enforcing DMARC policy - does not instruct receivers to reject spoofed mail")
         if spf.get("exceeds_lookup_limit"):
             score -= 1; issues.append(f"SPF exceeds 10 DNS lookup limit ({spf['dns_lookups']} lookups) — may cause validation failures")
         # DMARC scoring

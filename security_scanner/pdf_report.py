@@ -2970,7 +2970,7 @@ def cat_financial_impact(d, S):
             ("  POPIA regulatory",    f"{cur}&nbsp;{sc.get('data_breach', {}).get('regulatory_fine', 0):,.0f}"),
             ("Detection & Escalation", f"{cur}&nbsp;{sc4.get('detection_escalation', {}).get('estimated_loss', 0):,.0f}") if sc4 else ("", ""),
             ("Ransom Demand",         f"{cur}&nbsp;{sc4.get('ransom_demand', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})") if sc4 else ("Ransomware Loss", f"{cur}&nbsp;{sc.get('ransomware', {}).get('estimated_loss', 0):,.0f}  (RSI={sc.get('ransomware', {}).get('rsi_score', 0)})"),
-            ("Bus. Interruption",     f"{cur}&nbsp;{sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (P={sc.get('business_interruption', {}).get('probability', 0)})"),
+            ("Bus. Interruption",     f"{cur}&nbsp;{sc.get('business_interruption', {}).get('estimated_loss', 0):,.0f}  (indicative outage risk)"),
             ("",                      ""),
             ("Premium Risk Tier",     ins.get("premium_risk_tier", "N/A")),
             ("Cover Sizing",          "See Loss Exposure Scenarios above"),
@@ -3061,7 +3061,12 @@ def loss_exposure_scenarios_block(d, S):
         loss = sc.get("loss_zar", 0)
         prob = sc.get("annual_prob")
         if prob is None:
-            prob_text = "Most likely (peak)"
+            # Only the mode row is the actual most-likely peak. The catastrophe
+            # rows (return_1_*) are SEVERITY percentiles conditional on a severe
+            # event (post-#15 severity-PML), not annual frequencies - an annual
+            # probability does not apply, so show a dash rather than repeating
+            # "Most likely (peak)" on every catastrophe row.
+            prob_text = "Most likely (peak)" if key == "most_likely" else "\u2014"
         else:
             # Percentage with one-decimal precision for <1% per rule #8
             prob_pct = prob * 100
@@ -3135,6 +3140,156 @@ def loss_exposure_scenarios_block(d, S):
         blocks += [Spacer(1, 2 * mm), Paragraph(cov_txt, S["body_muted"])]
 
     blocks.append(Spacer(1, 3 * mm))
+    return blocks
+
+
+def risk_probability_block(d, S):
+    """Cyber-Risk Probability - reporting-only FAIR frequency view (item #17).
+
+    Surfaces fin["risk_probability"]: THREE distinct, separately-graded annual-
+    likelihood concepts - (1) total cyber-incident probability (nested ABOVE the
+    breach figure), (2) data-breach probability, (3) an INDICATIVE availability
+    resilience indicator. New presentation of already-scored signals (no scoring
+    weight). Mirrors loss_exposure_scenarios_block styling."""
+    fin = d.get("financial_impact", {})
+    if not fin:
+        return []
+    rp = fin.get("risk_probability", {})
+    if not rp:
+        return []
+    db = rp.get("data_breach", {})
+    ci = rp.get("cyber_incident", {})
+    av = rp.get("availability_resilience", {})
+
+    col_widths = [98 * mm, 30 * mm, INNER_W - 98 * mm - 30 * mm]
+    table_data = [
+        ["Annual cyber-risk probability", "Likelihood", "Grade"],
+        ["Total cyber-incident (breach + ransomware)",
+         f"{ci.get('probability_pct', 0):.1f}%", ci.get("grade", "")],
+        ["   of which: data breach",
+         f"{db.get('probability_pct', 0):.2f}%", db.get("grade", "")],
+        ["Availability resilience (indicative)",
+         f"{av.get('indicator_pct', 0):.0f}%", "Indicative"],
+    ]
+    table = Table(table_data, colWidths=col_widths)
+    table.setStyle(TableStyle([
+        ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1), 9),
+        ("BACKGROUND",    (0, 0), (-1, 0),  C_GREY_1),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),  C_NAVY),
+        ("LINEBELOW",     (0, 0), (-1, 0),  1.0, C_NAVY),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN",         (1, 0), (-1, -1), "RIGHT"),
+        ("ALIGN",         (0, 0), (0, -1),  "LEFT"),
+        ("ALIGN",         (2, 0), (2, -1),  "CENTER"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, C_GREY_1]),
+        ("BOX",           (0, 0), (-1, -1), 0.25, C_GREY_2),
+        ("INNERGRID",     (0, 1), (-1, -1), 0.25, C_GREY_2),
+        ("FONTNAME",      (0, 1), (-1, 1),  "Helvetica-Bold"),
+    ]))
+
+    blocks = [
+        Spacer(1, 3 * mm),
+        Paragraph("<b>Cyber-Risk Probability</b>", S["cat_title"]),
+        Spacer(1, 2 * mm),
+        Paragraph(
+            "Modelled annual likelihood of a cyber loss event, shown as three "
+            "distinct and separately-graded measures. This is a frequency view of "
+            "externally-observable signals already scored elsewhere in this report "
+            "and carries no additional scoring weight.",
+            S["body"]),
+        Spacer(1, 2 * mm),
+        table,
+        Spacer(1, 2 * mm),
+        Paragraph(
+            "<b>Total cyber-incident probability</b> - the likelihood of ANY "
+            "modelled cyber incident in the year, combining the data-breach and "
+            "ransomware channels. It nests ABOVE the data-breach figure and is "
+            "always greater than or equal to it. Provisional bands: &lt;5% Low, "
+            "5-15% Typical, 15-30% Elevated, &gt;30% High.",
+            S["body_muted"]),
+        Paragraph(
+            "<b>Data-breach probability</b> - the likelihood specifically of a "
+            "data breach (confidentiality loss / record exfiltration). Graded on "
+            "firm public breach-rate bands (Cyentia IRIS SMB &lt;2%/yr, BitSight, "
+            "SecurityScorecard): &lt;1% Strong, 1-2% Good, 2-3% Typical, 3-6% "
+            "Elevated, 6-12% High, &gt;12% Critical.",
+            S["body_muted"]),
+        Paragraph(
+            "<b>Availability resilience indicator</b> - an INDICATIVE signal of "
+            "outage / availability risk (DDoS and system / infrastructure-failure "
+            "causes). It describes the risk only; it is not a calibrated "
+            "probability and not a statement of policy coverage.",
+            S["body_muted"]),
+        Spacer(1, 3 * mm),
+    ]
+    return blocks
+
+
+def cover_ladder_block(d, S):
+    """Cover-Sizing Ladder - severity-PML tiers (P50/P95/P99.6), posture-
+    independent (item #17). Surfaces fin["cover_ladder"]: the SEVERITY (LM) axis
+    of the FAIR split, the simplified client-facing companion to the Loss
+    Exposure Scenarios table. New presentation of already-scored signals."""
+    fin = d.get("financial_impact", {})
+    if not fin:
+        return []
+    cl = fin.get("cover_ladder", {})
+    if not cl:
+        return []
+    cur = "R " if fin.get("currency") == "ZAR" else "$"
+    ts = cl.get("typical_severe", {})
+    bad = cl.get("bad", {})
+    cat = cl.get("catastrophic", {})
+
+    col_widths = [65 * mm, 55 * mm, INNER_W - 65 * mm - 55 * mm]
+    table_data = [
+        ["Cover tier", "Modelled severity", "Reference"],
+        ["Typical severe breach", f"{cur}{ts.get('loss_zar', 0):,.0f}", "P50 severity"],
+        ["Bad breach",            f"{cur}{bad.get('loss_zar', 0):,.0f}", "P95 severity"],
+        ["Catastrophic breach",   f"{cur}{cat.get('loss_zar', 0):,.0f}", "1-in-250 / P99.6"],
+    ]
+    table = Table(table_data, colWidths=col_widths)
+    table.setStyle(TableStyle([
+        ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1), 9),
+        ("BACKGROUND",    (0, 0), (-1, 0),  C_GREY_1),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),  C_NAVY),
+        ("LINEBELOW",     (0, 0), (-1, 0),  1.0, C_NAVY),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN",         (1, 0), (-1, -1), "RIGHT"),
+        ("ALIGN",         (0, 0), (0, -1),  "LEFT"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, C_GREY_1]),
+        ("BOX",           (0, 0), (-1, -1), 0.25, C_GREY_2),
+        ("INNERGRID",     (0, 1), (-1, -1), 0.25, C_GREY_2),
+        ("FONTNAME",      (0, 3), (-1, 3),  "Helvetica-Bold"),
+    ]))
+
+    blocks = [
+        Spacer(1, 3 * mm),
+        Paragraph("<b>Cover-Sizing Ladder</b>", S["cat_title"]),
+        Spacer(1, 2 * mm),
+        Paragraph(
+            "The modelled severity of a single severe cyber event across three "
+            "cover tiers - the simplified client-facing companion to the Loss "
+            "Exposure Scenarios above. These figures are the magnitude of a "
+            "realised event and are independent of how likely it is, so they do "
+            "not move with security posture. Cover sizing remains the insured's "
+            "decision in consultation with the broker; Phishield does not "
+            "recommend a specific cover amount.",
+            S["body"]),
+        Spacer(1, 2 * mm),
+        table,
+        Spacer(1, 3 * mm),
+    ]
     return blocks
 
 
@@ -3660,12 +3815,29 @@ def cat_risk_mitigations(d, S):
     mitigated = mit.get("mitigated_annual_loss", 0)
     reduction_pct = round((total_savings / current * 100) if current > 0 else 0, 1)
 
-    rows = [
+    # Re-portrayed (item #17): LEAD with the breach-probability/grade movement
+    # + %-reduction in modelled exposure + the posture-INDEPENDENT catastrophe
+    # cover (1-in-250). Absolute Rand savings are demoted to secondary detail.
+    rs = mit.get("remediation_summary", {})
+    rows = []
+    if rs:
+        rows.extend([
+            ("Data-breach likelihood",
+             f"{rs.get('breach_probability_before_pct', 0)}% "
+             f"({rs.get('breach_grade_before', '')})&nbsp;&rarr;&nbsp;"
+             f"{rs.get('breach_probability_after_pct', 0)}% "
+             f"({rs.get('breach_grade_after', '')})"),
+            ("Reduction in modelled exposure", f"{rs.get('exposure_reduction_pct', 0)}%"),
+            ("Catastrophe cover (1-in-250, unchanged)",
+             f"{cur}&nbsp;{rs.get('catastrophe_cover_zar', 0):,.0f}"),
+            ("", ""),
+        ])
+    rows.extend([
         ("Current Annual Loss",    f"{cur}&nbsp;{current:,.0f}"),
         ("Mitigated Annual Loss",  f"{cur}&nbsp;{mitigated:,.0f}"),
         ("Total Potential Savings", f"{cur}&nbsp;{total_savings:,.0f} ({reduction_pct}%)"),
         ("", ""),
-    ]
+    ])
 
     # Count by severity from summary
     summary = mit.get("summary", {})
@@ -4628,7 +4800,9 @@ def _assessment_kill_chain(results: dict) -> list:
     p4f = []
     if db_exposed: p4f.append("Databases directly internet-facing")
     if rsi:        p4f.append(f"{int(round(rsi*100))}% ransomware susceptibility")
-    if fin_mc_p50: p4f.append(f"Est. impact: {cur_sym} {fin_mc_p50/1_000_000:.2f}m (median)")
+    if fin_mc_p50: p4f.append("Est. impact: " + cur_sym + " " + (
+        f"{fin_mc_p50/1_000_000_000:.2f}bn" if fin_mc_p50 >= 1_000_000_000
+        else f"{fin_mc_p50/1_000_000:.2f}m") + " (median)")
     if not p4f:    p4f = ["Limited data exfiltration paths visible"]
 
     return [
@@ -4887,8 +5061,10 @@ def _style_slide_title(size=30):
                            spaceAfter=4)
 
 def _style_intro():
+    # Darkened from ASX_GREY_MUTED (#94a3b8, fails WCAG AA) to the readable
+    # body grey ASX_GREY_BODY (#475569, AAA) - slide subtitles were hard to read.
     return ParagraphStyle("asx_intro", fontSize=11, fontName=ASX_SANS,
-                           textColor=ASX_GREY_MUTED, leading=15, alignment=TA_LEFT,
+                           textColor=ASX_GREY_BODY, leading=15, alignment=TA_LEFT,
                            spaceAfter=10)
 
 
@@ -4919,14 +5095,17 @@ def _asx_draw_corner_mark(canvas, brand, x_right, y_baseline, max_w=110, max_h=3
 def _asx_page_painter(canvas, doc):
     """Slide-aware background + corner brand mark.
 
-    Slide 7 (Next Steps) is full-bleed navy; everything else is white.
+    Slide 8 (Next Steps) is full-bleed navy; everything else is white.
+    NOTE: hardcoded physical page number. The deck is cover..disclosures = 9
+    pages and Next Steps is the 8th; if the slide order/pagination changes,
+    update this (a PageTemplate would make it robust).
     Brand mark = logo image if brand_assets/<logo_file> exists, otherwise a
     serif wordmark from brand.company_name."""
     canvas.saveState()
     page = doc.page
     brand = _ASX_CURRENT_BRAND or {}
 
-    if page == 7:
+    if page == 8:
         canvas.setFillColor(ASX_NAVY_DEEP)
         canvas.rect(0, 0, ASX_PAGE_W, ASX_PAGE_H, stroke=0, fill=1)
         _asx_draw_corner_mark(canvas, brand, ASX_PAGE_W - ASX_MARGIN,
@@ -5219,11 +5398,18 @@ def _assessment_slide_supply_chain(results):
     # returns None when the checker completed and per-card logic should
     # build the metric from real fields.
     def _classify(payload):
-        if payload.get("status") == "skipped":
-            return "INFO", "Not applicable / not detected"
-        if payload.get("status") not in ("completed",):
-            return "INFO", "Not run"
-        return None
+        # A checker that RAN and found nothing (no_data) is CLEAN, not
+        # "not run". skipped = not applicable; absent/error = not assessed.
+        st = payload.get("status")
+        if st == "skipped":
+            return "NA", "Not applicable"
+        if st == "no_data":
+            return "CLEAN", "No exposure found"
+        if st == "completed":
+            return None
+        if st in (None, "error"):
+            return "UNKNOWN", "Not assessed (no scan data)"
+        return "UNKNOWN", "Not assessed"
 
     cards = []
 
@@ -5236,7 +5422,7 @@ def _assessment_slide_supply_chain(results):
         scanned = rd.get("scanned_count", 0)
         declared = rd.get("declared_count", 0)
         if declared == 0:
-            sev, metric = "INFO", "No broker-declared suppliers"
+            sev, metric = "NA", "No declared suppliers"
         elif crit > 0:
             sev = "CRITICAL"
             metric = f"{crit} critical of {scanned} declared supplier(s)"
@@ -5338,7 +5524,7 @@ def _assessment_slide_supply_chain(results):
         sev, metric = cls
     else:
         if not cms.get("is_wordpress"):
-            sev, metric = "INFO", "Not WordPress"
+            sev, metric = "NA", "Not WordPress"
         else:
             v = cms.get("versioned_count", 0)
             cnt = cms.get("plugin_count", 0)
@@ -5442,56 +5628,117 @@ def _assessment_slide_supply_chain(results):
         "INFO": "#475569",
     }
 
-    def card_cell(card):
-        return [
-            Paragraph(card["label"], label_st),
-            Spacer(1, 3),
-            _asx_pill(card["severity"], _SC_SEV_HEX.get(card["severity"], "#475569"),
-                       font_size=9),
-            Spacer(1, 8),
-            Paragraph(card["headline"], headline_st),
-            Spacer(1, 6),
-            Paragraph(card["metric"], metric_st),
-            Spacer(1, 5),
-            Paragraph(card["support"], support_st),
-        ]
+    # -- Executive roll-up: ONE verdict + only material-finding signals --
+    # The signal-by-signal S-1..S-10 detail lives in the full technical
+    # report + HTML; an executive deck carries a single verdict and only the
+    # signals with a material finding (no "not run"/"not applicable" tiles).
+    _SC_PLAIN = {
+        "S-1 Related Domains": ("Declared suppliers",
+            "A supplier or sister-company domain you rely on is compromised and used to reach you."),
+        "S-3 Dependency Manifests": ("Exposed code dependencies",
+            "Your software 'parts list' is publicly readable, letting attackers target known flaws with no reconnaissance."),
+        "S-2 Third-Party JavaScript": ("Website third-party scripts",
+            "A third-party script on your site (analytics, ads, CDN) is hijacked to skim customer or card data."),
+        "S-4 Email-Vendor Surface": ("Email service providers",
+            "An email vendor in your sending chain is abused to phish your staff and customers in your name."),
+        "S-10 CMS Plugin Surface": ("Website plugins",
+            "Out-of-date website plugins are a leading ransomware entry point for SA SMEs."),
+        "S-5 Vendor Breach Correlation": ("Known vendor breaches",
+            "A vendor that holds your data or login keys has a publicly-known breach; key rotation is often left incomplete."),
+        "Phase 4f Cross-Correlation": ("Cross-checked vendor exposure",
+            "Several independent signals point at the SAME vendor - the highest-priority item to rotate."),
+    }
+    _SEV_ORDER = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "CLEAN": 0}
+    flagged = [c for c in cards if c["severity"] in ("CRITICAL", "HIGH", "MEDIUM")]
+    clean = [c for c in cards if c["severity"] in ("LOW", "CLEAN")]
+    na = [c for c in cards if c["severity"] == "NA"]
+    unknown = [c for c in cards if c["severity"] not in
+               ("CRITICAL", "HIGH", "MEDIUM", "LOW", "CLEAN", "NA")]
+    assessed = flagged + clean
+    flagged.sort(key=lambda c: -_SEV_ORDER.get(c["severity"], 0))
 
-    rows = []
-    for i in range(0, len(cards), 2):
-        pair = cards[i:i + 2]
-        cells = [card_cell(c) for c in pair]
-        while len(cells) < 2:
-            cells.append([Paragraph("", support_st)])  # pad
-        rows.append(cells)
+    if flagged:
+        worst = flagged[0]["severity"]
+        verdict_text, vhex = worst + " EXPOSURE", _SC_SEV_HEX.get(worst, "#475569")
+        sub = (str(len(flagged)) + " of " + str(len(assessed)) +
+               " assessed supply-chain signal(s) flagged for attention.")
+    elif assessed:
+        verdict_text, vhex = "LOW EXPOSURE", _SC_SEV_HEX["LOW"]
+        sub = "All " + str(len(assessed)) + " assessed supply-chain signal(s) are clean."
+    else:
+        verdict_text, vhex = "NOT ASSESSED", "#475569"
+        sub = "No external supply-chain signals could be assessed on this scan."
 
-    grid = Table(rows, colWidths=[(ASX_INNER_W - 16) / 2] * 2,
-                  rowHeights=[125] * len(rows))
-    grid.setStyle(TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, -1), ASX_WHITE),
-        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 16),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-        ("TOPPADDING",   (0, 0), (-1, -1), 14),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
-        ("INNERGRID",    (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-        ("BOX",          (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-    ]))
+    vsub_st = ParagraphStyle("sc_vsub", fontSize=11, fontName=ASX_SANS,
+                              textColor=ASX_GREY_BODY, leading=15)
+    fname_st = ParagraphStyle("sc_fn", fontSize=13, fontName=ASX_SANS_BOLD,
+                               textColor=ASX_NAVY, leading=16)
+    frisk_st = ParagraphStyle("sc_fr", fontSize=10, fontName=ASX_SANS,
+                               textColor=ASX_GREY_BODY, leading=14)
+    fdetail_st = ParagraphStyle("sc_fd", fontSize=9.5, fontName=ASX_SANS_BOLD,
+                                 textColor=ASX_NAVY, leading=13)
+    foot_st = ParagraphStyle("sc_foot", fontSize=8.5, fontName=ASX_SANS,
+                              textColor=ASX_GREY_MUTED, leading=12)
 
-    return [
+    out = [
         Paragraph("SUPPLY-CHAIN EXPOSURE", _style_section_label()),
-        Paragraph("Risk Inherited From Vendors, CDNs, and Declared Suppliers",
+        Paragraph("Risk Inherited From Vendors, CDNs, and Suppliers",
                    _style_slide_title(28)),
-        Paragraph(
-            "Approximately 12% of breaches have a supply-chain root cause "
-            "(IBM Cost of a Data Breach 2024) and dwell ~48% longer than "
-            "direct breaches. Six external signals are surfaced here; each "
-            "feeds the Ransomware Susceptibility Index and the financial-"
-            "impact vulnerability uplift.",
-            _style_intro(),
-        ),
+        Spacer(1, 6),
+        _asx_pill(verdict_text, vhex, font_size=12),
+        Spacer(1, 7),
+        Paragraph(sub, vsub_st),
         Spacer(1, 8),
-        grid,
+        Paragraph(
+            "About one in eight breaches has a supply-chain root cause (IBM "
+            "Cost of a Data Breach 2024) and they take roughly 48% longer to "
+            "contain. The signals below are what that means for this "
+            "organisation.",
+            _style_intro()),
+        Spacer(1, 12),
     ]
+
+    if flagged:
+        frows = []
+        for c in flagged:
+            pn, pr = _SC_PLAIN.get(c["label"], (c["label"], c.get("headline", "")))
+            frows.append([[
+                _asx_pill(c["severity"], _SC_SEV_HEX.get(c["severity"], "#475569"),
+                           font_size=9),
+                Spacer(1, 5),
+                Paragraph(pn, fname_st),
+                Spacer(1, 3),
+                Paragraph(pr, frisk_st),
+                Spacer(1, 3),
+                Paragraph("What we found: " + str(c["metric"]), fdetail_st),
+            ]])
+        out.append(Table(frows, colWidths=[ASX_INNER_W], style=TableStyle([
+            ("BACKGROUND",   (0, 0), (-1, -1), colors.HexColor("#fbfbfd")),
+            ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING",  (0, 0), (-1, -1), 16),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+            ("TOPPADDING",   (0, 0), (-1, -1), 13),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 13),
+            ("LINEBELOW",    (0, 0), (-1, -2), 0.4, colors.HexColor("#e2e8f0")),
+            ("BOX",          (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ])))
+    else:
+        out.append(Paragraph(
+            "No material supply-chain exposure was identified on this scan - "
+            "every assessed external signal is within normal bounds. This is a "
+            "positive due-diligence result, not an absence of checking.", frisk_st))
+
+    def _plain_names(cardlist):
+        return ", ".join(_SC_PLAIN.get(c["label"], (c["label"],))[0]
+                          for c in cardlist) or "none"
+    foot = "<b>Assessed:</b> " + _plain_names(assessed) + ". "
+    if na:
+        foot += "<b>Not applicable:</b> " + _plain_names(na) + ". "
+    if unknown:
+        foot += "<b>Not assessed (no scan data):</b> " + _plain_names(unknown) + ". "
+    foot += "Full signal-by-signal detail is in the technical report."
+    out += [Spacer(1, 12), Paragraph(foot, foot_st)]
+    return out
 
 
 # === SLIDE 5: Financial Impact (navy card + bar chart) ==================
@@ -5508,6 +5755,8 @@ def _assessment_slide_financial_impact(results):
 
     def fmt(v):
         if not v or v == 0: return "&mdash;"
+        if v >= 1_000_000_000:
+            return f"{cur_sym}&nbsp;{v / 1_000_000_000:.2f}bn"
         if v >= 1_000_000:
             return f"{cur_sym}&nbsp;{v / 1_000_000:.2f}m"
         return f"{cur_sym}&nbsp;{v:,.0f}"
@@ -5531,16 +5780,16 @@ def _assessment_slide_financial_impact(results):
             label_map = {
                 "most_likely": "Most likely outcome",
                 "median": "Median (P50)",
-                "return_1_100": "1-in-100 year event",
-                "return_1_200": "1-in-200 year event",
-                "return_1_250": "1-in-250 year event",
+                "return_1_100": "Severe event",
+                "return_1_200": "Extreme event",
+                "return_1_250": "Catastrophic event",
             }
             sub_map = {
                 "most_likely": "Most likely (peak)",
                 "median": "50% annual probability",
-                "return_1_100": "1% annual probability",
-                "return_1_200": "0.5% annual probability",
-                "return_1_250": "0.4% annual probability",
+                "return_1_100": "P99 severity",
+                "return_1_200": "P99.5 severity",
+                "return_1_250": "P99.6 severity (1-in-250)",
             }
             rows.append((label_map[key], sub_map[key], sc.get("loss_zar", 0), BAR_COLORS[key]))
     else:
@@ -5569,7 +5818,7 @@ def _assessment_slide_financial_impact(results):
     ]
 
     navy_card = Table([[navy_inner]],
-                       colWidths=[290], rowHeights=[330])
+                       colWidths=[290], rowHeights=[285])
     navy_card.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), ASX_NAVY_DEEP),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -5615,7 +5864,7 @@ def _assessment_slide_financial_impact(results):
         bar_chart_rows.append([title_para])
         bar_chart_rows.append([Spacer(1, 3)])
         bar_chart_rows.append([bar_row])
-        bar_chart_rows.append([Spacer(1, 12)])
+        bar_chart_rows.append([Spacer(1, 5)])
 
     bar_chart = Table(bar_chart_rows, colWidths=[bar_area_w])
     bar_chart.setStyle(TableStyle([
@@ -5642,16 +5891,57 @@ def _assessment_slide_financial_impact(results):
     caveat_st = ParagraphStyle("cv", fontSize=9, fontName=ASX_SANS,
                                  textColor=ASX_GREY_MUTED, leading=12,
                                  backColor=ASX_TILE_BG, borderPadding=8)
-    return [
+
+    # --- FAIR frequency view: compact ANNUAL LIKELIHOOD strip ---
+    # New view of already-scored signals (fin['risk_probability'], item #17) -
+    # reporting-only. Three tiles: total cyber-incident (nested), data breach,
+    # availability (indicative). Grade-coloured % for at-a-glance reading.
+    rp = fin.get("risk_probability", {}) or {}
+    prob_strip = []
+    if rp:
+        _db = rp.get("data_breach", {}) or {}
+        _ci = rp.get("cyber_incident", {}) or {}
+        _av = rp.get("availability_resilience", {}) or {}
+        _ghex = {"Strong": "#166534", "Good": "#166534", "Low": "#166534",
+                 "Typical": "#92400e", "Elevated": "#b45309",
+                 "High": "#dc2626", "Critical": "#991b1b"}
+        def _chip(pct, lab, grade, hexc):
+            return ("<font name='Helvetica-Bold' size='16' color='" + hexc + "'>" + pct + "</font>"
+                    " <font size='10' color='#0f2744'><b>" + lab + "</b></font>"
+                    " <font size='9' color='#64748b'>" + grade + "</font>")
+        _sep = " &nbsp;&nbsp; <font color='#cbd5e1'>|</font> &nbsp;&nbsp; "
+        _line = _sep.join([
+            _chip("%.1f%%" % _ci.get('probability_pct', 0), "Total cyber-incident",
+                  _ci.get('grade', ''), _ghex.get(_ci.get('grade', ''), "#0f2744")),
+            _chip("%.2f%%" % _db.get('probability_pct', 0), "Data breach",
+                  _db.get('grade', ''), _ghex.get(_db.get('grade', ''), "#0f2744")),
+            _chip("%.0f%%" % _av.get('indicator_pct', 0), "Availability",
+                  "indicative", "#475569"),
+        ])
+        prob_strip = [
+            Spacer(1, 10),
+            Paragraph("ANNUAL LIKELIHOOD "
+                      "<font size=9 color='#94a3b8'>(how often a loss event is "
+                      "expected - pairs with the cost above; data breach is nested "
+                      "in the total)</font>", _style_section_label()),
+            Spacer(1, 5),
+            Paragraph(_line, ParagraphStyle("plk", fontSize=11, leading=20)),
+        ]
+
+    out = [
         Paragraph("FINANCIAL IMPACT", _style_section_label()),
         Paragraph("What a Breach Could Cost", _style_slide_title(30)),
         Paragraph("Modelled annual cyber loss across a range of severity scenarios, from the most likely outcome to a rare catastrophe.",
                    _style_intro()),
         body,
+    ]
+    out += prob_strip
+    out += [
         Spacer(1, 10),
         Paragraph("Figures are statistical model output. Selecting the appropriate cover limit is a decision for the insured in consultation with the broker.",
                    caveat_st),
     ]
+    return out
 
 
 # === SLIDE 5: Why This Matters (6 stat tiles, no borders) ===============
@@ -5668,7 +5958,7 @@ def _assessment_slide_why_this_matters():
     lab_st = ParagraphStyle("st_l", fontSize=11, fontName=ASX_SANS_BOLD,
                               textColor=ASX_NAVY, leading=14)
     desc_st = ParagraphStyle("st_d", fontSize=10, fontName=ASX_SANS,
-                               textColor=ASX_GREY_MUTED, leading=13)
+                               textColor=ASX_GREY_BODY, leading=13)
 
     def stat_cell(s, emphasised=False):
         val_st = val_red_st if emphasised else val_navy_st
@@ -6165,7 +6455,11 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             # Loss Exposure Scenarios dedicated table — also shown on
             # summary so brokers and clients have the catastrophe view
             # before reading further. Schema-driven from loss_exposure.scenarios.
+            # Cyber-risk probability cards (FAIR frequency view) + cover-sizing
+            # ladder, surfaced alongside the loss exposure scenarios. Item #17.
+            story += risk_probability_block(ins_data, S)
             story += loss_exposure_scenarios_block(ins_data, S)
+            story += cover_ladder_block(ins_data, S)
             # Data Breach Model Assumption Notice - records-per-revenue
             # heuristic + outlier threshold for the breach component.
             story += records_assumption_disclosure(ins_data, S)
@@ -6185,9 +6479,15 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         # Financial exposure recap
         total_likely = fin.get("total", {}).get("most_likely", 0) if fin else 0
         mc_data = fin.get("monte_carlo", {}).get("total", {}) if fin else {}
+        # Catastrophe figures use the severity-PML distribution (single severe
+        # event), matching the cover ladder / loss-exposure table / exec-deck
+        # bars - NOT the prob-weighted annual total - so every surface agrees on
+        # the 1-in-250. The median stays the annual median (correct for the
+        # 'estimated annual cyber loss' figure). Falls back to total.* if absent.
+        mc_pml = fin.get("monte_carlo", {}).get("severity_pml", {}) if fin else {}
         mc_p50 = mc_data.get("p50", total_likely)
-        mc_p99 = mc_data.get("p99", 0)
-        mc_p99_6 = mc_data.get("p99_6", 0)
+        mc_p99 = mc_pml.get("p99", mc_data.get("p99", 0))
+        mc_p99_6 = mc_pml.get("p99_6", mc_data.get("p99_6", 0))
         cur_cta = "R" if (fin and fin.get("currency") == "ZAR") else "$"
         org_location = "a South African" if (fin and fin.get("currency") == "ZAR") else "an"
 
@@ -6205,9 +6505,10 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             Spacer(1, 2 * mm),
             Paragraph(
                 f"Based on this assessment, the organisation faces an estimated annual cyber loss of "
-                f"<b>{cur_cta} {mc_p50:,.0f}</b> (median scenario). In a 1-in-100 year event, losses could reach "
-                f"<b>{cur_cta} {mc_p99:,.0f}</b>; in a 1-in-250 year event, "
-                f"<b>{cur_cta} {mc_p99_6:,.0f}</b>. These figures are derived from a Monte Carlo simulation of "
+                f"<b>{cur_cta} {mc_p50:,.0f}</b> (median scenario). The severity of a single severe "
+                f"event could reach <b>{cur_cta} {mc_p99:,.0f}</b> (P99 severity); a catastrophic event "
+                f"(the 1-in-250 severity benchmark) could reach <b>{cur_cta} {mc_p99_6:,.0f}</b>. These severity "
+                f"figures are conditional on a severe event occurring and are derived from a Monte Carlo simulation of "
                 f"10,000 scenarios modelling data breach, ransomware, and business interruption events "
                 f"calibrated to the organisation's industry and risk profile.",
                 S["body"]),
@@ -6376,7 +6677,9 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
             story += cat_financial_impact(results.get("insurance", {}), S)
             # Loss Exposure Scenarios - dedicated headline table replacing
             # the previous Insurance Cover Recommendation card.
+            story += risk_probability_block(results.get("insurance", {}), S)
             story += loss_exposure_scenarios_block(results.get("insurance", {}), S)
+            story += cover_ladder_block(results.get("insurance", {}), S)
             # Data Breach Model Assumption Notice - exposes the records-
             # per-revenue heuristic driving the breach component, plus the
             # outlier threshold above which broker recalibration is needed.

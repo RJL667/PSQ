@@ -1249,6 +1249,19 @@ def build(doc):
         "into the catastrophe-tail inflation in the FAIR Monte Carlo."
     )
 
+    add_body(doc,
+        "Presentation: across all supply-chain signals (related domains, "
+        "third-party scripts, dependency manifests, the email-vendor surface, "
+        "vendor-breach correlation, CMS plugins and the cross-correlation), the "
+        "executive deck presents a single rolled-up supply-chain verdict and "
+        "only the signals carrying a material finding; the full per-signal "
+        "detail appears in the technical report and the HTML view. A checker "
+        "that runs and finds nothing is reported as clean - a positive due-"
+        "diligence result - which is distinct from a checker that did not run "
+        "or is not applicable (for example, the CMS-plugin checker on a non-"
+        "WordPress site)."
+    )
+
     add_bold_body(
         doc,
         "Why it matters for insurance: ",
@@ -1561,10 +1574,13 @@ def build(doc):
         "compromise with partner-data exposure and credential reuse). "
         "Mandiant M-Trends 2025 puts the strict trojanised-vendor "
         "subset at ~3%. The defensible 'upstream root cause' rate "
-        "lies in the 12-20% band. The FAIR model under-estimates "
-        "loss-given-breach for the 12% SC-vectored slice — see "
-        "FIN-9 in the gap analysis for the conditional LGB Pareto "
-        "refinement that addresses this."
+        "lies in the 12-20% band. The catastrophe model captures this "
+        "loss-given-breach severity through the records-driven C1 "
+        "liability (a supplier-vectored breach still exposes the "
+        "insured's full record base), and discloses correlated systemic "
+        "supply-chain catastrophe at portfolio level. The earlier "
+        "conditional-Pareto loss-given-breach widening was retired to "
+        "keep one signal mapped to one channel and avoid double-counting."
     )
 
     # ══════════════════════════════════════════════════════════════════════
