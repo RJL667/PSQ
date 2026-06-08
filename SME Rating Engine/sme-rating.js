@@ -2457,7 +2457,10 @@ function renderBreakdownCard(container, ci, calc, benchmark, compRow, label, opt
     </div>
     <div class="breakdown-rm-fee" title="Our administration platform adds a 6% fee on the captured (input) premium. Capture THIS figure on the platform so the client's final premium equals the engine's calculated premium. Formula: Annual (with FP) ÷ 1.06.">
       <span class="rm-fee-label">Total Premium without RM Fee</span>
-      <strong class="rm-fee-value">${formatR(calc.annual / 1.06)}</strong>
+      <div class="rm-fee-figures">
+        <strong class="rm-fee-value">${formatR(calc.annual / 1.06)}<span class="rm-fee-unit">/yr</span></strong>
+        <strong class="rm-fee-value">${formatR(Math.ceil((calc.annual / 1.06) / 12))}<span class="rm-fee-unit">/mo</span></strong>
+      </div>
     </div>
     <div class="breakdown-comparison">
       <div class="bc-item"><span class="bc-label">${benchLabel}</span><strong>${benchStr}</strong></div>
@@ -2508,14 +2511,14 @@ function buildClipboardText() {
       const calc = state.calculations[opt.id] || calculatePremium(opt.coverIndex, state, { fpIndex: opt.fpIndex, postureDiscount: opt.postureDiscount || 0, discretionaryDiscount: opt.discretionaryDiscount || 0 });
       if (!calc) return;
       const optRef = getOptionQuoteRef(opt);
-      lines.push(`${opt.label} [${optRef}]: ${formatR(calc.annual)}/yr (${formatR(calc.monthly)}/mo) | Ex-FP: ${formatR(calc.annualExFP)} | Without RM Fee: ${formatR(calc.annual / 1.06)}`);
+      lines.push(`${opt.label} [${optRef}]: ${formatR(calc.annual)}/yr (${formatR(calc.monthly)}/mo) | Ex-FP: ${formatR(calc.annualExFP)} | Without RM Fee: ${formatR(calc.annual / 1.06)}/yr (${formatR(Math.ceil((calc.annual / 1.06) / 12))}/mo)`);
     });
   } else {
     const covers = state.selectedCovers.length > 0 ? state.selectedCovers : state.recommendedCovers;
     covers.forEach(ci => {
       const calc = state.calculations[ci] || calculatePremium(ci, state);
       if (!calc) return;
-      lines.push(`${COVER_LIMITS[ci].label}: ${formatR(calc.annual)}/yr (${formatR(calc.monthly)}/mo) | Ex-FP: ${formatR(calc.annualExFP)} | Without RM Fee: ${formatR(calc.annual / 1.06)}`);
+      lines.push(`${COVER_LIMITS[ci].label}: ${formatR(calc.annual)}/yr (${formatR(calc.monthly)}/mo) | Ex-FP: ${formatR(calc.annualExFP)} | Without RM Fee: ${formatR(calc.annual / 1.06)}/yr (${formatR(Math.ceil((calc.annual / 1.06) / 12))}/mo)`);
     });
   }
 
@@ -2854,18 +2857,23 @@ function generatePDF(optionOverride) {
     y += 20;
 
     // Total Premium without RM Fee (internal back-office figure — admin platform adds 6% to the input premium)
-    checkPage(16);
+    var rmAnnual = calc.annual / 1.06;
+    var rmMonthly = Math.ceil(rmAnnual / 12);
+    var rmBoxH = 17;
+    checkPage(rmBoxH + 9);
     doc.setFillColor(245, 250, 255);
-    doc.rect(margin, y, contentW, 9, 'F');
+    doc.rect(margin, y, contentW, rmBoxH, 'F');
     doc.setDrawColor(0, 150, 200);
-    doc.rect(margin, y, contentW, 9, 'S');
-    doc.setFontSize(8.5);
+    doc.rect(margin, y, contentW, rmBoxH, 'S');
+    var rmCx = margin + contentW / 2;
+    doc.setFontSize(10.2);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(60, 60, 60);
-    doc.text('Total Premium without RM Fee', margin + 3, y + 6);
+    doc.text('Total Premium without RM Fee', rmCx, y + 6.5, { align: 'center' });
+    doc.setFontSize(13);
     doc.setTextColor(0, 100, 170);
-    doc.text(formatR(calc.annual / 1.06), margin + contentW - 3, y + 6, { align: 'right' });
-    y += 15;
+    doc.text(formatR(rmAnnual) + ' /yr        ' + formatR(rmMonthly) + ' /mo', rmCx, y + 13.5, { align: 'center' });
+    y += rmBoxH + 3;
     doc.setFontSize(6.5);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(120, 120, 120);

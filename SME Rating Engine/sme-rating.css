@@ -2015,27 +2015,41 @@ body::before {
 }
 .breakdown-rm-fee {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-  padding: 10px 14px;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 12px 17px;
   background: rgba(0, 180, 216, 0.06);
   border: 1px dashed rgba(0, 180, 216, 0.35);
   border-radius: var(--radius-md);
+  text-align: center;
 }
 .rm-fee-label {
-  font-size: 0.7rem;
+  font-size: 0.84rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
   color: var(--text-muted);
 }
+.rm-fee-figures {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 24px;
+}
 .rm-fee-value {
-  font-size: 1.1rem;
+  font-size: 1.32rem;
   font-weight: 900;
   color: var(--text-heading);
   white-space: nowrap;
+  text-align: center;
+}
+.rm-fee-unit {
+  font-size: 0.6em;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-left: 2px;
 }
 .breakdown-comparison {
   display: grid;
