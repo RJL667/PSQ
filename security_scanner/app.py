@@ -2192,6 +2192,20 @@ def health():
     return jsonify({"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()})
 
 
+@app.route("/config")
+def config_info():
+    # Lightweight config-verification endpoint. Reports the effective
+    # MAX_CONCURRENT_SCANS the app booted with (so an env-var change can be
+    # confirmed from a URL) and the worker PID. Hit it a few times: a single
+    # repeating PID => 1 gunicorn worker; alternating PIDs => 2 workers.
+    # No secrets exposed.
+    return jsonify({
+        "max_concurrent_scans": MAX_CONCURRENT,
+        "worker_pid": os.getpid(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 # ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
