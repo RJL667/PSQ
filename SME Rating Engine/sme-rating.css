@@ -2013,6 +2013,30 @@ body::before {
 .bf-value.accent {
   color: var(--accent);
 }
+.breakdown-rm-fee {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(0, 180, 216, 0.06);
+  border: 1px dashed rgba(0, 180, 216, 0.35);
+  border-radius: var(--radius-md);
+}
+.rm-fee-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.rm-fee-value {
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: var(--text-heading);
+  white-space: nowrap;
+}
 .breakdown-comparison {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
