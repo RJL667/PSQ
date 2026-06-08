@@ -2519,7 +2519,7 @@ def cat_credential_remediation(d, S, brief=False):
         rows.append(("Services with captured logins", str(svc_total)))
     fb = ("Remediation detail for the affected accounts and systems. Identifiers are "
           "partially masked; the complete list (with passwords) is available on request "
-          "as an encrypted export, with client consent — see User Manual section 6.4.")
+          "as an encrypted export, with client consent.")
     title = "Credential Exposure — Examples" if brief else "Credential Remediation Detail"
     parts = build_cat_card(title, C_RED,
                            f"{staff_total} account(s)", rows, [], S, fallback=fb)
@@ -2544,8 +2544,8 @@ def cat_credential_remediation(d, S, brief=False):
         parts.append(Spacer(1, 2 * mm))
     parts.append(Paragraph(
         "<i>No passwords appear in this report. The complete list including passwords is "
-        "delivered only on request, with signed client consent, as an encrypted file "
-        "(User Manual section 6.4).</i>", S["body_muted"]))
+        "delivered only on request, with signed client consent, as an encrypted file.</i>",
+        S["body_muted"]))
     parts.append(Spacer(1, 3 * mm))
     return parts
 
