@@ -31,6 +31,28 @@ _CYBER_INCIDENT_BANDS = (
 )
 
 
+# Catastrophe-model calibration levers (env-overridable; defaults are the
+# colleague-reviewed values). Lever 1: small->large taper on the IBM-average C1
+# residual - CAT_RESIDUAL_TAPER_MIN is the residual weight at <=R10M revenue;
+# CAT_RESIDUAL_TAPER_HI_ZAR is the revenue at which the taper reaches 1.0 (no
+# taper, large-cap). Lever 2: FINE_CAPACITY_FLOOR floors the capacity factor used
+# for fixed-cap statutory fines (POPIA/ECTA/sector). Env-overridable so the cat
+# curve can be re-tuned in early-stage production WITHOUT a redeploy.
+import os as _os
+
+
+def _cat_env_float(key, default, lo, hi):
+    try:
+        return min(hi, max(lo, float(_os.environ.get(key, default))))
+    except (TypeError, ValueError):
+        return default
+
+
+CAT_RESIDUAL_TAPER_MIN    = _cat_env_float("CAT_RESIDUAL_TAPER_MIN", 0.30, 0.0, 1.0)
+CAT_RESIDUAL_TAPER_HI_ZAR = _cat_env_float("CAT_RESIDUAL_TAPER_HI_ZAR", 2_000_000_000.0, 1e7, 1e12)
+FINE_CAPACITY_FLOOR       = _cat_env_float("FINE_CAPACITY_FLOOR", 0.60, 0.0, 1.0)
+
+
 def _grade_probability(pct, bands):
     """Map a percentage probability to its segregated band label (reporting-only)."""
     for upper, label in bands:
@@ -2291,15 +2313,26 @@ class FinancialImpactCalculator:
         # face proportionally lower enforcement, not the full ceiling.
         # Pattern A capacity factor (revenue band table) applied.
         capacity_factor = self._capacity_factor(annual_revenue_zar)
+        # Lever 2 (cat refinement, 2026-06-08): a statutory FIXED-CAP fine
+        # (POPIA s109 R10M, ECTA, sector ceilings) does not scale down with
+        # company size the way discretionary enforcement does - a serious
+        # breach at a micro FSP can attract most of the statutory ceiling in a
+        # 1-in-X catastrophe. Floor the capacity factor used for the fixed-cap
+        # fines so small QUALIFYING entities carry genuine fine exposure. The
+        # %-of-turnover frameworks (GDPR / CPA / PCI) are untouched - they
+        # already scale with revenue. Only the fines that QUALIFY fire (POPIA
+        # baseline; GDPR / PCI / sector by reg_flags), so this lifts real
+        # exposure, not phantom fines.
+        fine_capacity_factor = max(capacity_factor, FINE_CAPACITY_FLOOR)
         sector_frameworks = self._sector_cat_stack(
             sub_industry, reg_flags.get("sub_industry_detail"), reg_flags)
         sector_cat_raw = sum(stat_max for _, stat_max in sector_frameworks)
-        sector_cat_scaled = int(round(sector_cat_raw * capacity_factor))
+        sector_cat_scaled = int(round(sector_cat_raw * fine_capacity_factor))
         # Per-framework scaled breakdown for the audit panel in the PDF.
         sector_cat_breakdown = [
             {"framework": name,
              "statutory_max_zar": stat_max,
-             "cat_scaled_zar": int(round(stat_max * capacity_factor))}
+             "cat_scaled_zar": int(round(stat_max * fine_capacity_factor))}
             for name, stat_max in sector_frameworks
         ]
 
@@ -2313,11 +2346,11 @@ class FinancialImpactCalculator:
         # liability under POPIA Section 99 is excluded - covered by the
         # qualitative Civil Liability Disclosure.
         c2_cat_stack_total = int(round(
-            c2_popia_statutory_max * capacity_factor  # statutory POPIA at cat
+            c2_popia_statutory_max * fine_capacity_factor  # statutory POPIA at cat
             + c2_gdpr                                  # already scales with rev
             + c2_pci                                   # statutorily small
             + c2_other                                 # already revenue-independent
-            + c2_ecta_cat * capacity_factor
+            + c2_ecta_cat * fine_capacity_factor
             + c2_cpa_cat                               # % of turnover, no factor
             + sector_cat_scaled
         ))
@@ -2391,7 +2424,23 @@ class FinancialImpactCalculator:
         # Captures: third-party liability, data restoration, multimedia claims,
         # notification costs, computer crime — everything not covered by C2-C5.
         # Anchored to IBM data via total_breach_magnitude.
-        c1_liability = max(0, total_breach_magnitude - c2_regulatory_fine - c3_bi - c4_ransom - c5_ir)
+        # Lever 1 (cat refinement, 2026-06-08): small->large taper on the
+        # IBM-average C1 residual. The residual is the SA-average breach cost
+        # (IBM anchor) scaled to revenue minus the other pillars; that average
+        # is dominated by large-org breaches, so for sub-large-cap entities it
+        # over-states third-party liability (~60x the records-driven value at
+        # R10M -> a 1-in-250 of 343% of revenue). Taper the residual from
+        # CAT_RESIDUAL_TAPER_MIN at <=R10M to 1.0 at/above R2bn (where the floor
+        # is already non-binding and the upper end behaves). NO cap: records-
+        # driven C1 and the genuine C2 fines are untapered, so a small FSP can
+        # still exceed revenue via real exposure. Applied to the analytical C1
+        # (most-likely) and the MC residual_floor (cat tail) with one factor.
+        import math as _math
+        _cat_t = (_math.log10(max(float(annual_revenue_zar), 1.0)) - 7.0) / \
+                 (_math.log10(CAT_RESIDUAL_TAPER_HI_ZAR) - 7.0)
+        cat_residual_taper = float(min(1.0, max(CAT_RESIDUAL_TAPER_MIN,
+                                       CAT_RESIDUAL_TAPER_MIN + (1.0 - CAT_RESIDUAL_TAPER_MIN) * _cat_t)))
+        c1_liability = cat_residual_taper * max(0, total_breach_magnitude - c2_regulatory_fine - c3_bi - c4_ransom - c5_ir)
 
         # ── Split ratios ──
         R = self.INCIDENT_SPLIT_RATIOS
@@ -2600,7 +2649,7 @@ class FinancialImpactCalculator:
         # supply total records held incl. historical). The np.maximum floor keeps
         # the old IBM residual for small orgs, where it dominates the records term.
         records_held = estimated_records
-        residual_floor = np.maximum(0, mc_total_breach - mc_c2 - mc_c3_full - mc_c4 - mc_c5)
+        residual_floor = cat_residual_taper * np.maximum(0, mc_total_breach - mc_c2 - mc_c3_full - mc_c4 - mc_c5)
         mc_c1 = np.maximum(records_held * 90.0 * np.random.lognormal(0, 0.25, N),
                            residual_floor)
 
@@ -3142,11 +3191,12 @@ class FinancialImpactCalculator:
                 # framework. Used for 1-in-100 / 1-in-200 / 1-in-250 views.
                 "catastrophe_stack": {
                     "capacity_factor": round(capacity_factor, 3),
+                    "fine_capacity_factor": round(fine_capacity_factor, 3),
                     "revenue_band_zar": int(annual_revenue_zar),
                     "popia_statutory_scaled_zar":
-                        int(round(c2_popia_statutory_max * capacity_factor)),
+                        int(round(c2_popia_statutory_max * fine_capacity_factor)),
                     "ecta_cat_scaled_zar":
-                        int(round(c2_ecta_cat * capacity_factor)),
+                        int(round(c2_ecta_cat * fine_capacity_factor)),
                     "cpa_cat_zar":
                         int(c2_cpa_cat),  # % already scales, no factor applied
                     "gdpr_cat_zar":         int(c2_gdpr),
