@@ -5071,6 +5071,28 @@ def _style_intro():
                            spaceAfter=10)
 
 
+# The Next Steps slide is full-bleed navy. Its physical page number is
+# content-dependent (an earlier slide can overflow to a 2nd page on data-heavy
+# scans), so it is discovered at RENDER time: _AsxNavyAnchor - a zero-size
+# marker placed at the END of the slide before Next Steps - records its page;
+# the painter then navy-fills the FOLLOWING page. Robust to pagination drift.
+from reportlab.platypus import Flowable as _Flowable
+_ASX_NAVY_PREV_PAGE = [None]
+
+
+class _AsxNavyAnchor(_Flowable):
+    """Zero-size render-time marker: records the page it lands on so the page
+    painter can navy-fill the next page (the Next Steps slide)."""
+    width = 0
+    height = 0
+
+    def wrap(self, availWidth, availHeight):
+        return (0, 0)
+
+    def draw(self):
+        _ASX_NAVY_PREV_PAGE[0] = self.canv.getPageNumber()
+
+
 # --- Per-page background painter (called by SimpleDocTemplate) ----------
 
 def _asx_draw_corner_mark(canvas, brand, x_right, y_baseline, max_w=110, max_h=32, light=False):
@@ -5098,17 +5120,19 @@ def _asx_draw_corner_mark(canvas, brand, x_right, y_baseline, max_w=110, max_h=3
 def _asx_page_painter(canvas, doc):
     """Slide-aware background + corner brand mark.
 
-    Slide 8 (Next Steps) is full-bleed navy; everything else is white.
-    NOTE: hardcoded physical page number. The deck is cover..disclosures = 9
-    pages and Next Steps is the 8th; if the slide order/pagination changes,
-    update this (a PageTemplate would make it robust).
+    The Next Steps slide is full-bleed navy; everything else is white. The
+    navy page is found at render time via _AsxNavyAnchor (records the page of
+    the slide before Next Steps); we navy-fill the FOLLOWING page - robust to
+    content-driven pagination drift. (Was hardcoded page == 8, which broke
+    when an earlier slide overflowed and pushed a light slide onto page 8.)
     Brand mark = logo image if brand_assets/<logo_file> exists, otherwise a
     serif wordmark from brand.company_name."""
     canvas.saveState()
     page = doc.page
     brand = _ASX_CURRENT_BRAND or {}
 
-    if page == 8:
+    navy_page = (_ASX_NAVY_PREV_PAGE[0] + 1) if _ASX_NAVY_PREV_PAGE[0] is not None else None
+    if navy_page is not None and page == navy_page:
         canvas.setFillColor(ASX_NAVY_DEEP)
         canvas.rect(0, 0, ASX_PAGE_W, ASX_PAGE_H, stroke=0, fill=1)
         _asx_draw_corner_mark(canvas, brand, ASX_PAGE_W - ASX_MARGIN,
@@ -6293,6 +6317,7 @@ def _build_assessment_pdf(results: dict) -> bytes:
         author=brand["company_name"].upper(),
     )
 
+    _ASX_NAVY_PREV_PAGE[0] = None
     story = []
     story += _assessment_slide_cover(domain, timestamp, brand);             story.append(PageBreak())
     story += _assessment_slide_score_and_kpis(results);                     story.append(PageBreak())
@@ -6300,7 +6325,7 @@ def _build_assessment_pdf(results: dict) -> bytes:
     story += _assessment_slide_supply_chain(results);                       story.append(PageBreak())
     story += _assessment_slide_financial_impact(results);                   story.append(PageBreak())
     story += _assessment_slide_why_this_matters();                          story.append(PageBreak())
-    story += _assessment_slide_plain_language(results);                     story.append(PageBreak())
+    story += _assessment_slide_plain_language(results);                     story.append(_AsxNavyAnchor()); story.append(PageBreak())
     story += _assessment_slide_next_steps(brand, results);                  story.append(PageBreak())
     story += _assessment_slide_disclosures(brand)
 
