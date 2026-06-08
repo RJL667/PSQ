@@ -53,7 +53,8 @@ DB_PATH = os.environ.get("DB_PATH", "scans.db")
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SCANS", "2"))
 
 VALID_INDUSTRIES = [
-    "Agriculture", "Communications", "Consumer", "Education", "Energy",
+    "Agriculture", "Mining", "Construction", "Wholesale Trade",
+    "Communications", "Consumer", "Education", "Energy",
     "Entertainment", "Financial Services", "Finance", "Healthcare",
     "Hospitality", "Industrial / Manufacturing", "Manufacturing",
     "Legal", "Media", "Pharmaceuticals", "Public Sector", "Research",

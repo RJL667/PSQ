@@ -19,18 +19,24 @@ Run from security_scanner/: py tooling/verify_subindustry_dropdown_mapping.py
 import os, sys, re, json
 HERE = os.path.dirname(os.path.abspath(__file__)); SEC = os.path.dirname(HERE)
 sys.path.insert(0, SEC)
-from scoring_analytics import FinancialImpactCalculator as F
+from scoring_analytics import FinancialImpactCalculator as F, SA_INDUSTRY_COSTS, RansomwareIndex
 import flag_inference as fi
 
 BI = F.INDUSTRY_BI_FACTOR
 SECTOR_SUBS = set(F.SECTOR_FRAMEWORKS.keys())
 AI = fi.ACCOUNTABLE_INSTITUTION_LABELS
 B2C = fi.B2C_SUB_INDUSTRY_LABELS
+COSTS = SA_INDUSTRY_COSTS
+RSIM = RansomwareIndex.INDUSTRY_MULTIPLIER
 
 html = open(os.path.join(SEC, "templates", "index.html"), encoding="utf-8").read()
 m = re.search(r"const SUB_INDUSTRIES = (\{.*?\});", html, re.S)
 assert m, "SUB_INDUSTRIES literal not found in templates/index.html"
 SUB = json.loads(m.group(1))
+# Industry <select> option values (excluding the blank/baseline placeholder).
+sel_m = re.search(r'<select[^>]*id="industry"[^>]*>(.*?)</select>', html, re.S)
+assert sel_m, "industry <select> not found in templates/index.html"
+SEL = set(o for o in re.findall(r'<option[^>]*value="([^"]*)"', sel_m.group(1)) if o)
 
 PASS = FAIL = 0
 def check(cond, label, detail=""):
@@ -58,6 +64,27 @@ for industry, subs in SUB.items():
         if submitted in BI and "bi" in e:
             check(abs(BI[submitted] - e["bi"]) < 1e-9, "bi-matches",
                   f"{industry}/{label!r} submits {submitted!r}: dropdown bi {e['bi']} != table {BI[submitted]}")
+
+# ── A2. every industry <select> option resolves 1:1 in the industry tables ──
+# Mirrors the server lookups: SA_INDUSTRY_COSTS[industry.title()] (else a silent
+# "Other" fallback), RansomwareIndex.INDUSTRY_MULTIPLIER[industry.lower()], and the
+# INDUSTRY_BI_FACTOR industry-level fallback[industry.title()]. "Other" is the
+# legitimate baseline (present in every table).
+for o in sorted(SEL):
+    check(o.title() in COSTS, "industry-in-costs",
+          f"<option> {o!r} (.title()={o.title()!r}) not in SA_INDUSTRY_COSTS -> silent 'Other' fallback")
+    check(o.lower() in RSIM, "industry-in-rsi",
+          f"<option> {o!r} not in RansomwareIndex.INDUSTRY_MULTIPLIER")
+    check(o.title() in BI, "industry-in-BI",
+          f"<option> {o!r} not in INDUSTRY_BI_FACTOR (industry-level fallback)")
+
+# ── A3. SUB_INDUSTRIES groups match the <select> options exactly: no dead
+#        (unreachable) groups, and no non-baseline option missing its sub-list. ──
+nonother = SEL - {"Other"}
+for k in sorted(set(SUB) - nonother):
+    check(False, "dead-sub-group", f"SUB_INDUSTRIES group {k!r} has no matching <option> (dead)")
+for o in sorted(nonother - set(SUB)):
+    check(False, "option-missing-sublist", f"<option> {o!r} has no SUB_INDUSTRIES group")
 
 # ── B. cross-table label sets are all valid sub-industry keys ──
 for x in sorted(AI):
