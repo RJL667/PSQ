@@ -6,13 +6,13 @@ breached-credential hardening accuracy work (2026-05-31); Step 6 (heuristics)
 added 2026-06-03 after the 34-card back-test, whose bugs were overwhelmingly
 heuristic failures.
 
-A card is not "accurate" until it passes this 6-step ground-truth check on a
+A card is not "accurate" until it passes this 7-step ground-truth check on a
 **live `takealot.com` reference scan**. Steps 1-5 are black-box (does the output
 match reality?); **Step 6 is white-box (are the card's internal assumptions
 sound?)** — it runs every time because the back-test proved most defects are
 heuristics that look fine on a sample target but are arbitrary or fragile.
 
-## The 6 steps
+## The 7 steps
 
 1. **Ground truth, direct from source.**
    Query the underlying provider *directly* (Shodan `/host/{ip}` or `/host/count`,
@@ -73,12 +73,35 @@ heuristics that look fine on a sample target but are arbitrary or fragile.
    `_probe` (200-only + body-sanity) is the reference pattern for response
    handling.
 
+7. **Output-surface wiring + Attacker's-View placement (run for every NEW checker).**
+   A checker is NOT "done" when its own card renders - it must be wired into every
+   output surface where its risk class belongs, and its kill-chain role decided:
+   - **All four tiers + the risk-class roll-up** - confirm the checker (or its
+     family roll-up) appears wherever that family is summarised, not only on its
+     own card (e.g. a supply-chain checker must surface in the Supply-Chain
+     Exposure slide, not just its individual card).
+   - **Attacker's View kill chain** - EXPLICITLY decide whether the finding is an
+     attacker step and, if so, wire it into `_assessment_kill_chain` (+
+     `_kill_chain_severities`) under the right phase (Recon / Initial Access /
+     Exploitation / Data & Impact). The kill chain is the SINGLE shared source for
+     the full, broker and exec-deck Attacker's View, so one edit covers all tiers.
+     **Default: an externally-observable finding IS an attacker step** - exclusion
+     is the exception and must carry a one-line written justification, not silence.
+   - **Consistency with the priced signal** - if the four-channel financial
+     anchoring routed the signal into p_breach / severity / tail, the Attacker's
+     View narrative must reflect it too. A signal that moves the number but never
+     appears in the "how they break in" story is an inconsistency.
+   - *Origin (2026-06-08): the six supply-chain checkers (S-1/2/3/4/5/10) were
+     priced via `supply_chain_vulnerability_uplift` but absent from the kill chain
+     - the exact failure mode this step exists to prevent.*
+
 ## Pass criteria
 - [ ] Value matches direct-source ground truth
 - [ ] Correctly attributed (verified ownership + recency)
 - [ ] Renders consistently across all four output tiers
 - [ ] Any divergence from an external benchmark is explained
 - [ ] **Every heuristic enumerated, screened against the failure modes, and classified (justified / fragile / arbitrary / calibration-gated) — no fabrication, no generic-response-as-signal, no boolean-as-count, no inversion, no stale table**
+- [ ] **Wired into every relevant output surface, and an explicit Attacker's-View kill-chain placement (which phase) OR a written exclusion justification**
 
 ## Credit caution
 Ground-truth API calls cost credits (**IntelX = 50/day**, DeHashed metered).
