@@ -24,6 +24,8 @@ security_scanner/scanner.db
 # Screenshots and generated output
 SME Rating Engine/manual_screenshots/
 SME Rating Engine/Quotes/
+# Rendered card-verification / calibration output (regenerate via tooling/_verify_calib_cards.py)
+security_scanner/docs/calibration_prep/calib_verify/
 # Test fixtures - large JSON baselines are local-only (regenerate from any scan)
 security_scanner/test_fixtures/phishield_baseline.json
 security_scanner/test_fixtures/test_*.pdf
