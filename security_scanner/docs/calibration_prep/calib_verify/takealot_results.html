@@ -1,0 +1,2762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CyberRisk Assessment — takealot.com</title>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #222636; --border: #2e3347;
+      --text: #e2e8f0; --muted: #7c85a2; --low: #22c55e; --medium: #f59e0b;
+      --high: #f97316; --critical: #ef4444; --blue: #3b82f6; --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+
+    .header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .logo { font-size: 1.05rem; font-weight: 700; color: var(--blue); }
+    .domain-badge { background: var(--surface2); border: 1px solid var(--border); padding: 5px 14px; border-radius: 999px; font-size: 0.88rem; font-weight: 600; }
+    .timestamp { color: var(--muted); font-size: 0.8rem; }
+
+    /* Pending / scanning */
+    .pending-card { text-align: center; padding: 60px 20px; }
+    .spinner { width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+    .spinner-sm { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .scan-progress { max-width: 740px; margin: 0 auto; }
+    .progress-bar-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; height: 28px; margin-bottom: 24px; position: relative; }
+    .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--blue), #6366f1); transition: width .4s ease; border-radius: 8px; }
+    .progress-bar-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: .78rem; font-weight: 600; color: var(--text); z-index: 1; }
+
+    .scan-section { margin-bottom: 16px; }
+    .scan-section-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 8px; }
+    .scan-checklist { list-style: none; }
+    .scan-item { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 6px; font-size: .84rem; margin-bottom: 2px; transition: background .2s; }
+    .scan-item.running { background: rgba(59,130,246,.08); color: var(--blue); }
+    .scan-item.done { color: var(--low); }
+    .scan-item.pending { color: var(--muted); }
+    .scan-icon { width: 18px; text-align: center; flex-shrink: 0; font-size: .9rem; }
+    .scan-label { flex: 1; }
+    .scan-score { font-size: .76rem; font-weight: 600; opacity: .7; }
+
+    .ip-discovery-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 18px; display: none; }
+    .ip-discovery-card.visible { display: block; }
+    .ip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .ip-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; font-size: .78rem; font-family: monospace; }
+
+    /* Hero */
+    .hero { display: grid; grid-template-columns: 240px 1fr; gap: 18px; margin-bottom: 20px; }
+    @media (max-width: 700px) { .hero { grid-template-columns: 1fr; } }
+
+    /* Gauge */
+    .gauge-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .gauge-wrap { position: relative; width: 190px; height: 105px; }
+    .gauge-wrap svg { width: 190px; height: 105px; }
+    .gauge-label { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); text-align: center; }
+    .gauge-score { font-size: 3rem; font-weight: 800; line-height: 1; margin-bottom: 2px; }
+    .gauge-max { font-size: 0.85rem; color: rgba(255,255,255,0.55); margin-top: 2px; letter-spacing: 2px; font-weight: 500; }
+    .risk-pill { padding: 5px 18px; border-radius: 999px; font-weight: 700; font-size: 0.95rem; }
+    .risk-Low    { background: #14532d; color: var(--low); }
+    .risk-Medium { background: #78350f; color: var(--medium); }
+    .risk-High   { background: #7c2d12; color: var(--high); }
+    .risk-Critical { background: #7f1d1d; color: var(--critical); }
+
+    /* Summary grid */
+    .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    @media (max-width: 600px) { .summary-card { grid-template-columns: repeat(2, 1fr); } }
+    .stat { text-align: center; }
+    .stat-val { font-size: 1.6rem; font-weight: 800; }
+    .stat-lbl { font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
+    .color-red { color: var(--critical); } .color-amber { color: var(--medium); } .color-green { color: var(--low); } .color-blue { color: var(--blue); }
+
+    /* Section label */
+    .section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 20px 0 10px; }
+
+    /* Category cards */
+    .categories { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 20px; align-items: start; }
+    .cat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .cat-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; min-height: 56px; box-sizing: border-box; cursor: pointer; user-select: none; transition: background 0.15s; }
+    .cat-header:hover { background: var(--surface2); }
+    /* Allow the title column to keep its width so long, verbose grade strings
+       wrap instead of squeezing the title into 3-4 lines (uneven card heights). */
+    .cat-header > div:last-child { flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
+    .cat-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
+    .traffic-light { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .tl-green   { background: var(--low);      box-shadow: 0 0 7px var(--low); }
+    .tl-amber   { background: var(--medium);   box-shadow: 0 0 7px var(--medium); }
+    .tl-red     { background: var(--high);     box-shadow: 0 0 7px var(--high); }
+    .tl-crimson { background: var(--critical); box-shadow: 0 0 7px var(--critical); }
+    .tl-blue    { background: var(--blue);     box-shadow: 0 0 7px var(--blue); }
+    .cat-title { font-weight: 600; font-size: 0.9rem; min-width: 0; line-height: 1.25; }
+    .cat-grade { font-weight: 700; font-size: 1rem; white-space: normal; text-align: right; }
+    .chevron { color: var(--muted); font-size: 0.75rem; transition: transform 0.2s; }
+    .cat-body { display: none; padding: 0 16px 14px; border-top: 1px solid var(--border); }
+    .cat-body.open { display: block; }
+    .chevron.open { transform: rotate(180deg); }
+
+    /* KV table */
+    .kv-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.82rem; }
+    .kv-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .kv-table td:first-child { color: var(--muted); white-space: nowrap; width: 42%; }
+    .kv-table tr:last-child td { border-bottom: none; }
+
+    /* Vulnerability table */
+    .vuln-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .vuln-table th { text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border); color: var(--muted); font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+    .vuln-table td { padding: 8px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .vuln-table tr:last-child td { border-bottom: none; }
+    .vuln-table tr:hover { background: rgba(255,255,255,.03); }
+    .sev-badge { display: inline-block; width: 20px; height: 20px; border-radius: 4px; text-align: center; line-height: 20px; font-size: .7rem; font-weight: 700; color: #fff; margin-right: 4px; }
+    .sev-critical { background: var(--critical); }
+    .sev-high { background: var(--high); }
+    .sev-medium { background: var(--medium); }
+    .sev-low { background: var(--green); }
+
+    /* Issue list */
+    .issue-list { list-style: none; margin-top: 10px; }
+    .issue-item { display: flex; gap: 7px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+    .issue-item:last-child { border-bottom: none; }
+    .issue-icon { flex-shrink: 0; margin-top: 1px; }
+    .issue-ok { color: var(--low); } .issue-warn { color: var(--medium); } .issue-err { color: var(--critical); }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 0.76rem; font-weight: 600; }
+    .badge-green  { background: #14532d; color: var(--low); }
+    .badge-red    { background: #7f1d1d; color: var(--critical); }
+    .badge-amber  { background: #78350f; color: var(--medium); }
+    .badge-blue   { background: #1e3a5f; color: var(--blue); }
+    .badge-grey   { background: var(--border); color: var(--muted); }
+
+    /* Port chips */
+    .port-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .port-chip { padding: 2px 8px; border-radius: 5px; font-size: 0.76rem; font-weight: 600; }
+    .port-high    { background: #7f1d1d; color: var(--critical); }
+    .port-medium  { background: #78350f; color: var(--medium); }
+    .port-info    { background: var(--surface2); color: var(--muted); }
+    .port-critical { background: #4c0519; color: #fda4af; border: 1px solid var(--critical); }
+
+    /* Subdomain list */
+    .sub-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .sub-chip { padding: 2px 7px; border-radius: 4px; font-size: 0.74rem; }
+    .sub-risky  { background: #78350f; color: var(--medium); }
+    .sub-normal { background: var(--surface2); color: var(--muted); }
+
+    /* Recommendations */
+    .rec-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 22px; margin-bottom: 20px; }
+    .rec-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 12px; }
+    .rec-list { list-style: none; }
+    .rec-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.84rem; }
+    .rec-item:last-child { border-bottom: none; }
+    .rec-num { flex-shrink: 0; width: 22px; height: 22px; background: var(--blue); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; margin-top: 1px; }
+
+    .footer { text-align: center; color: var(--muted); font-size: 0.76rem; padding: 18px 0; border-top: 1px solid var(--border); margin-top: 4px; }
+    .pdf-btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pdf-btn { background: var(--blue); color: white; padding: 6px 14px; border-radius: 7px; font-size: 0.82rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .pdf-btn:hover { background: #2563eb; }
+    .pdf-btn-outline { background: transparent; color: var(--blue); border: 1.5px solid var(--blue); padding: 5px 13px; border-radius: 7px; font-size: 0.82rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .pdf-btn-outline:hover { background: rgba(59,130,246,.12); }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="logo">&#128737; CyberRisk Assessment</div>
+    <div class="domain-badge">takealot.com</div>
+    <div class="timestamp">Scanned 2026-06-05 00:00:00 UTC</div>
+    
+  </div>
+
+  
+  <script>var RESULTS = ;</script>
+
+  
+  
+  
+  
+  
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="gauge-card">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 190 105" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 15 95 A 80 80 0 0 1 175 95" stroke="#2e3347" stroke-width="14" stroke-linecap="round"/>
+          <path id="gauge-arc" d="M 15 95 A 80 80 0 0 1 175 95" stroke="#ef4444" stroke-width="14" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+          <!-- needle removed for cleaner visual -->
+        </svg>
+        <div class="gauge-label">
+          <div class="gauge-score" id="gauge-score">235</div>
+          <div class="gauge-max">/ 1000</div>
+        </div>
+      </div>
+      <span class="risk-pill risk-Medium">Medium Risk</span>
+    </div>
+
+    <div class="summary-card">
+      
+      <div class="stat">
+        <div class="stat-val color-amber">C</div>
+        <div class="stat-lbl">SSL Grade</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-green">9<span style="font-size:.9rem">/10</span></div>
+        <div class="stat-lbl">Email Security</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-green">0</div>
+        <div class="stat-lbl">Breaches</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-red">4</div>
+        <div class="stat-lbl">Exposed Panels</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-green">0</div>
+        <div class="stat-lbl">DB/Service Leaks</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-red">&#9888;</div>
+        <div class="stat-lbl">Blacklisted</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-green">&#10003;</div>
+        <div class="stat-lbl">WAF Present</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val color-amber">235</div>
+        <div class="stat-lbl">Risk Score</div>
+      </div>
+    </div>
+  </div>
+
+  
+  
+  
+
+  <!-- =================== INSURANCE ANALYTICS =================== -->
+  
+  <div class="section-label">&#128202; Insurance Analytics</div>
+  <div class="categories">
+
+    <!-- RSI (Ransomware Susceptibility Index) — risk label leads, score secondary -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Ransomware Susceptibility Index (RSI)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">Low <span style="font-size:0.75em;color:var(--muted);font-weight:400;">(0.23)</span></span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Risk Level</td><td><span class="badge badge-green" style="font-size:1rem;">Low</span></td></tr>
+          <tr><td>RSI Score</td><td>0.230 / 1.000</td></tr>
+          <tr><td>Base Score</td><td>0.270</td></tr>
+          <tr><td>Industry</td><td>Ecommerce (×1.0)</td></tr>
+          <tr><td>Size Multiplier</td><td>×0.85</td></tr>
+        </table>
+        
+        <div style="margin-top:12px;font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Contributing Factors</div>
+        <table class="vuln-table" style="margin-top:6px;">
+          <thead><tr><th>Factor</th><th>Impact</th><th>Priority</th></tr></thead>
+          <tbody>
+          
+            <tr><td>CRITICAL credential risk — active compromise detected (infostealer/dark web)</td><td style="color:var(--critical);font-weight:600;">+0.22</td><td>P1</td></tr>
+          
+          </tbody>
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- Data Breach Index -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Data Breach Index (DBI)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">80/100 — Excellent</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="vuln-table">
+          <thead><tr><th>Component</th><th>Value</th><th>Points</th><th>Max</th></tr></thead>
+          <tbody>
+          
+            <tr><td>Breach count</td><td>0</td><td>30</td><td>30</td></tr>
+          
+            <tr><td>Recency</td><td>No breaches</td><td>20</td><td>20</td></tr>
+          
+            <tr><td>Data severity</td><td>No data exposed</td><td>15</td><td>15</td></tr>
+          
+            <tr><td>Credential leaks</td><td>3624</td><td>0</td><td>20</td></tr>
+          
+            <tr><td>Trend</td><td>Improving</td><td>15</td><td>15</td></tr>
+          
+            <tr style="border-top:2px solid var(--border);font-weight:700;"><td>Total</td><td></td><td>80</td><td>100</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+
+    <!-- Financial Impact -->
+    
+    
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">Financial Impact Analysis</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade" style="font-size:1.1rem;font-weight:700;">R 98,641,321 <span style="font-size:0.75em;font-weight:400;">est. annual loss</span></span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        
+        
+        
+        
+        
+
+        
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:180px;">Industry</td><td><strong>Ecommerce</strong></td></tr>
+          <tr><td>Annual Revenue</td><td><strong>R&nbsp;20,000,000,000</strong></td></tr>
+        </table>
+
+        
+        
+        
+        
+        
+        
+        
+        <div style="background:linear-gradient(135deg, rgba(99,102,241,0.08), rgba(99,102,241,0.02));border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:4px;">Cyber-Risk Probability</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+            Modelled annual likelihood of a cyber loss event, shown as three distinct and separately-graded measures. A frequency view of signals already scored elsewhere in this report &mdash; it carries no additional scoring weight.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="background:rgba(99,102,241,0.12);">
+                <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Annual cyber-risk probability</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Likelihood</th>
+                <th style="text-align:center;padding:8px 10px;font-weight:600;color:var(--text);">Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;font-weight:700;color:var(--text);">Total cyber-incident <span style="color:var(--muted);font-weight:400;">(breach + ransomware)</span></td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">9.0%</td>
+                <td style="padding:8px 10px;text-align:center;">Typical</td>
+              </tr>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px 8px 28px;color:var(--muted);">of which: data breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">2.21%</td>
+                <td style="padding:8px 10px;text-align:center;">Typical</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 10px;color:var(--muted);">Availability resilience <span style="font-size:.7rem;">(indicative)</span></td>
+                <td style="padding:8px 10px;text-align:right;white-space:nowrap;">6%</td>
+                <td style="padding:8px 10px;text-align:center;color:var(--muted);">Indicative</td>
+              </tr>
+            </tbody>
+          </table>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:10px;line-height:1.55;">
+            <strong style="color:var(--text);">Total cyber-incident probability</strong> &mdash; likelihood of ANY modelled cyber incident, combining the breach and ransomware channels; nests above the data-breach figure (always &ge; it). Relative posture bands: &lt;8% Low / 8-18% Typical / 18-28% Elevated / &gt;28% High &mdash; the combined rate sits above per-org claims frequency (Coalition 2025 1.2-5.7%/yr), so read as relative posture, not a calibrated annual rate.<br>
+            <strong style="color:var(--text);">Data-breach probability</strong> &mdash; likelihood specifically of a data breach (record exfiltration). Firm public bands (Cyentia IRIS SMB &lt;2%/yr, BitSight, SecurityScorecard): &lt;1% Strong / 1-2% Good / 2-3% Typical / 3-6% Elevated / 6-12% High / &gt;12% Critical.<br>
+            <strong style="color:var(--text);">Availability resilience indicator</strong> &mdash; an indicative signal of outage / availability risk (DDoS + system / infrastructure failure). Describes the risk only; not a calibrated probability and not a coverage statement.
+          </div>
+        </div>
+        
+
+        
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Estimated Annual Loss</div>
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:180px;">Est. Annual Loss (Likely)</td><td><strong style="color:var(--critical);">R&nbsp;98,641,321</strong></td></tr>
+          <tr><td>Est. Annual Loss (Min)</td><td>R&nbsp;51,204,181</td></tr>
+          <tr><td>Est. Annual Loss (Max)</td><td>R&nbsp;220,771,244</td></tr>
+        </table>
+
+        
+        
+        
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">
+          Monte Carlo Analysis <span style="font-weight:400;text-transform:none;">(50,000 simulations, PERT distribution)</span>
+        </div>
+
+        
+        
+        
+        <div style="position:relative;background:var(--surface2);border-radius:8px;padding:16px 14px 10px;margin-bottom:14px;">
+          
+          <div style="position:relative;height:28px;background:rgba(255,255,255,0.05);border-radius:6px;overflow:hidden;margin-bottom:8px;">
+            <div style="position:absolute;left:23.2%;width:76.8%;height:100%;background:linear-gradient(90deg, rgba(52,211,153,0.3), rgba(251,191,36,0.3), rgba(239,68,68,0.3));border-radius:6px;"></div>
+            
+            <div style="position:absolute;left:35.7%;width:31.3%;height:100%;background:linear-gradient(90deg, rgba(251,191,36,0.5), rgba(239,68,68,0.5));border-radius:4px;"></div>
+            
+            <div style="position:absolute;left:49.0%;top:0;bottom:0;width:3px;background:white;border-radius:2px;"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);text-align:center;">
+            <span style="flex:1;">P5<br>R&nbsp;51,204,181</span>
+            <span style="flex:1;">P25<br>R&nbsp;78,845,268</span>
+            <span style="flex:1;color:white;font-weight:700;">P50<br>R&nbsp;108,215,405</span>
+            <span style="flex:1;">P75<br>R&nbsp;147,838,035</span>
+            <span style="flex:1;">P95<br>R&nbsp;220,771,244</span>
+          </div>
+        </div>
+
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:220px;">90% Confidence Interval</td><td>R&nbsp;51,204,181 — R&nbsp;220,771,244</td></tr>
+          <tr><td>50% Confidence Interval</td><td><strong>R&nbsp;78,845,268 — R&nbsp;147,838,035</strong></td></tr>
+          <tr><td>Median (P50)</td><td><strong style="color:var(--critical);">R&nbsp;108,215,405</strong></td></tr>
+          <tr><td>Mean</td><td>R&nbsp;118,409,801</td></tr>
+          <tr><td>Standard Deviation</td><td>R&nbsp;53,132,523</td></tr>
+        </table>
+
+        
+        
+        
+        
+        
+        <div style="background:linear-gradient(135deg, rgba(29,78,216,0.08), rgba(29,78,216,0.02));border:1px solid rgba(29,78,216,0.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:4px;">Loss Exposure Scenarios</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+            Modelled annual cyber loss across a range of severity scenarios. Cover sizing should reflect the insured's risk appetite, contractual exposures, balance sheet capacity, and existing risk transfer arrangements.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="background:rgba(29,78,216,0.15);">
+                <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Scenario</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Modelled Loss</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Annual Probability</th>
+              </tr>
+            </thead>
+            <tbody>
+              
+              
+              
+              
+              
+              
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;color:var(--text);">Most likely (mode)</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--text);font-weight:700;white-space:nowrap;">R&nbsp;87,848,956</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">
+                  Most likely (peak)
+                </td>
+              </tr>
+              
+              
+              
+              
+              
+              
+              
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;color:var(--text);">Median (P50)</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--text);font-weight:700;white-space:nowrap;">R&nbsp;108,215,405</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">
+                  50%
+                </td>
+              </tr>
+              
+              
+              
+              
+              
+              
+              
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;color:var(--amber, #d97706);font-weight:700;">Severe event (P99 severity)</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--amber, #d97706);font-weight:700;white-space:nowrap;">R&nbsp;2,721,713,319</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">
+                  &mdash;
+                </td>
+              </tr>
+              
+              
+              
+              
+              
+              
+              
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;color:var(--critical);font-weight:700;">Extreme event (P99.5 severity)</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--critical);font-weight:700;white-space:nowrap;">R&nbsp;2,871,115,182</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">
+                  &mdash;
+                </td>
+              </tr>
+              
+              
+              
+              
+              
+              
+              
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;color:var(--critical);font-weight:700;">Catastrophic (P99.6 severity)</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--critical);font-weight:700;white-space:nowrap;">R&nbsp;2,914,038,160</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">
+                  &mdash;
+                </td>
+              </tr>
+              
+              
+            </tbody>
+          </table>
+          
+          
+          <div style="font-size:.7rem;color:var(--muted);font-style:italic;margin-top:10px;line-height:1.5;">
+            Figures presented are statistical model output. Selection of cover limit is the responsibility of the insured in consultation with the broker. Phishield does not recommend a specific cover amount.
+          </div>
+        </div>
+        
+
+        
+        
+        
+        <div style="background:linear-gradient(135deg, rgba(29,78,216,0.08), rgba(29,78,216,0.02));border:1px solid rgba(29,78,216,0.3);border-radius:10px;padding:16px 18px;margin-bottom:14px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--text);margin-bottom:4px;">Cover-Sizing Ladder</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.5;">
+            The modelled severity of a single severe cyber event across three cover tiers &mdash; the simplified client-facing companion to the Loss Exposure Scenarios above. These are the magnitude of a realised event and do not move with security posture.
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <thead>
+              <tr style="background:rgba(29,78,216,0.15);">
+                <th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text);">Cover tier</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);white-space:nowrap;">Modelled severity</th>
+                <th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text);">Reference</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;">Typical severe breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">R&nbsp;993,817,566</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">P50 severity</td>
+              </tr>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:8px 10px;">Bad breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;white-space:nowrap;">R&nbsp;2,235,426,910</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--muted);">P95 severity</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 10px;font-weight:700;color:var(--critical);">Catastrophic breach</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;color:var(--critical);white-space:nowrap;">R&nbsp;2,914,038,160</td>
+                <td style="padding:8px 10px;text-align:right;color:var(--critical);">1-in-250 / P99.6</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+
+        
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;">
+          
+          
+          
+          <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;min-height:90px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;white-space:nowrap;">Data Breach</div>
+            <div style="font-size:1.05rem;font-weight:700;color:var(--critical);white-space:nowrap;">R&nbsp;1,852,917</div>
+            <div style="font-size:.65rem;color:var(--muted);margin-top:4px;line-height:1.4;">P5: R&nbsp;1,084,948<br>P95: R&nbsp;8,652,547</div>
+          </div>
+          
+          
+          
+          
+          <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;min-height:90px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;white-space:nowrap;">Ransomware</div>
+            <div style="font-size:1.05rem;font-weight:700;color:var(--critical);white-space:nowrap;">R&nbsp;3,085,563</div>
+            <div style="font-size:.65rem;color:var(--muted);margin-top:4px;line-height:1.4;">P5: R&nbsp;1,444,814<br>P95: R&nbsp;6,572,680</div>
+          </div>
+          
+          
+          
+          
+          <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;min-height:90px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;margin-bottom:6px;white-space:nowrap;">Bus. Interruption</div>
+            <div style="font-size:1.05rem;font-weight:700;color:var(--critical);white-space:nowrap;">R&nbsp;102,561,483</div>
+            <div style="font-size:.65rem;color:var(--muted);margin-top:4px;line-height:1.4;">P5: R&nbsp;43,290,873<br>P95: R&nbsp;214,465,392</div>
+          </div>
+          
+          
+        </div>
+        
+
+        
+        
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Cost Category Breakdown</div>
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="width:200px;font-weight:600;">Data Breach Exposure</td>
+            <td>R&nbsp;4,678 <span style="color:var(--muted);">(P=2.2%)</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--muted);padding-left:20px;">POPIA regulatory</td>
+            <td>R&nbsp;100,000</td>
+          </tr>
+          
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="font-weight:600;">Detection & Escalation</td>
+            <td>R&nbsp;413,613 <span style="color:var(--muted);">DFIR, forensics, triage</span></td>
+          </tr>
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="font-weight:600;">Ransom Demand</td>
+            <td>R&nbsp;1,689,190 <span style="color:var(--muted);">(RSI=0.23)</span></td>
+          </tr>
+          
+          <tr style="border-bottom:2px solid var(--border);">
+            <td style="font-weight:600;">Bus. Interruption</td>
+            <td>R&nbsp;96,533,840 <span style="color:var(--muted);">(indicative outage risk)</span></td>
+          </tr>
+        </table>
+
+        
+        
+        <div style="font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Premium Risk Indicator</div>
+        <table class="kv-table" style="margin-bottom:14px;">
+          <tr><td style="width:180px;">Premium Risk Tier</td><td><strong style="color:var(--low);">Low</strong></td></tr>
+          <tr><td>Cover Sizing</td><td><span style="color:var(--muted);">See Loss Exposure Scenarios above</span></td></tr>
+        </table>
+        
+
+        
+        
+        
+        
+        <div style="background:var(--surface2);border-left:3px solid #60a5fa;border-radius:6px;padding:12px 14px;margin-top:6px;margin-bottom:8px;font-size:.78rem;line-height:1.5;">
+          <div style="font-weight:700;color:var(--text);margin-bottom:6px;">Cat Modelling Validity Notice (records-based)</div>
+          <div style="color:var(--muted);">
+            The data-breach component of the catastrophe modelling anchors on the IBM SA Cost of a Data Breach 2025 study (industry-average total cost: <strong>R44,100,000</strong> for the 'eCommerce' industry). IBM's regression is calibrated against typical SA breach sizes (~25,000-100,000 records per incident). For context, the model implicitly assumes this organisation holds approximately <strong>400,000 sensitive records</strong>, based on the industry heuristic of ~1 record per R50,000 of revenue. The breach cost component itself is computed as the residual after subtracting regulatory fines, revenue loss, ransom payment, and incident-response costs from the IBM anchor — the records figure is shown for transparency, not used directly in the calculation.
+          </div>
+          <div style="color:var(--muted);margin-top:8px;">
+            <strong style="color:var(--text);">The cat modelling is reliable up to approximately 250,000 records</strong> for this industry. Above this threshold, the IBM-anchored cat exposure understates realistic worst-case loss because several cost components scale super-linearly outside the IBM calibration window: POPIA Section 22 breach-notification costs (per-subject notice), POPIA Section 99 civil exposure (uncapped per affected subject), regulator escalation toward statutory maxima, and forensic / incident-response scope. If the organisation actually holds more than the threshold above in sensitive records under POPIA, GDPR, HIPAA, PCI DSS, or other applicable regulation, the cat figures in this report should be treated as a <strong style="color:var(--text);">FLOOR estimate only</strong>.
+          </div>
+          <div style="color:var(--muted);margin-top:8px;font-style:italic;">
+            Common outliers: small fintechs, health-tech aggregators, marketing platforms, data brokers, and breach-list resellers — entities with small revenue footprints but record holdings 10-1000x the industry average. The broker should consult the insured to verify approximate sensitive-record holdings. If the count exceeds 250,000, contact Phishield for a bespoke actuarial review of cat exposure — this report's catastrophe numbers are not reliable at that scale.
+          </div>
+        </div>
+        
+
+        
+        <div style="background:var(--surface2);border-left:3px solid var(--amber, #d97706);border-radius:6px;padding:12px 14px;margin-top:6px;font-size:.78rem;line-height:1.5;">
+          <div style="font-weight:700;color:var(--text);margin-bottom:6px;">Civil Liability Disclosure</div>
+          <div style="color:var(--muted);">
+            The financial impact figures presented in this report exclude civil liability arising from contractual or common-law obligations — specifically POPIA Section 99 civil action, common-law delict, contractual indemnities, master service agreement penalties, and third-party claims. These exposures cannot be quantified from an external security assessment because they depend on contracts, customer terms, supplier liabilities, and indemnity clauses held by the organisation under assessment. <strong>Civil exposure is uncapped under POPIA Section 99 and South African common law</strong> and can materially exceed the regulatory fine figures shown. Legal counsel and the organisation's risk officer should review contractual exposures alongside this report when determining appropriate cover.
+          </div>
+        </div>
+
+        
+        
+        
+        
+        
+        
+      </div>
+    </div>
+    
+
+    <!-- Risk Mitigation Recommendations -->
+    
+    
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Risk Mitigation Recommendations (Expected-Loss)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade" style="color:var(--low);">Save R&nbsp;36,095,127</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        
+        
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:10px;margin-bottom:6px;">
+          <div style="padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--low);">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Data-breach likelihood</div>
+            <div style="font-size:.98rem;font-weight:800;margin-top:4px;line-height:1.4;">2.20% <span style="color:var(--muted);font-size:.78rem;font-weight:600;">(Typical)</span> &rarr; <span style="color:var(--low);">0.33%</span> <span style="color:var(--muted);font-size:.78rem;font-weight:600;">(Strong)</span></div>
+          </div>
+          <div style="padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Reduction in modelled exposure</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--low);margin-top:4px;">36.6%</div>
+          </div>
+          <div style="padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.7rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Catastrophe cover (1-in-250)</div>
+            <div style="font-size:1.2rem;font-weight:800;margin-top:4px;">R&nbsp;2,914,038,160</div>
+            <div style="font-size:.66rem;color:var(--muted);margin-top:2px;">Unchanged &mdash; severity-driven</div>
+          </div>
+        </div>
+        
+        <!-- Impact summary strip -->
+        <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-top:10px;">
+          <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Current Annual Loss</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--critical);margin-top:4px;">R&nbsp;98,641,321</div>
+          </div>
+          <div style="font-size:1.5rem;color:var(--low);">&#10132;</div>
+          <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--low);">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;font-weight:600;">Mitigated Annual Loss</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--low);margin-top:4px;">R&nbsp;62,546,194</div>
+          </div>
+        </div>
+
+        <!-- Severity summary badges -->
+        <div style="display:flex;gap:12px;margin-top:14px;">
+          
+          <span class="badge badge-red">1 Critical &middot; R&nbsp;11,106,193</span>
+          
+          
+          <span class="badge badge-amber">2 High &middot; R&nbsp;19,435,838</span>
+          
+          
+          <span class="badge" style="background:rgba(59,130,246,.15);color:var(--blue);">2 Medium &middot; R&nbsp;5,553,096</span>
+          
+        </div>
+
+        <!-- Findings table -->
+        <table class="kv-table" style="margin-top:14px;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left;padding:6px 8px;font-size:.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;">Severity</th>
+              <th style="text-align:left;padding:6px 8px;font-size:.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;">Recommendation</th>
+              <th style="text-align:right;padding:6px 8px;font-size:.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;">Est. Annual Savings</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:8px;white-space:nowrap;">
+                
+                <span class="badge badge-red">Critical</span>
+                
+              </td>
+              <td style="padding:8px;">
+                <div style="font-size:.84rem;font-weight:600;">Restrict access to exposed sensitive files</div>
+                <div style="font-size:.74rem;color:var(--muted);margin-top:2px;">CRITICAL: Sensitive file exposed — /.git/HEAD (HTTP 403)</div>
+              </td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R&nbsp;11,106,193</td>
+            </tr>
+            
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:8px;white-space:nowrap;">
+                
+                <span class="badge badge-amber">High</span>
+                
+              </td>
+              <td style="padding:8px;">
+                <div style="font-size:.84rem;font-weight:600;">Force password resets for all leaked credentials</div>
+                <div style="font-size:.74rem;color:var(--muted);margin-top:2px;">1 plaintext password(s) found — immediate credential stuffing risk</div>
+              </td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R&nbsp;11,106,193</td>
+            </tr>
+            
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:8px;white-space:nowrap;">
+                
+                <span class="badge badge-amber">High</span>
+                
+              </td>
+              <td style="padding:8px;">
+                <div style="font-size:.84rem;font-weight:600;">Audit and rotate credentials exposed in data leaks</div>
+                <div style="font-size:.74rem;color:var(--muted);margin-top:2px;">3624 credential record(s) found in Dehashed for this domain (sources: Bureau van Dijk, healthcrum.com (Cit0day), Lumin PDF, Houzz.com, Canva.com) — notify affected users and enforce password reset</div>
+              </td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R&nbsp;8,329,645</td>
+            </tr>
+            
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:8px;white-space:nowrap;">
+                
+                <span class="badge" style="background:rgba(59,130,246,.15);color:var(--blue);">Medium</span>
+                
+              </td>
+              <td style="padding:8px;">
+                <div style="font-size:.84rem;font-weight:600;">Implement security headers (HSTS, CSP, X-Frame-Options)</div>
+                <div style="font-size:.74rem;color:var(--muted);margin-top:2px;">Missing security header: X-Content-Type-Options</div>
+              </td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R&nbsp;2,776,548</td>
+            </tr>
+            
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:8px;white-space:nowrap;">
+                
+                <span class="badge" style="background:rgba(59,130,246,.15);color:var(--blue);">Medium</span>
+                
+              </td>
+              <td style="padding:8px;">
+                <div style="font-size:.84rem;font-weight:600;">Resolve DNS blocklist entries</div>
+                <div style="font-size:.74rem;color:var(--muted);margin-top:2px;">Domain/IP listed on 1 blacklist(s): dbl.spamhaus.org</div>
+              </td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:var(--low);white-space:nowrap;">R&nbsp;2,776,548</td>
+            </tr>
+            
+          </tbody>
+        </table>
+        <div style="margin-top:10px;font-size:.72rem;color:var(--muted);">Incident-driven view: savings are modelled by reducing the probability of specific incident types (ransomware / breach / DDoS families), based on FAIR methodology and capped at 85% of current loss. The "Remediation Roadmap — RSI Prioritisation" card gives the complementary RSI-point view; the two totals differ because they model different drivers and are not competing figures. Actual risk reduction depends on implementation quality and scope.</div>
+      </div>
+    </div>
+    
+
+    <!-- RSI Prioritisation Roadmap -->
+    
+    
+
+  </div>
+  
+
+  <!-- =================== CORE SECURITY =================== -->
+  <div class="section-label">&#128274; Core Security</div>
+  <div class="categories">
+
+    <!-- SSL/TLS -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-amber"></div><div class="cat-title">SSL / TLS</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">C</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          
+          <tr><td>TLS 1.0</td><td><span class="badge badge-green">Disabled</span></td></tr>
+          <tr><td>TLS 1.1</td><td><span class="badge badge-green">Disabled</span></td></tr>
+          <tr><td>TLS 1.2</td><td><span class="badge badge-green">Yes</span></td></tr>
+          <tr><td>TLS 1.3</td><td><span class="badge badge-green">Yes</span></td></tr>
+          <tr><td>Cipher</td><td>TLS_AES_128_GCM_SHA256 <span class="badge badge-green">Strong</span></td></tr>
+          <tr><td>HSTS</td><td><span class="badge badge-green">Present</span></td></tr>
+          <tr><td>OCSP Stapling</td><td><span style="color:var(--muted);">Unknown</span></td></tr>
+          <tr><td>CAA Records</td><td>
+            
+            
+              <span class="badge badge-red">None</span> <span style="font-size:.78rem;color:var(--muted);">— any CA can issue certificates</span>
+            
+          </td></tr>
+        </table>
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>Invalid or unverifiable SSL certificate</li><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>No CAA records — any CA can issue certificates for this domain</li></ul>
+      </div>
+    </div>
+
+    <!-- HTTP Headers -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-red"></div><div class="cat-title">HTTP Security Headers</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">48%</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          
+          <tr><td>Content-Security-Policy</td><td>
+            <span class="badge badge-green">&#10003;</span><span style="font-size:.74rem;color:var(--muted);margin-left:4px;">frame-ancestors &#39;self&#39;; report-uri /csp-violation/</span>
+            
+          </td></tr>
+          
+          <tr><td>X-Frame-Options</td><td>
+            <span class="badge badge-green">&#10003;</span><span style="font-size:.74rem;color:var(--muted);margin-left:4px;">DENY</span>
+            
+          </td></tr>
+          
+          <tr><td>X-Content-Type-Options</td><td>
+            <span class="badge badge-red">Missing</span>
+          </td></tr>
+          
+          <tr><td>Strict-Transport-Security</td><td>
+            <span class="badge badge-green">&#10003;</span><span style="font-size:.74rem;color:var(--muted);margin-left:4px;">max-age=2592000</span>
+            
+          </td></tr>
+          
+          <tr><td>Referrer-Policy</td><td>
+            <span class="badge badge-red">Missing</span>
+          </td></tr>
+          
+          <tr><td>Permissions-Policy</td><td>
+            <span class="badge badge-red">Missing</span>
+          </td></tr>
+          
+          
+          
+          <tr><td colspan="2" style="padding-top:8px;font-weight:700;color:#60a5fa;">CSP Quality Analysis</td></tr>
+          <tr><td>Quality Score</td><td><span style="font-weight:700;color:var(--critical);">28/100</span></td></tr>
+          
+          <tr><td>Missing Directives</td><td><span style="color:#e67e22;font-size:.78rem;">default-src, script-src, object-src, base-uri</span></td></tr>
+          
+        </table>
+      </div>
+    </div>
+    
+
+    <!-- Website Security -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Website Security</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">100%</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>HTTPS enforced</td><td><span class="badge badge-green">Yes</span></td></tr>
+          <tr><td>Mixed content</td><td><span class="badge badge-green">None</span></td></tr>
+          <tr><td>CMS</td><td>None detected</td></tr>
+          
+          <tr><td>Cookie Secure</td><td><span class="badge badge-green">OK</span></td></tr>
+          <tr><td>Cookie HttpOnly</td><td><span class="badge badge-green">OK</span></td></tr>
+          
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- WAF -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">WAF / DDoS Protection</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">&#10003;</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>WAF detected</td><td><span class="badge badge-green">Yes — Cloudflare</span></td></tr>
+          <tr><td>All detected</td><td>Cloudflare, F5 BIG-IP ASM</td></tr>
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- Third-Party JavaScript (S-2) -->
+    
+    
+
+  </div>
+
+  <!-- =================== EMAIL SECURITY =================== -->
+  <div class="section-label">&#128140; Email Security</div>
+  <div class="categories">
+
+    <!-- Email Security -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Email Authentication</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">9/10</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>SPF</td><td>
+            
+              <span class="badge badge-green">Present</span>
+              
+            
+          </td></tr>
+          <tr><td>SPF record</td><td style="word-break:break-all;font-size:.75rem;">v=spf1 ip4:105.29.88.254 ip4:105.28.106.109 ip4:34.250.143.67 include:spf1.takealot.com include:_spf.google.com include:mail.zendesk.com include:spf.mandrillapp.com include:transmail.net include:_spf.123formbuilder.com -all</td></tr>
+          <tr><td>DMARC</td><td>
+            
+              <span class="badge badge-green">Present</span>
+              <span class="badge badge-amber">quarantine</span>
+              
+            
+          </td></tr>
+          <tr><td>DKIM</td><td><span class="badge badge-green">Found</span> google, google2, gm1, gm2, selector1, selector2, default, mail, dkim, k1, k2, smtp, email, sendgrid, s1, s2, smtpapi, mandrill, mte1, mte2, mailchimp, mc, mailgun, mg, postmark, pm, amazonses, ses, ug7nbmlcpnkfm3bm5tul7oy2kqoyno3s, everlytickey1, everlytickey2, everlytic, mimecast, protonmail, zendesk, zendesk1, zendesk2, cm, turbo-smtp, sparkpost</td></tr>
+          <tr><td>MX Records</td><td>5 record(s)</td></tr>
+        </table>
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>DMARC policy is &#39;quarantine&#39; — consider upgrading to &#39;reject&#39;</li></ul>
+      </div>
+    </div>
+
+    <!-- Email Hardening -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-red"></div><div class="cat-title">Advanced Email Hardening</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">0/10</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>MTA-STS</td><td>
+            <span class="badge badge-red">Missing</span>
+          </td></tr>
+          <tr><td>BIMI</td><td>
+            <span class="badge badge-grey">Not configured</span>
+          </td></tr>
+          <tr><td>DANE / TLSA</td><td>
+            <span class="badge badge-grey">Not configured</span>
+          </td></tr>
+          <tr><td>TLS-RPT</td><td>
+            
+            <span class="badge badge-grey">Not configured</span>
+          </td></tr>
+        </table>
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>No MTA-STS policy — inbound email susceptible to TLS downgrade attacks</li><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>DANE/TLSA not configured for mail servers</li><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>TLS-RPT not configured — no reporting of email TLS delivery failures</li></ul>
+      </div>
+    </div>
+
+    <!-- Email-Vendor Surface (S-4) -->
+    
+    
+
+  </div>
+
+  <!-- =================== NETWORK & INFRASTRUCTURE =================== -->
+  <div class="section-label">&#127760; Network &amp; Infrastructure</div>
+  <div class="categories">
+
+    <!-- DNS & Infrastructure -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">DNS &amp; Open Ports</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">5 ports</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        
+        <table class="kv-table">
+          <tr><td>Server</td><td>cloudflare</td></tr><tr><td>X-Powered-By</td><td>Awesome</td></tr>
+          <tr><td>Reverse DNS</td><td>None</td></tr>
+          
+          
+          <tr>
+            <td>Zone Transfer (AXFR)</td>
+            <td>
+              
+                <span style="color:var(--low);">Protected</span> (2 NS server(s) tested)
+              
+            </td>
+          </tr>
+          
+        </table>
+        
+        
+        
+        
+        <table class="kv-table">
+          <tr><td>DNSSEC</td><td><span class="badge badge-amber">Disabled</span></td></tr>
+          
+          <tr><td>AAAA (IPv6) records</td><td>2606:4700::6810:4840, 2606:4700::6810:4740</td></tr>
+          
+          <tr><td>TXT records</td><td>21 record(s)</td></tr>
+        </table>
+        
+        
+        
+        
+        
+          
+            
+            
+          
+            
+            
+          
+            
+            
+          
+            
+            
+          
+        
+          
+            
+            
+          
+            
+            
+          
+            
+            
+          
+            
+            
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+          
+            
+            
+          
+            
+            
+          
+        
+          
+            
+            
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+        <div class="port-list" style="margin-bottom:10px;"><span class="port-chip port-high">21/FTP</span><span class="port-chip port-info">80/HTTP</span><span class="port-chip port-info">443/HTTPS</span><span class="port-chip port-info">8080/HTTP-Alt</span><span class="port-chip port-info">8443/HTTPS-Alt</span></div>
+        
+        
+        <div style="margin-top:8px;">
+          
+          <div style="border:1px solid rgba(255,60,60,0.2);border-radius:8px;padding:8px 12px;margin-bottom:6px;background:rgba(255,60,60,0.03);font-size:0.82rem;">
+            <div style="font-weight:700;margin-bottom:4px;">
+              <span class="port-chip port-high" style="margin-right:6px;">21/FTP</span>
+              <span style="color:#e74c3c;">HIGH RISK</span>
+            </div>
+            
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Found on IP:</span> <span style="font-family:monospace;color:#fbbf24;font-size:0.78rem;margin-right:6px;">34.76.113.116</span></div>
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Detected version:</span> <span style="color:#22d3ee;font-weight:600;font-family:monospace;font-size:0.82rem;">(vsFTPd 3.0.5)</span></div>
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Typical exploits:</span> <span style="color:#cbd5e1;">Anonymous login, credential brute-force, cleartext credential theft (CVE-2015-3306, CVE-2019-12815)</span></div>
+            
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Vuln metrics:</span> <span style="font-weight:600;color:#e74c3c;">CVSS 9.8 | EPSS 85% | CISA KEV</span>
+             <span class="badge badge-red" style="font-size:0.65rem;">CISA KEV</span></div>
+            
+            
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Notable CVEs:</span>
+              <span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;margin-right:6px;">CVE-2015-3306</span><span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;margin-right:6px;">CVE-2019-12815</span><span style="font-family:monospace;font-size:0.78rem;color:#94a3b8;margin-right:6px;">CVE-2010-4221</span>
+            </div>
+            
+            <div style="margin-bottom:3px;"><span style="color:#94a3b8;">Insurance risk:</span> <span style="color:#fbbf24;">Data exfiltration via unencrypted file transfer; ransomware initial access vector</span></div>
+            
+            
+            <details style="margin-top:6px;">
+              <summary style="cursor:pointer;color:#60a5fa;font-size:0.78rem;user-select:none;">Show raw banner &amp; version detail</summary>
+              <div style="margin-top:4px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:6px;font-family:monospace;font-size:0.75rem;color:#94a3b8;white-space:pre-wrap;word-break:break-all;">220 (vsFTPd 3.0.5)</div>
+              
+            </details>
+            
+          </div>
+          
+        </div>
+        
+        
+      </div>
+    </div>
+
+    <!-- High-Risk Protocol Exposure -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Database &amp; Service Exposure</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade ">0 critical</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="color:var(--low);font-size:.82rem;margin-top:8px;">&#10003; No critical database or service ports exposed</p>
+      </div>
+    </div>
+
+    <!-- Cloud & CDN -->
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Cloud &amp; CDN Infrastructure</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">None</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Provider</td><td>None</td></tr>
+          <tr><td>CDN detected</td><td><span class="badge badge-grey">No</span></td></tr>
+          <tr><td>Hosting type</td><td>self-hosted or undetected cloud</td></tr>
+          <tr><td>IP Addresses</td><td>104.16.72.64, 104.16.71.64</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- VPN / Remote Access -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">VPN &amp; Remote Access</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">Microsoft RDS Web</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>RDP exposed</td><td><span class="badge badge-green">No</span></td></tr>
+          <tr><td>VPN detected</td><td><span class="badge badge-green">Microsoft RDS Web</span></td></tr>
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- Cloudflare-Bypass Origin Discovery -->
+    
+    
+    
+
+    <!-- CVE / Known Vulnerabilities -->
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">CVE / Known Vulnerabilities</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">16 IPs found</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <!-- Summary stats -->
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+          <div class="mini-stat"><div class="stat-val">16</div><div class="stat-lbl">Total IPs</div></div>
+          <div class="mini-stat"><div class="stat-val">14</div><div class="stat-lbl">IPv4</div></div>
+          <div class="mini-stat"><div class="stat-val">2</div><div class="stat-lbl">IPv6</div></div>
+          <div class="mini-stat"><div class="stat-val">2</div><div class="stat-lbl">ASNs</div></div>
+          <div class="mini-stat"><div class="stat-val">1</div><div class="stat-lbl">Countries</div></div>
+          
+          
+        </div>
+
+        <!-- Aggregate vulnerability summary -->
+        
+
+        <!-- Per-IP cards -->
+        
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">104.16.72.64</span>
+              <span class="badge badge-blue" style="font-size:0.65rem;">PRIMARY</span>
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#3b82f6;">dns</span><span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#2563eb;">primary</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Cloudflare, Inc. <span style="color:#64748b;">(AS13335)</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> takealot.com</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                8080, 2082, 2083, 2052, 2053, 2086, 2087, 2095, 80, 8880, 8443, 443
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">104.16.71.64</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#3b82f6;">dns</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Cloudflare, Inc. <span style="color:#64748b;">(AS13335)</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> takealot.com</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                8080, 2082, 2083, 2053, 2086, 2087, 80, 8880, 8443, 443
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">104.199.105.60</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> 60.105.199.104.bc.googleusercontent.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">197.96.143.205</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">196.34.14.130</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> smtp.takealot.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">2606:4700::6810:4740</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Cloudflare, Inc. <span style="color:#64748b;">(AS13335)</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                80
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">197.84.242.38</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">35.195.252.77</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> 77.252.195.35.bc.googleusercontent.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">34.77.15.242</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> mail.takealot.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">197.84.242.47</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">34.77.94.112</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Google LLC <span style="color:#64748b;">(AS396982)</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> 112.94.77.34.bc.googleusercontent.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                80, 443
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">34.76.113.116</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">90</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Google LLC <span style="color:#64748b;">(AS396982)</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> 116.113.76.34.bc.googleusercontent.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                21
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">196.34.14.132</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">104.199.99.192</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> 192.99.199.104.bc.googleusercontent.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">2606:4700::6810:4840</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Cloudflare, Inc. <span style="color:#64748b;">(AS13335)</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                80
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+          
+          
+          
+          
+          
+          <div style="border:1px solid rgba(30,58,138,0.12);border-radius:10px;margin-bottom:10px;overflow:hidden;">
+            <!-- IP header row -->
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:rgba(30,58,138,0.04);border-bottom:1px solid rgba(30,58,138,0.08);">
+              <span style="font-family:monospace;font-weight:700;font-size:0.95rem;">196.34.14.128</span>
+              
+              
+              
+              <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <span style="font-size:0.75rem;color:#94a3b8;">Risk Score:</span>
+                <span style="font-weight:800;font-size:1.1rem;color:#27ae60;">100</span>
+                <span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;color:#fff;background:#27ae60;">Low</span>
+              </span>
+            </div>
+            <!-- IP details grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:0.82rem;">
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Source:</span> <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:0.65rem;margin-right:3px;color:#fff;background:#14b8a6;">subdomain</span></div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Org:</span> Unknown</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Country:</span> </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);"><span style="color:#94a3b8;">Reverse DNS:</span> www.takealot.com.</div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Open Ports:</span>
+                None detected
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">CVEs:</span>
+                0
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max CVSS:</span>
+                —
+              </div>
+              <div style="padding:6px 14px;border-bottom:1px solid rgba(30,58,138,0.06);">
+                <span style="color:#94a3b8;">Max EPSS:</span>
+                —
+              </div>
+            </div>
+            <!-- Remediation -->
+            
+            <!-- Expandable CVE details -->
+            
+          </div>
+        
+        
+
+        
+      </div>
+    </div>
+
+  </div>
+
+  <!-- =================== EXPOSURE & REPUTATION =================== -->
+  <div class="section-label">&#128270; Exposure &amp; Reputation</div>
+  <div class="categories">
+
+    <!-- Brand-Level Breach Record (HIBP, layer 1 of credential pipeline) -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Brand-Level Breach Record (HIBP)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">Clean</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="font-size:.78rem;color:var(--muted);margin:4px 0 8px 0;">Scope: was this domain itself a breached service in HIBP&rsquo;s public catalogue? (Consumer-scale breaches only.) Email-level exposure is covered by <strong>Credential Risk Assessment</strong> below, which uses HIBP to add breach dates to Dehashed findings.</p>
+        
+        <p style="color:var(--low);font-size:.82rem;margin-top:8px;">&#10003; This domain is not listed as a breached service. Expected for most B2B domains &mdash; see Credential Risk Assessment for email-level exposure.</p>
+        
+      </div>
+    </div>
+
+    <!-- DNSBL Reputation -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">IP / Domain Reputation</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade color-red">Blacklisted</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        
+        <table class="kv-table">
+          
+          <tr><td>Domain blacklists</td><td>dbl.spamhaus.org</td></tr>
+        </table>
+        
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>Domain/IP listed on 1 blacklist(s): dbl.spamhaus.org</li></ul>
+      </div>
+    </div>
+
+    <!-- Exposed Admin Panels -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">Exposed Admin &amp; Sensitive Paths</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade color-red">4 found</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        
+        <div style="margin-top:8px;">
+          
+          <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <code>/.git/HEAD</code>
+            <span><span class="badge badge-red">critical</span> HTTP 403</span>
+          </div>
+          
+          <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <code>/.git/config</code>
+            <span><span class="badge badge-red">critical</span> HTTP 403</span>
+          </div>
+          
+          <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <code>/.env</code>
+            <span><span class="badge badge-red">critical</span> HTTP 403</span>
+          </div>
+          
+          <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <code>/.htpasswd</code>
+            <span><span class="badge badge-red">critical</span> HTTP 403</span>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+
+    <!-- Subdomains -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-amber"></div><div class="cat-title">Subdomain Exposure (CT Logs)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">15 found</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <!-- Discovery source breakdown -->
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;margin-bottom:10px;">
+          <div style="font-size:.78rem;color:var(--muted);">CT Logs: <strong style="color:var(--text);">0</strong></div>
+          <div style="font-size:.78rem;color:var(--muted);">DNS Brute-force: <strong style="color:var(--text);">15</strong></div>
+          <div style="font-size:.78rem;color:var(--muted);">Unique IPs: <strong style="color:var(--text);">16</strong></div>
+          
+        </div>
+        
+        
+        <p style="font-size:.8rem;color:var(--medium);margin-top:8px;margin-bottom:6px;">&#9888; Risky subdomains in public CT logs:</p>
+        <div class="sub-list"><span class="sub-chip sub-risky">beta.takealot.com</span><span class="sub-chip sub-risky">admin.takealot.com</span><span class="sub-chip sub-risky">backup.takealot.com</span><span class="sub-chip sub-risky">jenkins.takealot.com</span><span class="sub-chip sub-risky">jira.takealot.com</span><span class="sub-chip sub-risky">kibana.takealot.com</span><span class="sub-chip sub-risky">grafana.takealot.com</span><span class="sub-chip sub-risky">api.takealot.com</span><span class="sub-chip sub-risky">ftp.takealot.com</span></div>
+        
+        
+        <div style="margin-top:8px;">
+          <div class="sub-list"><span class="sub-chip sub-normal">www.takealot.com</span><span class="sub-chip sub-normal">secure.takealot.com</span><span class="sub-chip sub-normal">mail.takealot.com</span><span class="sub-chip sub-risky">beta.takealot.com</span><span class="sub-chip sub-risky">admin.takealot.com</span><span class="sub-chip sub-risky">backup.takealot.com</span><span class="sub-chip sub-normal">webmail.takealot.com</span><span class="sub-chip sub-risky">jenkins.takealot.com</span><span class="sub-chip sub-risky">jira.takealot.com</span><span class="sub-chip sub-risky">kibana.takealot.com</span><span class="sub-chip sub-risky">grafana.takealot.com</span><span class="sub-chip sub-normal">crm.takealot.com</span><span class="sub-chip sub-normal">smtp.takealot.com</span><span class="sub-chip sub-risky">api.takealot.com</span><span class="sub-chip sub-risky">ftp.takealot.com</span></div>
+          
+        </div>
+        
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>9 risky subdomain(s) found: beta.takealot.com, admin.takealot.com, backup.takealot.com, jenkins.takealot.com, jira.takealot.com</li></ul>
+      </div>
+    </div>
+
+    <!-- Dehashed Credential Leaks -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">Dehashed Credential Leaks</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">
+            3624 records
+          </span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        <table class="kv-table">
+          <tr><td>Total records</td><td><span class="badge badge-red">3624</span></td></tr>
+          <tr><td>Unique emails</td><td>98</td></tr>
+          <tr><td>Passwords leaked</td><td><span class="badge badge-red">Yes</span></td></tr>
+          
+          
+          <tr><td>Plaintext passwords</td><td><span class="badge badge-red">1 — IMMEDIATE RISK</span></td></tr>
+          <tr><td>Hashed credentials</td><td>6 (unknown: 6)</td></tr>
+          <tr><td>Weak hashes (MD5/SHA-1)</td><td>0</td></tr>
+          <tr><td>Corporate vs Personal</td><td>100 corporate | 0 personal</td></tr>
+          
+        </table>
+        
+        <p style="font-size:.78rem;color:var(--muted);margin:8px 0 4px 0;">Sample leaked emails:</p>
+        <div class="sub-list"><span class="sub-chip sub-risky">cornelius@takealot.com</span><span class="sub-chip sub-risky">cortney.kramer@takealot.com</span><span class="sub-chip sub-risky">andries@takealot.com</span><span class="sub-chip sub-risky">megan.virgin@takealot.com</span><span class="sub-chip sub-risky">mthobeli@takealot.com</span></div>
+        
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>3624 credential record(s) found in Dehashed for this domain (sources: Bureau van Dijk, healthcrum.com (Cit0day), Lumin PDF, Houzz.com, Canva.com) — notify affected users and enforce password reset</li><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>1 plaintext password(s) found — immediate credential stuffing risk</li></ul>
+        
+      </div>
+    </div>
+
+    <!-- Third-Party Cross-Correlation (Hudson Rock × S-4 × S-5) -->
+    
+    
+
+    <!-- Credential Exposure Correlation (DeHashed × Recency × Infostealer × IntelX) -->
+    
+    
+
+    <!-- Hudson Rock Infostealer Detection -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">Infostealer Detection (Hudson Rock)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade color-red">
+            51646 compromised
+          </span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Compromised employees</td><td><span class="badge badge-red">30</span></td></tr>
+          <tr><td>Compromised users</td><td><span class="badge badge-red">51616</span></td></tr>
+          <tr><td>Third-party exposures</td><td><span class="badge badge-amber">58</span></td></tr>
+        </table>
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>CRITICAL: 30 employee device(s) infected with infostealer malware — credentials are actively being sold on dark web markets. Immediate incident response required.</li><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>51616 user account(s) compromised via infostealer — force password resets and enable MFA for affected accounts.</li><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>58 third-party exposure(s) detected — review supply chain partners and shared credential access.</li></ul>
+        
+      </div>
+    </div>
+
+    <!-- IntelX Dark Web Monitoring (full-width card — recent-findings rows
+         carry long file paths/URLs that need horizontal room to wrap legibly) -->
+    
+    
+    
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-red"></div><div class="cat-title">Dark Web Monitoring (IntelX)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade ">289 result(s)</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Total references</td><td>289</td></tr>
+          <tr><td>Dark web mentions</td><td>0</td></tr>
+          <tr><td>Paste site mentions</td><td><span class="badge badge-amber">47</span></td></tr>
+          <tr><td>Leak database entries</td><td>242</td></tr>
+        </table>
+        
+        <div style="margin-top:10px;font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;">Recent Findings</div>
+        <table class="kv-table" style="margin-top:6px;table-layout:fixed;width:100%;">
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-31</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">[TN]196.179.0.13.rar/Grabber/grabber_639047079849232071/Downloads/Telegram Deskt <span style="color:var(--muted);font-family:inherit;">(Text File)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-27</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">ZA-41.123.238.212--0.4.3-2980028-23-01-2026-08-45-52.rar/passwords_bruteforce.tx <span style="color:var(--muted);font-family:inherit;">(Text File)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-27</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">ZA-41.123.238.212--0.4.3-2980028-23-01-2026-08-45-52.rar/passwords.txt <span style="color:var(--muted);font-family:inherit;">(Text File)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-27</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">ZA-41.123.238.212--0.4.3-2980028-23-01-2026-08-45-52.rar/passwords.tsv <span style="color:var(--muted);font-family:inherit;">(CSV File)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-10</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">https://www.ecommercesky.cz/marketplace/ <span style="color:var(--muted);font-family:inherit;">(Website HTML)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-06</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">ZA4670DE389499C650C6EEF49D4DFE177F_2023_06_28T15_42_30_652693.rar/FileGrabber/Us <span style="color:var(--muted);font-family:inherit;">(Text File)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-06</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">ZA4670DE389499C650C6EEF49D4DFE177F_2023_06_28T15_42_30_652693.rar/FileGrabber/Us <span style="color:var(--muted);font-family:inherit;">(Text File)</span></td>
+          </tr>
+          
+          <tr>
+            <td style="font-size:.75rem;color:var(--muted);width:90px;white-space:nowrap;">2026-03-03</td>
+            <td style="font-size:.75rem;word-break:break-all;font-family:ui-monospace,monospace;">[UN]_wabqnxqzsj55k5imfeizfk39.rar/Chrome/Default/Autofills.txt <span style="color:var(--muted);font-family:inherit;">(Text File)</span></td>
+          </tr>
+          
+        </table>
+        
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>47 paste site mention(s) — data has been shared on public paste sites (Pastebin, etc.).</li></ul>
+      </div>
+    </div>
+    
+
+    <!-- Credential Risk Assessment -->
+    
+    
+    
+    <div class="cat-card" style="grid-column: 1 / -1;">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-crimson"></div><div class="cat-title">Credential Risk Assessment</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade" style="color:var(--critical);">CRITICAL</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <p style="font-size:.88rem;color:var(--text);padding:8px 0;line-height:1.5;">CRITICAL credential risk - active infostealer infection or fresh password capture. Force resets, enable MFA, isolate infected devices, engage IR.</p>
+        
+        <ul class="issue-list" style="margin-top:4px;">
+          <li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>ACTIVE INFOSTEALER: 30 employee device(s) infected - credentials may be exfiltrating in real time</li><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>51616 user account(s) compromised via infostealer malware</li><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>0 plaintext-password and 1 hashed-credential record(s) of 20 exposed (confidence-weighted W=0.42); source(s): healthcrum.com (Cit0day)</li><li class="issue-item"><span class="issue-icon issue-warn">&#9888;</span>IntelX: 0 dark-web and 47 paste mention(s) - monitoring signal, not confirmed credential theft (no score impact)</li>
+        </ul>
+        
+        
+        
+        <div style="margin-top:10px;font-size:.76rem;font-weight:700;color:var(--muted);text-transform:uppercase;">Breach Source Timeline &mdash; HIBP-enriched</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:2px;">Breach dates and data-class metadata come from Have I Been Pwned&rsquo;s public breach catalogue, cross-referenced against Dehashed&rsquo;s reported breach sources. Dehashed does not publish timelines directly.</div>
+        <table class="kv-table" style="margin-top:6px;">
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Bureau van Dijk</td>
+            <td>
+              Date: Unknown
+              
+              
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">healthcrum.com (Cit0day)</td>
+            <td>
+              Date: 2020-11-04
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Passwords</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Lumin PDF</td>
+            <td>
+              Date: Unknown
+              
+              
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Houzz.com</td>
+            <td>
+              Date: 2018-05-23
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Geographic locations, IP addresses, Names, Passwords, Social media profiles, Usernames</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Canva.com</td>
+            <td>
+              Date: 2019-05-24
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Geographic locations, Names, Passwords, Usernames</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Apollo</td>
+            <td>
+              Date: 2018-07-23
+              
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Employers, Geographic locations, Job titles, Names, Phone numbers, Salutations, Social media profiles</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Exploit.in</td>
+            <td>
+              Date: Unknown
+              
+              
+              
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Luxottica</td>
+            <td>
+              Date: 2021-03-16
+              
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Dates of birth, Email addresses, Genders, Names, Phone numbers, Physical addresses</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">DemandScience by Pure Incubation</td>
+            <td>
+              Date: 2024-02-28
+              
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Employers, Job titles, Names, Phone numbers, Physical addresses, Social media profiles</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Animoto</td>
+            <td>
+              Date: 2018-07-10
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Dates of birth, Email addresses, Geographic locations, Names, Passwords</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Wattpad.com</td>
+            <td>
+              Date: 2020-06-29
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Bios, Dates of birth, Email addresses, Genders, Geographic locations, IP addresses, Names, Passwords, Social media profiles, User website URLs, Usernames</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Dropbox</td>
+            <td>
+              Date: 2012-07-01
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Passwords</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td style="width:140px;font-weight:600;">Nitro PDF</td>
+            <td>
+              Date: 2020-09-28
+              <span class="badge badge-red" style="margin-left:6px;">Passwords exposed</span>
+              <span class="badge badge-amber" style="margin-left:4px;">Verified</span>
+              <br><span style="color:var(--muted);font-size:.75rem;">Data: Email addresses, Names, Passwords</span>
+            </td>
+          </tr>
+          
+        </table>
+        
+      </div>
+    </div>
+    
+
+    <!-- VirusTotal Reputation -->
+    
+    
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">VirusTotal Reputation</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade ">
+            Clean
+          </span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        <table class="kv-table">
+          <tr><td>Malicious detections</td><td><span class="badge badge-green">0</span></td></tr>
+          <tr><td>Suspicious detections</td><td><span class="badge badge-green">0</span></td></tr>
+          <tr><td>Harmless</td><td>62</td></tr>
+          <tr><td>Undetected</td><td>32</td></tr>
+          <tr><td>Community reputation</td><td>0</td></tr>
+          <tr><td>Community votes</td><td>&#128077; 0 / &#128078; 0</td></tr>
+          <tr><td>Popularity rank</td><td>#1,113</td></tr>
+          <tr><td>Categories</td><td style="font-size:.78rem;">onlineshop, online shopping, shopping</td></tr>
+        </table>
+        
+        
+        
+      </div>
+    </div>
+
+    <!-- Fraudulent Domains -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-blue"></div><div class="cat-title">Fraudulent Domains (Typosquat)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade" style="color:var(--muted);">Skipped</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <p style="color:var(--muted);font-size:.82rem;margin-top:8px;">Set <code>include_fraudulent_domains: true</code> in the scan request to enable typosquat detection. This check adds ~2 minutes to scan time.</p>
+      </div>
+    </div>
+    
+
+    <!-- Related Domains (Supply Chain) (S-1) -->
+    
+    
+
+    <!-- Dependency Manifest Leak (S-3) -->
+    
+    
+
+    <!-- Vendor Breach Correlation (S-5) -->
+    
+    
+
+  </div>
+
+  <!-- =================== TECH & GOVERNANCE =================== -->
+  <div class="section-label">&#9881; Technology &amp; Governance</div>
+  <div class="categories">
+
+    <!-- Tech Stack -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Technology Stack &amp; EOL</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade ">0 EOL</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td colspan="2" style="font-size:.78rem;color:var(--muted);">Server: cloudflare</td></tr><tr><td colspan="2" style="font-size:.78rem;color:var(--muted);">X-Powered-By: Awesome</td></tr>
+          <tr><td>CMS</td><td>Not detected</td></tr>
+          <tr><td>EOL software</td><td><span class="badge badge-green">None detected</span></td></tr>
+          
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- CMS Plugin SBOM (S-10) -->
+    
+    
+
+    <!-- Domain Intelligence -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Domain Intelligence</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">14.9y</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Registrar</td><td>GoDaddy.com, LLC</td></tr>
+          <tr><td>Created</td><td>2011-06-01</td></tr>
+          <tr><td>Expires</td><td>2026-06-01</td></tr>
+          <tr><td>Age</td><td>5424 days (14.9 years)</td></tr>
+          <tr><td>WHOIS privacy</td><td><span class="badge badge-grey">Protected</span></td></tr>
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- SecurityTrails DNS Intelligence -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">DNS Intelligence (SecurityTrails)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">
+            Info
+          </span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        <table class="kv-table">
+          
+          
+          
+          <tr><td>Associated domains</td><td>0</td></tr>
+          
+        </table>
+        
+        
+        
+      </div>
+    </div>
+
+    <!-- Privacy Policy Compliance -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-red"></div><div class="cat-title">Privacy Policy Compliance</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade color-red">
+            10%
+          </span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        <table class="kv-table">
+          <tr><td>Policy URL</td><td style="font-size:.76rem;word-break:break-all;">https://takealot.com/privacy-policy</td></tr>
+          <tr><td>Compliance score</td><td><span class="badge badge-red">10%</span></td></tr>
+          <tr><td>Sections found</td><td style="font-size:.78rem;">Children&#39;s Privacy</td></tr>
+          <tr><td>Sections missing</td><td style="font-size:.78rem;color:var(--critical);">Data Collection, Data Usage, Data Sharing, Cookie Policy, User Rights, Data Retention, Contact Information, Do Not Track, Updates to Policy</td></tr>
+        </table>
+        
+        <ul class="issue-list" style="margin-top:8px;"><li class="issue-item"><span class="issue-icon issue-err">&#9888;</span>Privacy policy missing critical sections: Data Collection, Data Usage, User Rights, Contact Information</li></ul>
+      </div>
+    </div>
+
+    <!-- Security Policy -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Security Policy &amp; VDP</div></div>
+        <div style="display:flex;align-items:center;gap:10px;"><span class="cat-grade">VDP present</span><span class="chevron">&#9660;</span></div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>security.txt</td><td>
+            <span class="badge badge-green">Found at /.well-known/security.txt</span>
+            
+          </td></tr>
+          <tr><td>robots.txt</td><td><span class="badge badge-green">Present</span> 52 disallow rules</td></tr>
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- Payment Security -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Payment Security</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">Unknown</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Payment page</td><td><span class="badge badge-blue">Detected</span></td></tr>
+          
+          <tr><td>Provider</td><td>None</td></tr>
+          <tr><td>Page HTTPS</td><td><span class="badge badge-green">Yes</span></td></tr>
+          <tr><td>Self-hosted form</td><td><span class="badge badge-green">No</span></td></tr>
+          
+        </table>
+        
+      </div>
+    </div>
+
+    <!-- AI Readiness — Anthropic Glasswing partner -->
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-grey"></div><div class="cat-title">AI Readiness (Glasswing)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade ">Not detected</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Glasswing partner</td><td><span class="badge badge-grey">Not detected</span></td></tr>
+          
+        </table>
+        <p style="font-size:.8rem;color:var(--muted);margin-top:8px;"></p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- =================== COMPLIANCE FRAMEWORK MAPPING =================== -->
+  
+
+  <!-- =================== DISCOVERY & INFO =================== -->
+  <div class="section-label">&#128269; Discovery & Information Security</div>
+  <div class="categories">
+
+    <!-- Web Ranking -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Web Ranking (Tranco)</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">#6,632</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        <table class="kv-table">
+          <tr><td>Tranco Rank</td><td>#6,632</td></tr>
+          <tr><td>In List</td><td><span class="badge badge-green">Yes</span></td></tr>
+          <tr><td>Score</td><td>90/100</td></tr>
+        </table>
+        
+      </div>
+    </div>
+    
+
+    <!-- Information Disclosure -->
+    
+    
+    
+    <div class="cat-card">
+      <div class="cat-header" onclick="toggle(this)">
+        <div class="cat-left"><div class="traffic-light tl-green"></div><div class="cat-title">Information Disclosure</div></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="cat-grade">100/100</span>
+          <span class="chevron">&#9660;</span>
+        </div>
+      </div>
+      <div class="cat-body">
+        
+        <p style="color:var(--low);font-size:.84rem;margin-top:6px;">&#10003; No sensitive files or debug endpoints exposed.</p>
+        
+        
+      </div>
+    </div>
+    
+
+  </div>
+
+  <!-- Recommendations -->
+  
+  <div class="rec-section">
+    <div class="rec-title">&#128203; Remediation Recommendations</div>
+    <ul class="rec-list">
+      
+      <li class="rec-item"><div class="rec-num">1</div><div>Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">2</div><div>Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">3</div><div>Add &#39;X-Content-Type-Options: nosniff&#39; to prevent MIME sniffing.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">4</div><div>Immediately restrict access to sensitive files. Audit your web server configuration and .htaccess rules.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">5</div><div>Immediately investigate and remediate the critically exposed service.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">6</div><div>Notify affected users and enforce mandatory password reset for all leaked accounts.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">7</div><div>Update your privacy policy to include all required sections for POPIA/GDPR compliance.</div></li>
+      
+      <li class="rec-item"><div class="rec-num">8</div><div>Investigate blacklist listings — likely indicates past spam, malware distribution, or compromise.</div></li>
+      
+    </ul>
+  </div>
+  
+
+  <!-- Gauge JS -->
+  <script>
+  (function(){
+    var score = 235;
+    var pct = score / 1000;
+    var arcLen = 251.2;
+    var arc = document.getElementById('gauge-arc');
+    arc.style.strokeDashoffset = arcLen - (arcLen * pct);
+    arc.setAttribute('stroke', pct < 0.2 ? '#22c55e' : pct < 0.4 ? '#f59e0b' : pct < 0.6 ? '#f97316' : '#ef4444');
+    // Needle removed — arc fill + score number is cleaner
+  })();
+  </script>
+
+  
+
+  <div class="footer">Passive external assessment only &bull; No intrusive testing &bull; For insurance underwriting use &bull; PHISHIELD UMA (Pty) Ltd &nbsp;|&nbsp; Authorised Financial Services Provider &nbsp;|&nbsp; FSP 46418</div>
+</div>
+
+<script>
+function toggle(header) {
+  var body = header.nextElementSibling;
+  var chevron = header.querySelector('.chevron');
+  body.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
+</script>
+</body>
+</html>

@@ -247,11 +247,16 @@ def build(doc):
         "penalty is applied only when DMARC is not at enforcement - so a "
         "deliberate ~all paired with an enforcing DMARC policy, a common and "
         "valid configuration for large senders, is not penalised. A bare all "
-        "is treated as +all (Pass) per RFC 7208. The penalty magnitudes are "
-        "conservative and calibration-gated. Where a non-enforcing soft-fail "
-        "or neutral SPF is found, the report's remediation recommends "
-        "hardening the policy to a terminal -all and includes it in the "
-        "expected-loss mitigation estimate."
+        "is treated as +all (Pass) per RFC 7208. The qualifier score penalties "
+        "are unchanged; the expected-loss remediation credit for hardening a "
+        "soft-fail or neutral SPF was recalibrated on 5 June 2026 - trimmed "
+        "about a quarter (keeping the email-authentication credits in a "
+        "four-to-two-to-one ratio) because DMARC and SPF enforcement block only "
+        "exact-domain spoofing, a minority of the phishing and business-email-"
+        "compromise surface (the 2025 Verizon DBIR puts phishing at about 16 "
+        "percent of breaches). Where a non-enforcing soft-fail or neutral SPF is "
+        "found, the report's remediation recommends hardening the policy to a "
+        "terminal -all and includes it in the expected-loss mitigation estimate."
     )
 
     # DKIM

@@ -3209,8 +3209,11 @@ def risk_probability_block(d, S):
             "<b>Total cyber-incident probability</b> - the likelihood of ANY "
             "modelled cyber incident in the year, combining the data-breach and "
             "ransomware channels. It nests ABOVE the data-breach figure and is "
-            "always greater than or equal to it. Provisional bands: &lt;5% Low, "
-            "5-15% Typical, 15-30% Elevated, &gt;30% High.",
+            "always greater than or equal to it. Relative posture bands "
+            "(&lt;8% Low, 8-18% Typical, 18-28% Elevated, &gt;28% High): the "
+            "combined rate sits above per-org material-incident claims "
+            "frequency (Coalition 2025 1.2-5.7%/yr), so read it as relative "
+            "posture rather than a calibrated annual claim rate.",
             S["body_muted"]),
         Paragraph(
             "<b>Data-breach probability</b> - the likelihood specifically of a "

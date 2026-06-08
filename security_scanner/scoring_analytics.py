@@ -17,9 +17,17 @@ _BREACH_PROB_BANDS = (
     (1.0, "Strong"), (2.0, "Good"), (3.0, "Typical"),
     (6.0, "Elevated"), (12.0, "High"), (float("inf"), "Critical"),
 )
-# Provisional total cyber-incident bands (multi-channel: breach + ransomware).
+# Relative multi-channel cyber-incident posture bands (breach + ransomware).
+# Re-fit 2026-06-05: 5/15/30 -> 8/18/28 so a genuinely low-risk posture can
+# reach 'Low' (the old <5% Low band was practically unreachable once the
+# ransomware channel is included). RELATIVE-posture bands: the combined rate
+# sits ABOVE per-org material-incident claims frequency (Coalition 2025
+# 1.2%/yr <$25M -> 5.7%/yr >$100M; Cyentia IRIS <2% SMB) because the
+# ransomware loss-event-frequency lever (RW_LEF) is pending the warm-annual-
+# loss recalibration (colleague-gated). Read as relative posture, not a
+# calibrated annual claim rate; a frequency-calibration pass is recorded next.
 _CYBER_INCIDENT_BANDS = (
-    (5.0, "Low"), (15.0, "Typical"), (30.0, "Elevated"), (float("inf"), "High"),
+    (8.0, "Low"), (18.0, "Typical"), (28.0, "Elevated"), (float("inf"), "High"),
 )
 
 
@@ -2051,10 +2059,19 @@ class FinancialImpactCalculator:
         waf_detected = categories.get("waf", {}).get("detected", False)
         cdn_detected = categories.get("cloud_cdn", {}).get("cdn_detected", False)
         single_asn = categories.get("external_ips", {}).get("unique_asns", 2) <= 1
-        p_interruption = min(0.5, 0.05
-                             + (0.05 if not waf_detected else 0)
-                             + (0.05 if not cdn_detected else 0)
-                             + (0.05 if single_asn else 0))
+        # FAIR-anchored 2026-06-05. Base = Uptime Institute AOA serious/severe
+        # outage rate (~3%/yr). Increments reflect the availability-relevant
+        # control gaps: CDN/DDoS-mitigation is the PRIMARY lever (+0.035),
+        # multi-homing / hosting redundancy secondary (single ASN +0.025), and
+        # WAF is L7-flood ONLY (+0.015) - most volumetric DDoS is mitigated at
+        # the CDN edge, not the WAF ruleset, so WAF is no longer the largest
+        # availability term. Cap 0.18 (even fully-exposed self-hosted single-
+        # homed orgs sit ~10-12%/yr empirically). Base FAIR-anchored; per-
+        # control increments directional.
+        p_interruption = min(0.18, 0.03
+                             + (0.015 if not waf_detected else 0)
+                             + (0.035 if not cdn_detected else 0)
+                             + (0.025 if single_asn else 0))
 
         # ── Total breach magnitude (IBM anchor, scaled by revenue) ──
         # Uses graduated elasticity: flatter for small companies (less aggressive),
@@ -2359,6 +2376,14 @@ class FinancialImpactCalculator:
         # BI_factor = industry-specific IT dependency (from Section 1 lookup)
         SA_AVG_DOWNTIME = 25  # SA average recovery days (Sophos SA 2025 + global data)
         IMPACT_FACTOR = 0.50  # Average revenue loss across recovery period
+        # Acute outages (DDoS + the short opportunistic / silent / extortion
+        # legs) are a DIFFERENT regime: while the service is down the loss is
+        # near-total throughout, with no 90->10 recovery tail to average
+        # against. A linear 90->10 recovery averages 0.50 for ANY recovery
+        # length (25 or 80 days), so the rebuild factor is duration-independent;
+        # acute events are flat-high and decoupled from the (drifting) recovery
+        # period. In the MC the PERT day-count carries the duration spread.
+        ACUTE_IMPACT_FACTOR = 0.85
         c3_bi = SA_AVG_DOWNTIME * daily_revenue * IMPACT_FACTOR * bi_factor
 
         # ── Cost Component C1: Post-breach liability (RESIDUAL) ──
@@ -2432,7 +2457,7 @@ class FinancialImpactCalculator:
         # 4. Silent data breach: exfiltration discovered late, no encryption
         #    Full C1+C2, minimal C3 (2 days investigation), reduced C5
         p_silent = p_breach * R["silent_breach"]
-        c3_silent = 2 * daily_revenue * IMPACT_FACTOR * bi_factor  # minimal downtime
+        c3_silent = 2 * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor  # minimal downtime (acute outage)
         c5_silent = c5_ir * 0.60  # lower IR (no encryption recovery)
         cost_silent = c1_liability + c2_regulatory_fine + c3_silent + c5_silent
         incidents["silent_breach"] = {
@@ -2448,7 +2473,7 @@ class FinancialImpactCalculator:
         # 5. Data extortion (no encryption): exfiltration + demand, no lockout
         #    Minimal downtime (3 days), reduced ransom (no operational leverage)
         p_extort = p_breach * R["data_extortion"]
-        c3_extort = 3 * daily_revenue * IMPACT_FACTOR * bi_factor
+        c3_extort = 3 * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         c4_extort = c4_ransom * 0.40  # lower demand — no operational leverage
         cost_extort = c1_liability + c2_regulatory_fine + c3_extort + c4_extort + c5_ir
         incidents["data_extortion"] = {
@@ -2464,7 +2489,7 @@ class FinancialImpactCalculator:
         # 6. Opportunistic breach: automated/bot-driven, no targeted demand
         #    Minimal downtime (1 day), reduced C1 (smaller data set), reduced C5
         p_opp = p_breach * R["opportunistic_breach"]
-        c3_opp = 1 * daily_revenue * IMPACT_FACTOR * bi_factor
+        c3_opp = 1 * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         c1_opp = c1_liability * 0.50  # smaller data set typically exposed
         c5_opp = c5_ir * 0.40  # simpler response
         cost_opp = c1_opp + c2_regulatory_fine + c3_opp + c5_opp
@@ -2480,7 +2505,7 @@ class FinancialImpactCalculator:
 
         # 7. DDoS / infrastructure failure: pure availability event
         #    Uses p_interruption, 5-day average, BI factor applies
-        c3_ddos = 5 * daily_revenue * IMPACT_FACTOR * bi_factor
+        c3_ddos = 5 * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         cost_ddos = c3_ddos
         incidents["ddos_infra"] = {
             "label": "DDoS / Infrastructure Failure",
@@ -2605,7 +2630,7 @@ class FinancialImpactCalculator:
 
         # 4. Silent data breach (C1+C2+C3_minimal+C5_partial)
         mc_p = mc_p_breach * R["silent_breach"]
-        mc_c3_silent = self._pert_sample(1, 2, 5, N) * daily_revenue * IMPACT_FACTOR * bi_factor
+        mc_c3_silent = self._pert_sample(1, 2, 5, N) * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         mc_breach_total += mc_p * (mc_c1 + mc_c2)
         mc_detection_total += mc_p * mc_c5 * 0.60
         mc_bi_total += mc_p * mc_c3_silent
@@ -2614,7 +2639,7 @@ class FinancialImpactCalculator:
         # Downtime upper bound widened 7d -> 21d (2026-05-15, Phase B3)
         # to cover extended negotiation cases observed in SA cat events.
         mc_p = mc_p_breach * R["data_extortion"]
-        mc_c3_extort = self._pert_sample(1, 3, 21, N) * daily_revenue * IMPACT_FACTOR * bi_factor
+        mc_c3_extort = self._pert_sample(1, 3, 21, N) * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         mc_breach_total += mc_p * (mc_c1 + mc_c2)
         mc_ransom_demand_total += mc_p * mc_c4 * 0.40
         mc_detection_total += mc_p * mc_c5
@@ -2622,14 +2647,14 @@ class FinancialImpactCalculator:
 
         # 6. Opportunistic breach (C1_partial+C2+C3_minimal+C5_partial)
         mc_p = mc_p_breach * R["opportunistic_breach"]
-        mc_c3_opp = self._pert_sample(0.5, 1, 3, N) * daily_revenue * IMPACT_FACTOR * bi_factor
+        mc_c3_opp = self._pert_sample(0.5, 1, 3, N) * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         mc_breach_total += mc_p * (mc_c1 * 0.50 + mc_c2)
         mc_detection_total += mc_p * mc_c5 * 0.40
         mc_bi_total += mc_p * mc_c3_opp
 
         # 7. DDoS / infra failure (C3 only, 5-day avg)
         mc_dt_ddos = self._pert_sample(1, 5, 14, N)
-        mc_c3_ddos = mc_dt_ddos * daily_revenue * IMPACT_FACTOR * bi_factor
+        mc_c3_ddos = mc_dt_ddos * daily_revenue * ACUTE_IMPACT_FACTOR * bi_factor
         mc_bi_total += mc_p_int * mc_c3_ddos
 
         # Total and per-category stats
@@ -3062,15 +3087,19 @@ class FinancialImpactCalculator:
                         "ransomware": round(p_ransomware, 4),
                     },
                     "bands": [
-                        {"upper_pct": 5, "grade": "Low"},
-                        {"upper_pct": 15, "grade": "Typical"},
-                        {"upper_pct": 30, "grade": "Elevated"},
+                        {"upper_pct": 8, "grade": "Low"},
+                        {"upper_pct": 18, "grade": "Typical"},
+                        {"upper_pct": 28, "grade": "Elevated"},
                         {"upper_pct": None, "grade": "High"},
                     ],
                     "band_anchor": (
-                        "PROVISIONAL multi-channel bands (not yet firm-anchored). "
-                        "The breach band is deliberately NOT reused - that "
-                        "mislabels a typical multi-channel rate as 'High'."
+                        "Relative multi-channel posture bands (8/18/28). The "
+                        "combined breach+ransomware rate sits above per-org "
+                        "material-incident claims frequency (Coalition 2025 "
+                        "1.2%/yr <$25M to 5.7%/yr >$100M; Cyentia IRIS <2% SMB) "
+                        "because it aggregates both channels as an index; read "
+                        "as relative posture, not a calibrated annual claim rate. "
+                        "A frequency-calibration pass (ransomware LEF) is next."
                     ),
                 },
                 "availability_resilience": {
@@ -3080,16 +3109,18 @@ class FinancialImpactCalculator:
                         "risk spanning DDoS and system / infrastructure-failure "
                         "causes. Describes the RISK only - it is NOT a coverage "
                         "statement (outage / system-failure cover varies by "
-                        "policy and over time). Heuristic; NOT a calibrated "
-                        "probability."
+                        "policy and over time). Base FAIR-anchored to outage "
+                        "data; per-control increments directional."
                     ),
                     "indicator": round(p_interruption, 4),
                     "indicator_pct": round(p_interruption * 100, 1),
                     "calibrated": False,
                     "basis": (
-                        "Heuristic over WAF / CDN / single-ASN / DNSBL "
-                        "availability signals. Indicative-only pending FAIR "
-                        "re-anchoring (deferred)."
+                        "FAIR-anchored base (Uptime Institute AOA serious/severe "
+                        "outage rate ~3%/yr) plus availability-control increments: "
+                        "CDN/DDoS-mitigation (primary), hosting redundancy / "
+                        "multi-ASN (secondary), WAF (L7-flood only). Base "
+                        "FAIR-anchored; per-control increments directional."
                     ),
                 },
             },
@@ -3266,14 +3297,18 @@ class FinancialImpactCalculator:
         {"pattern": r"CRITICAL:.*Sensitive file exposed",     "severity": "Critical", "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Restrict access to exposed sensitive files"},
         # --- High: aligned with rebalanced weights ---
         {"pattern": r"high.severity CVE|high CVE",            "severity": "High",     "scenario": "ransomware",             "rsi_reduction": 0.04, "label": "Patch high-severity CVEs within 30 days"},
-        {"pattern": r"No WAF detected",                       "severity": "High",     "scenario": "both",                   "rsi_reduction": 0.05, "bi_reduction": 0.05, "label": "Deploy a Web Application Firewall (WAF)"},
-        {"pattern": r"No SPF record|No DMARC record",         "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Implement email authentication (SPF/DMARC/DKIM)"},
+        {"pattern": r"No WAF detected",                       "severity": "High",     "scenario": "both",                   "rsi_reduction": 0.05, "bi_reduction": 0.015, "label": "Deploy a Web Application Firewall (WAF)"},
+        {"pattern": r"No SPF record|No DMARC record",         "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.06, "label": "Implement email authentication (SPF/DMARC/DKIM)"},
         # DMARC published but NOT enforcing (p=none): the primary anti-spoofing
         # control is in monitor-only mode (BEC vector). probability_reduction
-        # CONSERVATIVE + CALIBRATION-GATED - half the full-absence rung (0.08),
-        # double the SPF-qualifier rung (0.02); CISA BOD 18-01 / NIST SP 800-177
-        # / M3AAWG target p=reject. Unconditional (nothing above DMARC moots it).
-        {"pattern": r"DMARC policy is 'none'",                "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.04, "label": "Enforce DMARC (move policy from p=none to quarantine or reject)"},
+        # CALIBRATED 2026-06-05 (0.04 -> 0.03): half the full-absence rung
+        # (0.06), double the SPF-qualifier rung (0.015). Scale cut ~25% from the
+        # provisional set because DMARC enforcement only blocks EXACT-domain
+        # spoofing - a minority of the phishing/BEC surface (DBIR 2025: phishing
+        # = 16% of breaches; lookalike / display-name / ATO route around DMARC).
+        # The 4:2:1 ratio is retained. CISA BOD 18-01 / NIST SP 800-177 / M3AAWG
+        # target p=reject. Unconditional (nothing above DMARC moots it).
+        {"pattern": r"DMARC policy is 'none'",                "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.03, "label": "Enforce DMARC (move policy from p=none to quarantine or reject)"},
         {"pattern": r"password.*leaked|Plaintext.*password",   "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.08, "label": "Force password resets for all leaked credentials"},
         {"pattern": r"credential record.*found in Dehashed",  "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.06, "label": "Audit and rotate credentials exposed in data leaks"},
         {"pattern": r"admin.*exposed|login.*exposed",          "severity": "High",     "scenario": "data_breach",            "probability_reduction": 0.04, "label": "Restrict access to admin and login panels"},
@@ -3289,14 +3324,16 @@ class FinancialImpactCalculator:
         {"pattern": r"Missing security header|HSTS.*missing|X-Frame|Content-Security-Policy", "severity": "Medium", "scenario": "data_breach", "probability_reduction": 0.02, "label": "Implement security headers (HSTS, CSP, X-Frame-Options)"},
         {"pattern": r"blacklist|blocklist|listed on",          "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Resolve DNS blocklist entries"},
         {"pattern": r"lookalike domain|typosquat|fraudulent",  "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Monitor and take down fraudulent lookalike domains"},
-        {"pattern": r"single ASN|unique_asns.*1",              "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.05, "label": "Add hosting redundancy across multiple providers"},
+        {"pattern": r"single ASN|unique_asns.*1",              "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.025, "label": "Add hosting redundancy across multiple providers"},
         {"pattern": r"No VPN.*detected",                       "severity": "Medium",   "scenario": "ransomware",             "rsi_reduction": 0.03, "label": "Implement VPN or Zero Trust Network Access for remote workers"},
-        {"pattern": r"No DKIM",                                "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Enable DKIM signing on your mail server"},
+        {"pattern": r"No DKIM",                                "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.015, "label": "Enable DKIM signing on your mail server"},
         # SPF present but non-enforcing (~all/?all) with no enforcing DMARC -
-        # harden to -all. probability_reduction CONSERVATIVE + CALIBRATION-GATED
-        # (anchored to the secondary email-hardening rung; tune at calibration).
-        {"pattern": r"SPF ends with '[~?]all'",          "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.02, "label": "Harden SPF to a hard-fail policy ('-all')"},
-        {"pattern": r"No CDN detected",                        "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.03, "label": "Deploy a CDN for DDoS resilience and availability"},
+        # harden to -all. probability_reduction CALIBRATED 2026-06-05 (0.02 ->
+        # 0.015): the lowest email-auth rung (= No-DKIM), 1/4 of the absence
+        # rung (0.06). SPF hard-fail without DMARC = no From-alignment, no
+        # reporting; necessary-not-sufficient (NIST SP 800-177; M3AAWG).
+        {"pattern": r"SPF ends with '[~?]all'",          "severity": "Medium",   "scenario": "data_breach",            "probability_reduction": 0.015, "label": "Harden SPF to a hard-fail policy ('-all')"},
+        {"pattern": r"No CDN detected",                        "severity": "Medium",   "scenario": "business_interruption",  "bi_reduction": 0.035, "label": "Deploy a CDN for DDoS resilience and availability"},
     ]
 
     def _build_mitigations(self, categories: dict, fin_output: dict) -> dict:
