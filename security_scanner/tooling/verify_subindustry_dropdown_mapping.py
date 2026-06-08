@@ -41,20 +41,23 @@ def check(cond, label, detail=""):
         FAIL += 1
         print(f"FAIL [{label}] {detail}")
 
-# ── A. every dropdown entry carries a canonical key that resolves 1:1 ──
+# ── A. the value each dropdown entry SUBMITS resolves 1:1 in the lookup ──
+# The form submits the canonical `key` if present, else the `label` (since
+# 2026-06-09 the label IS the canonical SIC key, so no separate key field).
 submitted_keys = set()
 for industry, subs in SUB.items():
     for e in subs:
         label = e.get("label", "?")
-        key = e.get("key")
-        check(key is not None, "key-present", f"{industry}/{label!r} has no 'key' field")
-        if key is None:
+        submitted = e.get("key") or e.get("label")
+        check(submitted is not None, "submit-value-present", f"{industry}/{label!r} has no label or key")
+        if submitted is None:
             continue
-        submitted_keys.add(key)
-        check(key in BI, "key-in-BI", f"{industry}/{label!r} -> key {key!r} not in INDUSTRY_BI_FACTOR")
-        if key in BI and "bi" in e:
-            check(abs(BI[key] - e["bi"]) < 1e-9, "bi-matches",
-                  f"{industry}/{label!r} key {key!r}: dropdown bi {e['bi']} != table {BI[key]}")
+        submitted_keys.add(submitted)
+        check(submitted in BI, "submit-in-BI",
+              f"{industry}/{label!r} -> submits {submitted!r} not in INDUSTRY_BI_FACTOR")
+        if submitted in BI and "bi" in e:
+            check(abs(BI[submitted] - e["bi"]) < 1e-9, "bi-matches",
+                  f"{industry}/{label!r} submits {submitted!r}: dropdown bi {e['bi']} != table {BI[submitted]}")
 
 # ── B. cross-table label sets are all valid sub-industry keys ──
 for x in sorted(AI):
