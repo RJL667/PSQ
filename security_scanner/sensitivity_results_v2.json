@@ -13,34 +13,69 @@
       "description": "Total breach magnitude anchor. Scales entire model linearly.",
       "profiles": {
         "R10M FS": {
-          "base": 3748250,
-          "up_total": 4685312,
-          "down_total": 2811188,
+          "base": 1743852,
+          "up_total": 2179815,
+          "down_total": 1307889,
+          "up_pct": 25.0,
+          "down_pct": -25.0,
+          "max_impact": 25.0,
+          "base_rec_cover": 2500000
+        },
+        "R200M FS": {
+          "base": 14687402,
+          "up_total": 18359252,
+          "down_total": 11015552,
+          "up_pct": 25.0,
+          "down_pct": -25.0,
+          "max_impact": 25.0,
+          "base_rec_cover": 15000000
+        },
+        "R200M Agri": {
+          "base": 3824072,
+          "up_total": 4780090,
+          "down_total": 2868054,
           "up_pct": 25.0,
           "down_pct": -25.0,
           "max_impact": 25.0,
           "base_rec_cover": 5000000
-        },
-        "R200M FS": {
-          "base": 31362323,
-          "up_total": 39202904,
-          "down_total": 23521742,
-          "up_pct": 25.0,
-          "down_pct": -25.0,
-          "max_impact": 25.0,
-          "base_rec_cover": 35000000
-        },
-        "R200M Agri": {
-          "base": 9546126,
-          "up_total": 11932658,
-          "down_total": 7159594,
-          "up_pct": 25.0,
-          "down_pct": -25.0,
-          "max_impact": 25.0,
-          "base_rec_cover": 10000000
         }
       },
       "avg_max_impact": 25.0,
+      "sensitivity": "High"
+    },
+    {
+      "param": "Scanner Overall Score",
+      "description": "Drives vulnerability in p_breach formula. Higher score = lower breach probability.",
+      "profiles": {
+        "R10M FS": {
+          "base": 1743852,
+          "up_total": 2151842,
+          "down_total": 1410241,
+          "up_pct": 23.4,
+          "down_pct": -19.13,
+          "max_impact": 23.4,
+          "base_rec_cover": 2500000
+        },
+        "R200M FS": {
+          "base": 14687402,
+          "up_total": 18254829,
+          "down_total": 11770340,
+          "up_pct": 24.29,
+          "down_pct": -19.86,
+          "max_impact": 24.29,
+          "base_rec_cover": 15000000
+        },
+        "R200M Agri": {
+          "base": 3824072,
+          "up_total": 4587072,
+          "down_total": 3200172,
+          "up_pct": 19.95,
+          "down_pct": -16.32,
+          "max_impact": 19.95,
+          "base_rec_cover": 5000000
+        }
+      },
+      "avg_max_impact": 22.55,
       "sensitivity": "High"
     },
     {
@@ -48,34 +83,34 @@
       "description": "Scales breach magnitude, C3 (daily revenue), C2 (POPIA/GDPR), and C5 tier.",
       "profiles": {
         "R10M FS": {
-          "base": 3748250,
-          "up_total": 4288305,
-          "down_total": 2973264,
-          "up_pct": 14.41,
-          "down_pct": -20.68,
-          "max_impact": 20.68,
-          "base_rec_cover": 5000000
+          "base": 1743852,
+          "up_total": 1995244,
+          "down_total": 1381475,
+          "up_pct": 14.42,
+          "down_pct": -20.78,
+          "max_impact": 20.78,
+          "base_rec_cover": 2500000
         },
         "R200M FS": {
-          "base": 31362323,
-          "up_total": 34447563,
-          "down_total": 25158960,
-          "up_pct": 9.84,
-          "down_pct": -19.78,
-          "max_impact": 19.78,
-          "base_rec_cover": 35000000
+          "base": 14687402,
+          "up_total": 16099396,
+          "down_total": 11764596,
+          "up_pct": 9.61,
+          "down_pct": -19.9,
+          "max_impact": 19.9,
+          "base_rec_cover": 15000000
         },
         "R200M Agri": {
-          "base": 9546126,
-          "up_total": 10578019,
-          "down_total": 8209206,
-          "up_pct": 10.81,
-          "down_pct": -14.0,
-          "max_impact": 14.0,
-          "base_rec_cover": 10000000
+          "base": 3824072,
+          "up_total": 4168280,
+          "down_total": 3342691,
+          "up_pct": 9.0,
+          "down_pct": -12.59,
+          "max_impact": 12.59,
+          "base_rec_cover": 5000000
         }
       },
-      "avg_max_impact": 18.15,
+      "avg_max_impact": 17.76,
       "sensitivity": "High"
     },
     {
@@ -83,104 +118,69 @@
       "description": "Scales total breach magnitude for high-risk industries. Graduated for small companies.",
       "profiles": {
         "R10M FS": {
-          "base": 3575222,
-          "up_total": 3637446,
-          "down_total": 3513000,
-          "up_pct": 1.74,
-          "down_pct": -1.74,
-          "max_impact": 1.74,
-          "base_rec_cover": 5000000
+          "base": 1643903,
+          "up_total": 1673558,
+          "down_total": 1614247,
+          "up_pct": 1.8,
+          "down_pct": -1.8,
+          "max_impact": 1.8,
+          "base_rec_cover": 2500000
         },
         "R200M FS": {
-          "base": 29853085,
-          "up_total": 36573406,
-          "down_total": 23132763,
-          "up_pct": 22.51,
-          "down_pct": -22.51,
-          "max_impact": 22.51,
-          "base_rec_cover": 30000000
+          "base": 13813454,
+          "up_total": 17043832,
+          "down_total": 10583076,
+          "up_pct": 23.39,
+          "down_pct": -23.39,
+          "max_impact": 23.39,
+          "base_rec_cover": 15000000
         },
         "R200M Agri": {
-          "base": 9411304,
-          "up_total": 11183917,
-          "down_total": 7638693,
-          "up_pct": 18.83,
-          "down_pct": -18.83,
-          "max_impact": 18.83,
-          "base_rec_cover": 10000000
-        }
-      },
-      "avg_max_impact": 14.36,
-      "sensitivity": "Medium"
-    },
-    {
-      "param": "Scanner Overall Score",
-      "description": "Drives vulnerability in p_breach formula. Higher score = lower breach probability.",
-      "profiles": {
-        "R10M FS": {
-          "base": 3748250,
-          "up_total": 3391033,
-          "down_total": 4105466,
-          "up_pct": -9.53,
-          "down_pct": 9.53,
-          "max_impact": 9.53,
+          "base": 3727598,
+          "up_total": 4566219,
+          "down_total": 2888975,
+          "up_pct": 22.5,
+          "down_pct": -22.5,
+          "max_impact": 22.5,
           "base_rec_cover": 5000000
-        },
-        "R200M FS": {
-          "base": 31362323,
-          "up_total": 28246476,
-          "down_total": 34478169,
-          "up_pct": -9.94,
-          "down_pct": 9.93,
-          "max_impact": 9.94,
-          "base_rec_cover": 35000000
-        },
-        "R200M Agri": {
-          "base": 9546126,
-          "up_total": 9006841,
-          "down_total": 10085409,
-          "up_pct": -5.65,
-          "down_pct": 5.65,
-          "max_impact": 5.65,
-          "base_rec_cover": 10000000
         }
       },
-      "avg_max_impact": 8.37,
-      "sensitivity": "Medium"
+      "avg_max_impact": 15.9,
+      "sensitivity": "High"
     },
     {
       "param": "TEF (Threat Event Frequency)",
       "description": "Industry-specific breach targeting frequency. Drives p_breach.",
       "profiles": {
         "R10M FS": {
-          "base": 3748250,
-          "up_total": 4105466,
-          "down_total": 3658945,
-          "up_pct": 9.53,
-          "down_pct": -2.38,
-          "max_impact": 9.53,
-          "base_rec_cover": 5000000
+          "base": 1743852,
+          "up_total": 1950199,
+          "down_total": 1692266,
+          "up_pct": 11.83,
+          "down_pct": -2.96,
+          "max_impact": 11.83,
+          "base_rec_cover": 2500000
         },
         "R200M FS": {
-          "base": 30583361,
-          "up_total": 33504467,
-          "down_total": 29853085,
-          "up_pct": 9.55,
-          "down_pct": -2.39,
-          "max_impact": 9.55,
-          "base_rec_cover": 35000000
+          "base": 14236332,
+          "up_total": 15927844,
+          "down_total": 13813454,
+          "up_pct": 11.88,
+          "down_pct": -2.97,
+          "max_impact": 11.88,
+          "base_rec_cover": 15000000
         },
         "R200M Agri": {
-          "base": 9546126,
-          "up_total": 10085409,
-          "down_total": 9411304,
-          "up_pct": 5.65,
-          "down_pct": -1.41,
-          "max_impact": 5.65,
-          "base_rec_cover": 10000000
+          "base": 3824072,
+          "up_total": 4209971,
+          "down_total": 3727598,
+          "up_pct": 10.09,
+          "down_pct": -2.52,
+          "max_impact": 10.09,
+          "base_rec_cover": 5000000
         }
       },
-      "avg_max_impact": 8.24,
+      "avg_max_impact": 11.27,
       "sensitivity": "Medium"
     },
     {
@@ -188,139 +188,69 @@
       "description": "Revenue scaling exponent. Flatter for small companies, steeper for large.",
       "profiles": {
         "R10M FS": {
-          "base": 3575222,
-          "up_total": 2942633,
-          "down_total": 4343801,
+          "base": 1643903,
+          "up_total": 1353036,
+          "down_total": 1997299,
           "up_pct": -17.69,
           "down_pct": 21.5,
           "max_impact": 21.5,
-          "base_rec_cover": 5000000
+          "base_rec_cover": 2500000
         },
         "R200M FS": {
-          "base": 29853085,
-          "up_total": 29853085,
-          "down_total": 29853085,
+          "base": 13813454,
+          "up_total": 13813454,
+          "down_total": 13813454,
           "up_pct": 0.0,
           "down_pct": 0.0,
           "max_impact": 0.0,
-          "base_rec_cover": 30000000
+          "base_rec_cover": 15000000
         },
         "R200M Agri": {
-          "base": 9411304,
-          "up_total": 9411304,
-          "down_total": 9411304,
+          "base": 3727598,
+          "up_total": 3727598,
+          "down_total": 3727598,
           "up_pct": 0.0,
           "down_pct": 0.0,
           "max_impact": 0.0,
-          "base_rec_cover": 10000000
+          "base_rec_cover": 5000000
         }
       },
       "avg_max_impact": 7.17,
       "sensitivity": "Medium"
     },
     {
-      "param": "SA Downtime Days (25)",
-      "description": "Average recovery time. Drives C3 (BI) component.",
-      "profiles": {
-        "R10M FS": {
-          "base": 3575222,
-          "up_total": 3626740,
-          "down_total": 3523704,
-          "up_pct": 1.44,
-          "down_pct": -1.44,
-          "max_impact": 1.44,
-          "base_rec_cover": 5000000
-        },
-        "R200M FS": {
-          "base": 29853085,
-          "up_total": 30797140,
-          "down_total": 28909030,
-          "up_pct": 3.16,
-          "down_pct": -3.16,
-          "max_impact": 3.16,
-          "base_rec_cover": 30000000
-        },
-        "R200M Agri": {
-          "base": 9411304,
-          "up_total": 10081424,
-          "down_total": 8741184,
-          "up_pct": 7.12,
-          "down_pct": -7.12,
-          "max_impact": 7.12,
-          "base_rec_cover": 10000000
-        }
-      },
-      "avg_max_impact": 3.91,
-      "sensitivity": "Low"
-    },
-    {
-      "param": "Impact Factor (0.50)",
-      "description": "Average revenue loss during recovery. Multiplies with downtime days.",
-      "profiles": {
-        "R10M FS": {
-          "base": 3575222,
-          "up_total": 3626740,
-          "down_total": 3523704,
-          "up_pct": 1.44,
-          "down_pct": -1.44,
-          "max_impact": 1.44,
-          "base_rec_cover": 5000000
-        },
-        "R200M FS": {
-          "base": 29853085,
-          "up_total": 30797140,
-          "down_total": 28909030,
-          "up_pct": 3.16,
-          "down_pct": -3.16,
-          "max_impact": 3.16,
-          "base_rec_cover": 30000000
-        },
-        "R200M Agri": {
-          "base": 9411304,
-          "up_total": 10081424,
-          "down_total": 8741184,
-          "up_pct": 7.12,
-          "down_pct": -7.12,
-          "max_impact": 7.12,
-          "base_rec_cover": 10000000
-        }
-      },
-      "avg_max_impact": 3.91,
-      "sensitivity": "Low"
-    },
-    {
       "param": "C4 Ransom Proportion (10.40%)",
       "description": "Ransom share of total breach magnitude. Derived from Sophos SA 2025.",
       "profiles": {
         "R10M FS": {
-          "base": 3575222,
-          "up_total": 3695170,
-          "down_total": 3455274,
-          "up_pct": 3.35,
-          "down_pct": -3.35,
-          "max_impact": 3.35,
-          "base_rec_cover": 5000000
+          "base": 1643903,
+          "up_total": 1692110,
+          "down_total": 1595696,
+          "up_pct": 2.93,
+          "down_pct": -2.93,
+          "max_impact": 2.93,
+          "base_rec_cover": 2500000
         },
         "R200M FS": {
-          "base": 29853085,
-          "up_total": 30474892,
-          "down_total": 29231278,
-          "up_pct": 2.08,
-          "down_pct": -2.08,
-          "max_impact": 2.08,
-          "base_rec_cover": 30000000
+          "base": 13813454,
+          "up_total": 14063545,
+          "down_total": 13563363,
+          "up_pct": 1.81,
+          "down_pct": -1.81,
+          "max_impact": 1.81,
+          "base_rec_cover": 15000000
         },
         "R200M Agri": {
-          "base": 9411304,
-          "up_total": 9842058,
-          "down_total": 8980550,
-          "up_pct": 4.58,
-          "down_pct": -4.58,
-          "max_impact": 4.58,
-          "base_rec_cover": 10000000
+          "base": 3727598,
+          "up_total": 3900339,
+          "down_total": 3554857,
+          "up_pct": 4.63,
+          "down_pct": -4.63,
+          "max_impact": 4.63,
+          "base_rec_cover": 5000000
         }
       },
-      "avg_max_impact": 3.34,
+      "avg_max_impact": 3.12,
       "sensitivity": "Low"
     },
     {
@@ -328,34 +258,104 @@
       "description": "Regulatory fine component of C2. Capped at R10M.",
       "profiles": {
         "R10M FS": {
-          "base": 3575222,
-          "up_total": 3585222,
-          "down_total": 3565222,
-          "up_pct": 0.28,
-          "down_pct": -0.28,
-          "max_impact": 0.28,
-          "base_rec_cover": 5000000
+          "base": 1643903,
+          "up_total": 1653903,
+          "down_total": 1633903,
+          "up_pct": 0.61,
+          "down_pct": -0.61,
+          "max_impact": 0.61,
+          "base_rec_cover": 2500000
         },
         "R200M FS": {
-          "base": 29853085,
-          "up_total": 30053085,
-          "down_total": 29653085,
-          "up_pct": 0.67,
-          "down_pct": -0.67,
-          "max_impact": 0.67,
-          "base_rec_cover": 30000000
+          "base": 13813454,
+          "up_total": 14013454,
+          "down_total": 13613454,
+          "up_pct": 1.45,
+          "down_pct": -1.45,
+          "max_impact": 1.45,
+          "base_rec_cover": 15000000
         },
         "R200M Agri": {
-          "base": 9411304,
-          "up_total": 9611304,
-          "down_total": 9211304,
-          "up_pct": 2.13,
-          "down_pct": -2.13,
-          "max_impact": 2.13,
-          "base_rec_cover": 10000000
+          "base": 3727598,
+          "up_total": 3927598,
+          "down_total": 3527598,
+          "up_pct": 5.37,
+          "down_pct": -5.37,
+          "max_impact": 5.37,
+          "base_rec_cover": 5000000
         }
       },
-      "avg_max_impact": 1.03,
+      "avg_max_impact": 2.48,
+      "sensitivity": "Low"
+    },
+    {
+      "param": "SA Downtime Days (25)",
+      "description": "Average recovery time. Drives C3 (BI) component.",
+      "profiles": {
+        "R10M FS": {
+          "base": 1643903,
+          "up_total": 1663480,
+          "down_total": 1624326,
+          "up_pct": 1.19,
+          "down_pct": -1.19,
+          "max_impact": 1.19,
+          "base_rec_cover": 2500000
+        },
+        "R200M FS": {
+          "base": 13813454,
+          "up_total": 14175398,
+          "down_total": 13451510,
+          "up_pct": 2.62,
+          "down_pct": -2.62,
+          "max_impact": 2.62,
+          "base_rec_cover": 15000000
+        },
+        "R200M Agri": {
+          "base": 3727598,
+          "up_total": 3745963,
+          "down_total": 3709233,
+          "up_pct": 0.49,
+          "down_pct": -0.49,
+          "max_impact": 0.49,
+          "base_rec_cover": 5000000
+        }
+      },
+      "avg_max_impact": 1.43,
+      "sensitivity": "Low"
+    },
+    {
+      "param": "Impact Factor (0.50)",
+      "description": "Average revenue loss during recovery. Multiplies with downtime days.",
+      "profiles": {
+        "R10M FS": {
+          "base": 1643903,
+          "up_total": 1663480,
+          "down_total": 1624326,
+          "up_pct": 1.19,
+          "down_pct": -1.19,
+          "max_impact": 1.19,
+          "base_rec_cover": 2500000
+        },
+        "R200M FS": {
+          "base": 13813454,
+          "up_total": 14175398,
+          "down_total": 13451510,
+          "up_pct": 2.62,
+          "down_pct": -2.62,
+          "max_impact": 2.62,
+          "base_rec_cover": 15000000
+        },
+        "R200M Agri": {
+          "base": 3727598,
+          "up_total": 3745963,
+          "down_total": 3709233,
+          "up_pct": 0.49,
+          "down_pct": -0.49,
+          "max_impact": 0.49,
+          "base_rec_cover": 5000000
+        }
+      },
+      "avg_max_impact": 1.43,
       "sensitivity": "Low"
     }
   ]

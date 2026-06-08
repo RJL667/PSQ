@@ -18,7 +18,14 @@ conn.row_factory = sqlite3.Row
 row = conn.execute(
     "SELECT results FROM scans WHERE domain LIKE '%phishield%' ORDER BY created_at DESC LIMIT 1"
 ).fetchone()
-results = json.loads(row['results'])
+if row and row['results']:
+    results = json.loads(row['results'])
+else:
+    # Fallback: committed fixture (DB not populated, e.g. fresh checkout / CI).
+    _fx = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       'test_fixtures', 'phishield_R10M_finance_2026-05-15.json')
+    with open(_fx, encoding='utf-8') as _f:
+        results = json.load(_f)
 cats = results.get('categories', {})
 cats['credential_risk'] = {'risk_level': 'HIGH', 'risk_score': 30}
 

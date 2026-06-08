@@ -69,6 +69,15 @@ const changeLogRow1 = [
   "Implemented"
 ];
 
+const changeLogRow2 = [
+  "2026-06-05",
+  "CAL-001",
+  "Calibration session: cyber-incident bands re-fit, SPF/DMARC remediation magnitudes, availability frequency and severity, plus an HTML-report security fix.",
+  "Tightened the provisional values shipped on 2026-06-05 against empirical anchors (Coalition 2025 claims frequency, Verizon DBIR 2025, Uptime Institute outage analysis, CISA BOD 18-01). Availability p_interruption was FAIR-anchored (previously indicative / not calibrated); the BI revenue-impact factor was separated into a duration-independent 50% recovery average for rebuilds and an 85% acute factor for DDoS / short outages, decoupled from the drifting recovery-period figure.",
+  "Cyber-incident bands 5/15/30 to 8/18/28 (relative-posture relabel). SPF/DMARC remediation credits trimmed about 25% (4:2:1 retained). Availability range re-anchored to roughly 3-17% (was 5-20%) with the WAF mis-attribution fixed. BI net approximately flat but correctly decomposed. Separately fixed a script-tag breakout in the HTML report (raw-JSON dump and stored-XSS vector).",
+  "Implemented"
+];
+
 function makeChangeLogTable() {
   const headerRow = new TableRow({
     tableHeader: true,
@@ -77,10 +86,13 @@ function makeChangeLogTable() {
   const dataRow = new TableRow({
     children: changeLogRow1.map((val, i) => dataCell(val, changeLogCols[i], false))
   });
+  const dataRow2 = new TableRow({
+    children: changeLogRow2.map((val, i) => dataCell(val, changeLogCols[i], true))
+  });
   return new Table({
     width: { size: CONTENT_W, type: WidthType.DXA },
     columnWidths: changeLogCols,
-    rows: [headerRow, dataRow]
+    rows: [headerRow, dataRow, dataRow2]
   });
 }
 
@@ -93,7 +105,7 @@ const gapRows = [
   ["GAP-002", "IBM data includes implicit BI costs", "Medium", "Accept IBM cost-per-record as authoritative (includes \u201Clost business\u201D component)", "Monitor whether IBM publishes component-level breakdown in future reports; consider adjusting if data becomes available", "Accepted (by design)"],
   ["GAP-003", "No correlation modelling between incident types", "Medium", "Incident types are summed as independent events", "Implement copula-based correlation for ransomware-family incidents (double extortion and ransomware-only are correlated by RSI)", "Future enhancement"],
   ["GAP-004", "SA-specific breach frequency data lacking", "Medium", "Uses overall score and IBM multiplier as proxy for breach probability", "Source SA-specific breach frequency from SABRIC or Information Regulator annual reports when available", "Future enhancement"],
-  ["GAP-005", "Load-shedding impact on recovery not modelled", "Low", "Global average downtime days used (22 for ransomware)", "Add SA-specific recovery delay factor for companies without generator/UPS backup (suggested +3\u20135 days)", "Future enhancement"],
+  ["GAP-005", "Load-shedding impact on recovery not modelled", "Low", "Global average downtime days used (25 for ransomware)", "Add SA-specific recovery delay factor for companies without generator/UPS backup (suggested +3\u20135 days)", "Future enhancement"],
   ["GAP-006", "POPIA enforcement trend not reflected", "Low", "Fixed 2% of turnover", "Adjust based on Information Regulator enforcement track record (currently minimal fines imposed). Could reduce to 0.5\u20131% until enforcement matures.", "Future enhancement"],
   ["GAP-007", "Split ratios not yet empirically calibrated for SA", "Medium", "Global averages (70% double extortion, etc.) from industry reports", "Calibrate against SABRIC/CISA/IBM SA-specific incident-type data when available", "Future enhancement"]
 ];
