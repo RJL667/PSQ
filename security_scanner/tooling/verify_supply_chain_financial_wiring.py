@@ -226,31 +226,37 @@ def check_vendor_breach_drift() -> list:
     return warnings
 
 
-# Curated point-in-time tables carry a `# review-by: YYYY-MM-DD` marker. This
-# guard WARNs (never fails the gate) when any such marker is past due, so a
-# hand-maintained CVSS/EPSS/KEV/ransomware table can't silently rot. Bounded by
-# design: only files that opt in by adding the marker are scanned. Today the
-# markers live on DNSBLChecker.IP_DNSBLS, PORT_INTEL (checkers_network.py) and
-# RANSOMWARE_CVE_MAP (checkers_threats.py); SERVICE_INTEL / EOL_SIGNATURES /
-# SECURITY_INTEL etc. are intentionally NOT yet marked (deferred — add markers
-# opportunistically rather than carpet-bombing every table).
+# Curated point-in-time tables carry a `# review-by: YYYY-MM-DD` marker.
+# OVERDUE markers FAIL the gate (upgraded from warn-only 2026-06-11): a
+# hand-maintained CVSS/EPSS/KEV/ransomware/EOL table that silently rots is an
+# accuracy regression the deploy pipeline must surface, not a nudge. DUE-SOON
+# (within REVIEW_BY_WARN_DAYS) stays warn-only. Marked tables as of
+# 2026-06-11: IP_DNSBLS, PORT_INTEL, SERVICE_INTEL, TAKEOVER_SIGNATURES
+# (checkers_network.py); RANSOMWARE_CVE_MAP, ATTACK_TECHNIQUE_MAP,
+# EOL_SIGNATURES, _STEALER_TOKENS (checkers_threats.py); _STEALER_TOKENS
+# (darkweb_providers.py); CVE_DESCRIPTIONS (pdf_data.py — split out of
+# pdf_report.py 2026-06-11).
 _REVIEW_BY_FILES = (
     "checkers_network.py",
     "checkers_threats.py",
+    "darkweb_providers.py",
+    "pdf_data.py",
 )
 _REVIEW_BY_RE = re.compile(r"#\s*review-by:\s*(\d{4}-\d{2}-\d{2})")
 # Warn this many days BEFORE the review date, mirroring the vendor-breach nudge.
 REVIEW_BY_WARN_DAYS = 30
 
 
-def check_curated_table_staleness() -> list:
-    """WARN-only staleness guard for `# review-by: YYYY-MM-DD` markers.
+def check_curated_table_staleness() -> tuple:
+    """Staleness guard for `# review-by: YYYY-MM-DD` markers.
 
-    Scans the opted-in source files for review-by markers and warns for any that
-    are past due (or within REVIEW_BY_WARN_DAYS of due). Never changes the exit
-    code — purely an operator nudge so curated point-in-time tables (CVSS/EPSS/
-    KEV/ransomware attribution) are refreshed deliberately, not discovered stale.
+    Returns (failures, warnings). OVERDUE or unparseable markers are
+    failures — they flip the gate's exit code so a stale curated table
+    (CVSS/EPSS/KEV/ransomware attribution/EOL) blocks deploy until refreshed
+    (refreshing = review the table, then bump the marker date). DUE-SOON and
+    unreadable-file conditions remain warnings.
     """
+    failures: list = []
     warnings: list = []
     now = datetime.now(timezone.utc)
     for fname in _REVIEW_BY_FILES:
@@ -268,18 +274,18 @@ def check_curated_table_staleness() -> list:
             try:
                 due = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             except Exception:
-                warnings.append(f"{fname}:{lineno} has unparseable review-by date {date_str!r}.")
+                failures.append(f"{fname}:{lineno} has unparseable review-by date {date_str!r}.")
                 continue
             remaining = (due - now).days
             if remaining < 0:
-                warnings.append(
+                failures.append(
                     f"OVERDUE: {fname}:{lineno} review-by {date_str} passed "
-                    f"{-remaining}d ago — refresh the curated table.")
+                    f"{-remaining}d ago — refresh the curated table, then bump the marker.")
             elif remaining <= REVIEW_BY_WARN_DAYS:
                 warnings.append(
                     f"DUE-SOON: {fname}:{lineno} review-by {date_str} in {remaining}d "
                     f"— schedule a refresh of the curated table.")
-    return warnings
+    return failures, warnings
 
 
 def _run_pipeline(cats: dict, *, industry: str, revenue_zar: int) -> dict:
@@ -532,14 +538,17 @@ def run(industry: str = "retail",
               f"{VENDOR_BREACH_DRIFT_WARN_DAYS}d of the "
               f"{VENDOR_BREACH_LOOKBACK_DAYS}d lookback window")
 
-    # Curated-table review-by staleness check (WARN-only — never changes exit).
+    # Curated-table review-by staleness check (OVERDUE fails the gate;
+    # DUE-SOON warns).
     print()
-    print("--- curated-table review-by check (warn-only) ---")
-    review_warnings = check_curated_table_staleness()
-    if review_warnings:
-        for w in review_warnings:
-            print(f"WARN [review_by] {w}")
-    else:
+    print("--- curated-table review-by check (overdue = FAIL) ---")
+    review_failures, review_warnings = check_curated_table_staleness()
+    for f in review_failures:
+        print(f"FAIL [review_by] {f}")
+        failures.append(f"[review_by] {f}")
+    for w in review_warnings:
+        print(f"WARN [review_by] {w}")
+    if not review_failures and not review_warnings:
         print(f"OK   [review_by] no review-by markers overdue or within "
               f"{REVIEW_BY_WARN_DAYS}d")
 

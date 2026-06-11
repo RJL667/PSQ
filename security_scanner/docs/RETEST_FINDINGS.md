@@ -1,5 +1,14 @@
 # Phishield Scanner — Card Back-Test Re-Test (post-fix)
 
+> **STATUS UPDATE (2026-06-11):** the three "new issues" below are resolved:
+> (1) HTTP Headers 403 guard — fixed (`checkers_core.py:858`, `unreachable`
+> status on non-2xx, no false posture read); (2) vendor_breaches.json drift —
+> warn-only date-window check now runs inside
+> `tooling/verify_supply_chain_financial_wiring.py` (note: the `marketo` row
+> exits the 5-yr lookback ~2026-06-21 — refresh or prune deliberately);
+> (3) peer-vs-financial revenue basis — unified default via
+> `resolve_effective_revenue_zar()` / shared R10M constant.
+
 # Card Back-Test — Re-Test Summary (post-fix)
 
 **Date:** 2026-06-03

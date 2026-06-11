@@ -152,14 +152,50 @@ def run(domain: str = "example.com",
     print(f"    risk_level: {result.get('risk_level', '?')}")
     print(f"    categories built: {len(result.get('categories', {}))}")
     print(f"    checkers reporting done: {len(completed_checkers)}")
-    # Quick sanity — Phase 4f always builds a category even when no HR
-    # data; absence here suggests scan() returned early via a different
-    # path (catastrophic but not startup-class).
-    if "third_party_correlation" not in result.get("categories", {}):
-        print("    WARN — third_party_correlation missing from categories. "
-               "Phase 4f may have been skipped.")
-    if "_overall_score" not in result.get("categories", {}):
-        print("    WARN — _overall_score not propagated to categories.")
+    # Production-shape assertions (upgraded from WARN-only 2026-06-11).
+    # These run against the REAL scan() output — unlike the math verifier,
+    # which injects synthetic dicts — so a key the financial model consumes
+    # going missing in production cannot be masked again (the `_overall_score`
+    # pin lived for weeks exactly because only injected paths were checked).
+    shape_failures = []
+
+    if not result.get("schema_version"):
+        shape_failures.append("schema_version missing from results")
+
+    cats = result.get("categories", {})
+    if "third_party_correlation" not in cats:
+        shape_failures.append("third_party_correlation missing from categories "
+                              "(Phase 4f skipped?)")
+    if "_overall_score" not in cats:
+        shape_failures.append("_overall_score not propagated to categories — "
+                              "financial model decoupled from posture")
+    elif cats["_overall_score"] != result.get("overall_risk_score"):
+        shape_failures.append(
+            f"_overall_score ({cats['_overall_score']}) != overall_risk_score "
+            f"({result.get('overall_risk_score')}) — coupling broken")
+
+    fin = result.get("insurance", {}).get("financial_impact", {})
+    if not fin:
+        shape_failures.append("insurance.financial_impact missing")
+    else:
+        mc_p50 = fin.get("monte_carlo", {}).get("total", {}).get("p50")
+        if not isinstance(mc_p50, (int, float)) or not (mc_p50 > 0):
+            shape_failures.append(
+                f"monte_carlo.total.p50 not a positive number ({mc_p50!r})")
+        if "risk_probability" not in fin:
+            shape_failures.append("financial_impact.risk_probability block "
+                                  "missing (item #17 probability cards)")
+
+    if shape_failures:
+        print()
+        print("=== FAIL — production result shape broken ===")
+        for sf in shape_failures:
+            print(f"    FAIL — {sf}")
+        print("    The scan ran, but a key the financial model / renderers")
+        print("    consume is missing or inconsistent. DO NOT DEPLOY.")
+        return 1
+    print("    shape OK — schema_version, _overall_score coupling, "
+          "financial_impact p50, risk_probability all present")
     return 0
 
 

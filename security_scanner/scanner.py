@@ -20,6 +20,12 @@ from http_client import HTTP, _apex_of
 # Main Scanner Orchestrator
 # ---------------------------------------------------------------------------
 
+# Stamped into every results dict. Scan results are persisted as JSON blobs
+# (scans.results in SQLite) and re-rendered long after the code that wrote
+# them has changed — bump this on any breaking change to the results shape
+# so renderers can branch on stored version instead of guessing.
+RESULTS_SCHEMA_VERSION = "1.0"
+
 _CRED_RECENCY_BANDS = ["<30d", "30-90d", "90-180d", "180-360d", "1-2yr", ">2yr"]
 
 # Known aggregator / combo / credential-stuffing lists — re-packaged historical
@@ -349,6 +355,7 @@ class SecurityScanner:
         scan_apex = _apex_of(f"https://{domain}")
         HTTP.reset_for_scan(scan_apex)
         results = {
+            "schema_version": RESULTS_SCHEMA_VERSION,
             "domain_scanned": domain,
             "scan_timestamp": datetime.now(timezone.utc).isoformat(),
             "overall_risk_score": 0,

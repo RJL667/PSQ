@@ -103,6 +103,7 @@ class IntelXProvider(DarkWebProvider):
     # Infostealer-log signatures — stealer dumps are served as generic text
     # (media != 13) so without this they all fall into the "leak" bucket and
     # darkweb_count stays 0 even for genuine criminal-forum harvest.
+    # review-by: 2026-12-02
     _STEALER_TOKENS = (
         "stealer", "redline", "raccoon", "vidar", "lumma",
         "_default.txt", " default.txt", "/default.txt", "autofill",

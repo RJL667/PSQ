@@ -11,12 +11,29 @@ from scanner_utils import *
 # 15. Technology Stack & EOL/CVE Check
 # ---------------------------------------------------------------------------
 
+# Shared CMS fingerprints, used by both TechStackChecker and
+# WebsiteSecurityChecker. Single table so the signatures can't drift apart
+# (they already had: Wix "wix-code" vs "X-Wix-", Magento with/without the
+# bare token, PrestaShop in one copy only — this is the union).
+CMS_SIGNATURES = {
+    "WordPress": ["/wp-content/", "/wp-includes/", "wp-json"],
+    "Joomla": ["/components/com_", "Joomla!", "/media/jui/"],
+    "Drupal": ["/sites/default/", "Drupal.settings", "/modules/system/"],
+    "Wix": ["wixsite.com", "wix-code", "X-Wix-"],
+    "Shopify": ["cdn.shopify.com", "Shopify.theme"],
+    "Squarespace": ["squarespace.com", "data-squarespace"],
+    "Magento": ["Mage.Cookies", "/skin/frontend/", "magento"],
+    "PrestaShop": ["prestashop", "/themes/default-bootstrap/"],
+}
+
+
 class TechStackChecker:
     # EOL signature table. Refreshed 2026-06-02 against endoflife.date.
     # Substring-matched against Server/X-Powered-By headers + body, so each key
     # is a header-style "Product/Version" token. Only versions that are genuinely
     # past their security-EOL date as of the refresh date are listed here; newer
     # supported branches are intentionally absent so they are not flagged.
+    # review-by: 2026-12-02
     EOL_SIGNATURES = {
         "PHP/5": {"risk": "critical", "note": "PHP 5.x — end-of-life Dec 2018, no security patches"},
         "PHP/7.0": {"risk": "critical", "note": "PHP 7.0 — end-of-life Dec 2018"},
@@ -64,17 +81,6 @@ class TechStackChecker:
         "Tomcat/8.0": {"risk": "critical", "note": "Apache Tomcat 8.0 — end-of-life Jun 2018"},
         "Tomcat/8.5": {"risk": "high", "note": "Apache Tomcat 8.5 — end-of-life Mar 2024"},
         "Tomcat/9": {"risk": "medium", "note": "Apache Tomcat 9.x — end-of-life Dec 2025"},
-    }
-
-    CMS_SIGNATURES = {
-        "WordPress": ["/wp-content/", "/wp-includes/", "wp-json"],
-        "Joomla": ["/components/com_", "Joomla!", "/media/jui/"],
-        "Drupal": ["/sites/default/", "Drupal.settings", "/modules/system/"],
-        "Wix": ["wixsite.com", "wix-code"],
-        "Shopify": ["cdn.shopify.com", "Shopify.theme"],
-        "Squarespace": ["squarespace.com", "data-squarespace"],
-        "Magento": ["Mage.Cookies", "/skin/frontend/", "magento"],
-        "PrestaShop": ["prestashop", "/themes/default-bootstrap/"],
     }
 
     def check(self, domain: str) -> dict:
@@ -129,7 +135,7 @@ class TechStackChecker:
                         result["score"] -= 10
 
             # CMS detection
-            for cms, sigs in self.CMS_SIGNATURES.items():
+            for cms, sigs in CMS_SIGNATURES.items():
                 if any(sig in body or sig in all_headers_str for sig in sigs):
                     version = None
                     if cms == "WordPress":
@@ -255,16 +261,6 @@ class BreachChecker:
 # ---------------------------------------------------------------------------
 
 class WebsiteSecurityChecker:
-    CMS_SIGNATURES = {
-        "WordPress": ["/wp-content/", "/wp-includes/", "wp-json"],
-        "Joomla": ["/components/com_", "Joomla!", "/media/jui/"],
-        "Drupal": ["/sites/default/", "Drupal.settings", "/modules/system/"],
-        "Wix": ["wixsite.com", "X-Wix-"],
-        "Shopify": ["cdn.shopify.com", "Shopify.theme"],
-        "Squarespace": ["squarespace.com", "data-squarespace"],
-        "Magento": ["Mage.Cookies", "/skin/frontend/"],
-    }
-
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed", "https_enforced": False,
@@ -329,7 +325,7 @@ class WebsiteSecurityChecker:
             r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
                              allow_redirects=True, headers={"User-Agent": USER_AGENT})
             combined = r.text[:100000] + str(r.headers)
-            for cms, sigs in self.CMS_SIGNATURES.items():
+            for cms, sigs in CMS_SIGNATURES.items():
                 if any(sig in combined for sig in sigs):
                     version = None
                     if cms == "WordPress":
@@ -713,6 +709,7 @@ class ShodanVulnChecker:
     }
 
     # MITRE ATT&CK technique mapping for common CVE exploitation patterns
+    # review-by: 2026-12-02
     ATTACK_TECHNIQUE_MAP = {
         # Initial Access techniques
         "CVE-2019-0708": {"technique": "T1210", "name": "Exploitation of Remote Services", "groups": ["APT28", "Lazarus"]},
@@ -2045,6 +2042,7 @@ class IntelXChecker:
     # they would otherwise all fall into `leak_count` and darkweb_count stays 0
     # even for genuine criminal-forum/market harvest. These tokens identify a
     # record as dark-web-grade infostealer harvest.
+    # review-by: 2026-12-02
     _STEALER_TOKENS = (
         "stealer", "redline", "raccoon", "vidar", "lumma", "meta stealer",
         "_default.txt", " default.txt", "/default.txt", "autofill",

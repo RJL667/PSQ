@@ -8,6 +8,7 @@ Endpoints:
   GET  /api/history/<dom>  → last 10 scans for a domain
 """
 
+import hmac
 import io
 import os
 import json
@@ -16,6 +17,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 
@@ -63,9 +65,112 @@ VALID_INDUSTRIES = [
 ]
 
 _semaphore = threading.Semaphore(MAX_CONCURRENT)
+# Longest a queued scan waits for a slot before failing visibly. A hung
+# scan would otherwise hold the semaphore forever and every later scan
+# would sit at status "pending" with no error surfaced to the caller.
+# 15 min ≈ two back-to-back worst-case full scans (~510s each).
+SCAN_QUEUE_TIMEOUT_S = int(os.environ.get("SCAN_QUEUE_TIMEOUT_S", "900"))
 
 # In-memory SSE progress tracking: scan_id -> queue.Queue()
 _scan_progress = {}
+_scan_progress_created = {}  # scan_id -> epoch seconds, for the TTL sweep
+_SSE_QUEUE_TTL_S = int(os.environ.get("SSE_QUEUE_TTL_S", str(2 * 3600)))
+
+
+def _sweep_progress_queues():
+    """Drop SSE queues whose scan started more than the TTL ago. Entries
+    are normally popped when the progress stream ends, but an abrupt client
+    disconnect (browser close, network drop) leaks them — this opportunistic
+    sweep, run at each scan start, bounds that growth."""
+    cutoff = time.time() - _SSE_QUEUE_TTL_S
+    for sid in [s for s, ts in list(_scan_progress_created.items()) if ts < cutoff]:
+        _scan_progress.pop(sid, None)
+        _scan_progress_created.pop(sid, None)
+
+
+def _drop_progress_queue(scan_id: str):
+    _scan_progress.pop(scan_id, None)
+    _scan_progress_created.pop(scan_id, None)
+
+
+@contextmanager
+def _release_on_exit(sem):
+    """Release an already-acquired semaphore on exit. Companion to the
+    bounded `_semaphore.acquire(timeout=...)` in run_scan — `with sem:`
+    can't be used there because it would re-acquire."""
+    try:
+        yield
+    finally:
+        sem.release()
+
+
+# ---------------------------------------------------------------------------
+# Endpoint protection: opt-in shared-secret auth + per-IP rate limiting
+# ---------------------------------------------------------------------------
+
+# Auth is opt-in: with SCANNER_API_KEY unset (current deployments) behaviour
+# is unchanged. Once the env var is set on Render AND the frontend sends the
+# matching X-Api-Key header, expensive / state-changing endpoints reject
+# anonymous callers.
+SCANNER_API_KEY = os.environ.get("SCANNER_API_KEY")
+
+
+def require_api_key(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if SCANNER_API_KEY:
+            supplied = request.headers.get("X-Api-Key", "")
+            if not hmac.compare_digest(supplied, SCANNER_API_KEY):
+                return jsonify({"error": "Unauthorized — missing or invalid X-Api-Key"}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+class _RateLimiter:
+    """Fixed-window per-IP limiter, per gunicorn worker (Render runs 2
+    workers, so effective limits are ~2x the configured value — fine for
+    abuse damping; the scan semaphore remains the hard concurrency cap).
+    In-house on purpose: no new dependency, no shared storage needed."""
+
+    def __init__(self, max_calls: int, window_s: int):
+        self.max_calls = max_calls
+        self.window_s = window_s
+        self._hits = {}  # ip -> (window_start_epoch, count)
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        now = time.time()
+        with self._lock:
+            if len(self._hits) > 10000:  # bound memory under address-spraying
+                self._hits.clear()
+            start, count = self._hits.get(key, (now, 0))
+            if now - start >= self.window_s:
+                start, count = now, 0
+            count += 1
+            self._hits[key] = (start, count)
+            return count <= self.max_calls
+
+
+# Scan-class endpoints launch real work (threads, paid-API credits); the
+# default 30/h per IP sits above the physical throughput of 2 scan slots
+# (~12-24 scans/h), so legitimate sequential use is never throttled.
+_scan_limiter = _RateLimiter(int(os.environ.get("SCAN_RATE_LIMIT_PER_HOUR", "30")), 3600)
+_light_limiter = _RateLimiter(int(os.environ.get("LIGHT_RATE_LIMIT_PER_HOUR", "120")), 3600)
+
+
+def rate_limited(limiter):
+    def deco(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            # First X-Forwarded-For hop is the real client on Render;
+            # remote_addr alone would be the platform proxy.
+            ip = (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                  or request.remote_addr or "unknown")
+            if not limiter.allow(ip):
+                return jsonify({"error": "Rate limit exceeded — try again later"}), 429
+            return f(*args, **kwargs)
+        return wrapper
+    return deco
 
 CHECKER_MANIFEST = [
     {"section": "Discovery", "checkers": [
@@ -478,6 +583,25 @@ def fetch_scan(scan_id: str):
     return dict(row) if row else None
 
 
+# Scans hold status "pending" for their whole run (there is no "running"
+# state), so the stale threshold must clear worst-case scan duration
+# (~510s) PLUS the maximum semaphore queue wait (SCAN_QUEUE_TIMEOUT_S,
+# default 900s). 45 min default leaves ~2x headroom. A dyno restart
+# orphans in-flight scans; without this check their rows poll "pending"
+# forever.
+STALE_PENDING_S = int(os.environ.get("STALE_PENDING_SCAN_S", "2700"))
+
+
+def _scan_is_stale(row: dict) -> bool:
+    try:
+        created = datetime.fromisoformat(row["created_at"])
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - created).total_seconds() > STALE_PENDING_S
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -550,12 +674,20 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
              regulatory_flags: dict = None, sub_industry: str = None,
              related_domains: list = None):
     progress_q = queue.Queue()
+    _sweep_progress_queues()
     _scan_progress[scan_id] = progress_q
+    _scan_progress_created[scan_id] = time.time()
 
     def on_progress(event):
         progress_q.put(event)
 
-    with _semaphore:
+    if not _semaphore.acquire(timeout=SCAN_QUEUE_TIMEOUT_S):
+        msg = (f"No scan slot became free within {SCAN_QUEUE_TIMEOUT_S // 60} "
+               "minutes (scanner busy or a previous scan hung) — please retry")
+        mark_failed(scan_id, msg)
+        progress_q.put({"type": "error", "message": msg})
+        return
+    with _release_on_exit(_semaphore):
         try:
             scanner = SecurityScanner(
                 hibp_api_key=HIBP_API_KEY,
@@ -680,6 +812,8 @@ def scanner_info():
 
 
 @app.route("/api/preflight", methods=["POST"])
+@require_api_key
+@rate_limited(_light_limiter)
 def preflight():
     """Run flag auto-detection BEFORE the full scan starts so the broker
     form can pre-fill checkboxes with sensible defaults. Returns the
@@ -704,6 +838,8 @@ def preflight():
 
 
 @app.route("/api/dehashed/balance", methods=["GET"])
+@require_api_key
+@rate_limited(_light_limiter)
 def dehashed_balance():
     """Check Dehashed API credit balance without using a credit."""
     if not DEHASHED_API_KEY:
@@ -727,6 +863,8 @@ def dehashed_balance():
 
 
 @app.route("/api/intelx/balance", methods=["GET"])
+@require_api_key
+@rate_limited(_light_limiter)
 def intelx_balance():
     """Check IntelX API credit balance."""
     if not INTELX_API_KEY:
@@ -750,6 +888,8 @@ def intelx_balance():
 
 
 @app.route("/api/credential-export", methods=["POST"])
+@require_api_key
+@rate_limited(_scan_limiter)
 def credential_export():
     """On-demand encrypted credential export (Phase 2 / Manual 6.4). Re-queries
     DeHashed live, builds the full CSV (incl passwords), encrypts it, and streams
@@ -822,6 +962,8 @@ def age_check():
 
 
 @app.route("/api/scan", methods=["POST"])
+@require_api_key
+@rate_limited(_scan_limiter)
 def start_scan():
     data = request.get_json(silent=True) or {}
     domain = str(data.get("domain", "")).strip().lower()
@@ -881,17 +1023,26 @@ def start_scan():
     if isinstance(auto_detected, dict):
         regulatory_flags["_auto_detected"] = auto_detected
 
-    # Parse client-supplied IPs (optional)
+    # Parse client-supplied IPs (optional). Only publicly routable addresses
+    # are accepted: an attacker-supplied RFC1918 / loopback / link-local /
+    # CGNAT address would otherwise be port-scanned from inside the hosting
+    # network (SSRF) the moment the scanner runs on infrastructure with
+    # internal routing. Capped at 25 — each IP fans out to 4 per-IP checkers.
     import ipaddress as _ipaddress
     raw_client_ips = data.get("client_ips", [])
     client_ips = []
+    rejected_client_ips = []
     if isinstance(raw_client_ips, list):
-        for ip_str in raw_client_ips:
+        for ip_str in raw_client_ips[:25]:
+            candidate = str(ip_str).strip()
             try:
-                _ipaddress.ip_address(str(ip_str).strip())
-                client_ips.append(str(ip_str).strip())
+                ip_obj = _ipaddress.ip_address(candidate)
             except ValueError:
                 continue
+            if ip_obj.is_global:
+                client_ips.append(candidate)
+            else:
+                rejected_client_ips.append(candidate)
 
     # Broker-declared related/supplier domains (S-1 supply-chain). Each is
     # subject to the same valid_domain check as the primary; v1.1 will add
@@ -941,13 +1092,20 @@ def start_scan():
     )
     t.start()
 
-    return jsonify({
+    response = {
         "scan_id": scan_id,
         "domain": domain,
         "status": "pending",
         "poll_url": f"/api/scan/{scan_id}",
         "report_url": f"/results/{scan_id}",
-    }), 202
+    }
+    if rejected_client_ips:
+        response["rejected_client_ips"] = rejected_client_ips
+        response["rejected_client_ips_reason"] = (
+            "Only publicly routable IP addresses are scanned; private/"
+            "loopback/link-local addresses were dropped"
+        )
+    return jsonify(response), 202
 
 
 @app.route("/api/scan/<scan_id>", methods=["GET"])
@@ -957,6 +1115,13 @@ def get_scan(scan_id: str):
         return jsonify({"error": "Scan not found"}), 404
 
     if row["status"] == "pending":
+        if _scan_is_stale(row):
+            msg = ("Scan lost — exceeded the maximum pending window (likely "
+                   "interrupted by a service restart). Please re-run the scan.")
+            mark_failed(scan_id, msg)
+            _drop_progress_queue(scan_id)
+            return jsonify({"scan_id": scan_id, "status": "failed",
+                            "error": msg}), 500
         return jsonify({"scan_id": scan_id, "status": "pending"}), 202
 
     if row["status"] == "failed":
@@ -1002,7 +1167,7 @@ def scan_progress(scan_id: str):
                     break
             except queue.Empty:
                 yield ": keepalive\n\n"
-        _scan_progress.pop(scan_id, None)
+        _drop_progress_queue(scan_id)
 
     return Response(event_stream(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1018,11 +1183,38 @@ def download_pdf(scan_id: str):
     if row["status"] == "failed":
         return jsonify({"error": "Scan failed — no PDF available"}), 500
 
-    from pdf_report import generate_pdf
+    report_type = request.args.get("type", "full")
+    if report_type not in ("assessment", "summary", "full"):
+        # Whitelist: the value feeds the cache filename, so anything else
+        # (path traversal, typos) collapses to the default tier.
+        report_type = "full"
+
     results = json.loads(row["results"])
     results["scan_id"] = scan_id
-    report_type = request.args.get("type", "full")
-    pdf_bytes = generate_pdf(results, report_type=report_type)
+
+    # Per-tier PDF cache: generation takes ~10-30s and spikes memory, so
+    # serve a previously generated copy when one exists. Keyed by scan_id +
+    # tier; scan results are immutable once completed, so the cache never
+    # goes stale. Render's disk is ephemeral (wiped on deploy) — that's
+    # acceptable: a miss just regenerates.
+    from pathlib import Path
+    cache_dir = Path(__file__).parent / "scans" / "_pdf_cache"
+    cache_path = cache_dir / f"{scan_id}_{report_type}.pdf"
+    pdf_bytes = None
+    if cache_path.exists():
+        try:
+            pdf_bytes = cache_path.read_bytes()
+        except Exception:
+            pdf_bytes = None
+
+    if pdf_bytes is None:
+        from pdf_report import generate_pdf
+        pdf_bytes = generate_pdf(results, report_type=report_type)
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(pdf_bytes)
+        except Exception:
+            pass  # caching is best-effort; serving the bytes is what matters
 
     date_str = results.get('scan_timestamp', '')[:10]
     if report_type == "assessment":

@@ -1,0 +1,26 @@
+{
+  "phishield_R10M_finance_2026-05-15::assessment": {
+    "sha256": "eb4f4ed7c67e9ddd4e9f866c6eec7d70938510d2d534a4a1526b0c7076c2bfbe",
+    "bytes": 16471
+  },
+  "phishield_R10M_finance_2026-05-15::summary": {
+    "sha256": "f388ea2e580ee039e6ae24febe84360f74c0c16ad6fc51b0f0599188bd3766ea",
+    "bytes": 17927
+  },
+  "phishield_R10M_finance_2026-05-15::full": {
+    "sha256": "b82c9057d4d81d550c7697b29051a72e04c7eaf9d00045df6ab303f2ced71ceb",
+    "bytes": 89167
+  },
+  "takealot_baseline::assessment": {
+    "sha256": "e73dc4962c4e3f90d247fbe1732783f4489cec7b63d41af7af711e735983126a",
+    "bytes": 16143
+  },
+  "takealot_baseline::summary": {
+    "sha256": "64433153eb58fe29b84d57c15ac76bec57f56447b2563ba1d9498cd2d3350cb4",
+    "bytes": 13722
+  },
+  "takealot_baseline::full": {
+    "sha256": "ab665302aacda51a952ef9adc04e8827ec58a63966f72701ae664fd41c9997c6",
+    "bytes": 79337
+  }
+}

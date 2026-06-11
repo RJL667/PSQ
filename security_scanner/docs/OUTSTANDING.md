@@ -1,6 +1,6 @@
 # Outstanding Items — Phishield Scanner
 
-**Last updated**: 2026-05-16
+**Last updated**: 2026-06-11
 **Owner**: SML Consulting (engineering) + Phishield UMA (ops)
 **Authoritative source** for items pending across the scanner project.
 Consolidates open items from gap analysis SCN-* entries, memory files,
@@ -24,6 +24,8 @@ outstanding item lands.
 | **User-Agent flip back to canonical `phishield.com/scanner-info`** | Blocked by proxy above | Engineering | After hosting team confirms `phishield.com/scanner-info` returns 200. Single-line change in `http_client.py` USER_AGENT constant. |
 | **GCP / Vertex AI migration of scanner backend** | Future | Phishield ops + engineering | No fixed date. Adds protected environment + LLM-augmented analysis. When this lands: re-run scanner-info IP-range description; update User-Agent host; migrate `scans.db` from SQLite-on-Render to Cloud SQL Postgres. **Now also load-bearing for the encrypted-export enrichment (5j/5k):** the export pulls recency dates + IntelX leak-refs from the domain's last scan, but Render's free-tier disk is **ephemeral and wipes `scans.db` on every deploy** — so a scan→deploy→export sequence silently drops the dates/leak-refs (export still returns credentials, just un-clustered). Persistent DB removes this. Interim: re-scan before exporting if a deploy has occurred. |
 | **Eventual move to Hetzner self-hosted** | Future-future | TBD | After GCP/Vertex experience accumulated. |
+| **Enable API auth (`SCANNER_API_KEY`)** | Code shipped 2026-06-11, env var NOT yet set (auth is opt-in / off) | Engineering + frontend | Set `SCANNER_API_KEY` on Render AND add the matching `X-Api-Key` header to the Vercel frontend's calls to `/api/scan`, `/api/preflight`, `/api/credential-export`, balance endpoints. Order matters: frontend first or simultaneously, else scans 401. Rate limiting (per-IP, env-tunable) is already live and needs nothing. |
+| **`vendor_breaches.json` `marketo` row** | Exits the 5-yr lookback ~2026-06-21 | Engineering | Refresh or prune deliberately; the wiring gate warns until then. |
 
 ## 2. External API budget (Phase 2 unblockers)
 
@@ -88,11 +90,9 @@ throughput + always-on use, but it is no longer an emergency blocker. Avoid
 burning credits on test scans (`skip_intelx:true`; the smoke test is already
 credit-free).
 
-- **Action (before 2026-06-03 calibration test):** add `INTELX_API_KEY` to
-  **Render** (it's currently set locally but NOT on Render — that's why prod
-  has no IntelX/forum signal while local does). This makes the credential
-  correlation's signal-4 active on prod for Wednesday's supply-chain
-  calibration run.
+- **DONE (2026-06-01):** `INTELX_API_KEY` (and `SHODAN_API_KEY`) are set on
+  Render — prod now carries the IntelX/forum signal. The *paid-tier upgrade
+  decision* (Shodan Freelancer, IntelX replacement) remains open above.
 - **Still seek a sustainable replacement** (Snusbase / LeakCheck Pro /
   SpyCloud) for the cohort-scale + always-on case; the free tier can remain a
   fallback for ad-hoc use. The credential-correlation circulation slot is
@@ -153,6 +153,15 @@ Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:
 | **Credential-risk scoring calibration** (ticket, NOT done) | Two tweaks to `CredentialRiskClassifier`, both **calibration-gated** (empirical anchors + sign-off, per the scoring-change rule): (1) the IntelX paste/dark-web deductions are **per-mention and uncapped** (40 pastes → −120, floored at 0) — can out-deduct Hudson Rock's flat −50 in the raw 0-100 score even though HR sets the higher *level*; add a cap. (2) **Date-gate the HR CRITICAL** so a *stale* infostealer infection (old `last_compromised`) doesn't auto-force CRITICAL — use the new `days_since_compromise`. The Credential Exposure Correlation (reporting) already does this date-anchoring; this would align the *score* with it. |
 
 ## 6b. FIN-9 calibration inputs — financial-loss impact of the 2026-06-03 accuracy waves
+
+> **STATUS (2026-06-11):** the 2026-06-03/04 session RETIRED the FIN-9 Pareto
+> widening; the #14 records-driven cat redesign was wired instead (see
+> `calibration_prep/07_WIRING_SPEC_AND_HANDOFF.md` §7 and the FIN-9 memory
+> memo). The dead-USD `COST_PER_RECORD` / `REGULATORY_FINE` tables listed
+> below have since been **deleted** from `scoring_analytics.py`. Still
+> genuinely open from this table: the `p_breach` base/curve sign-off, risk-band
+> re-fit (200/400/600), TEF multipliers, K_TAIL, HIBP step thresholds,
+> remediation caps — all colleague-gated.
 
 **Why this matters for the FIN-9 session.** Wave 1 wired `cat_results["_overall_score"]`
 into the FinancialImpactCalculator for the FIRST time in production — `vulnerability`

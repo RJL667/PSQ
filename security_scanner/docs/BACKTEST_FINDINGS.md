@@ -1,5 +1,21 @@
 # Phishield Scanner — Card Back-Test Findings
 
+> **STATUS UPDATE (2026-06-11): historical snapshot — the bugs below are FIXED.**
+> All 17 bugs (and the targeted gaps) were fixed in Waves 1–4 and re-verified
+> with zero regressions on 2026-06-03 — see **`RETEST_FINDINGS.md`** for the
+> per-finding confirmation. Spot re-verified in code on 2026-06-11: #1 SSL
+> (sslyze-6.x port, `checkers_core.py:71`), #2 DNSBL return-code validation
+> (`checkers_network.py:1013`), #3 Exposed-Admin 200-only gate
+> (`checkers_core.py:857`), #4 `_overall_score` wiring (`scanner.py:1114`),
+> #5 F5 signature tightened, #6 CMS readme.txt validation, #7 wildcard-DNS
+> guard, #8 password-bearing record count, #9 Mandrill/Zoho SPF classes,
+> #10 severity tracks underlying breach, #11 ASN render guarded, #12
+> `unique_emails` lower-cased, #15 DKIM `v=DKIM1` guard, #18 AAAA rendered,
+> #22 ghost renderers deleted. #16 (dual remediation cards) fixed 2026-06-11.
+> Still open by design: #17 S-1 auto-discovery (v1.2 roadmap), #20 IDN
+> homoglyphs, parts of #13/#21 — tracked in `OUTSTANDING.md`.
+> **Do not treat the findings below as the current state of the code.**
+
 # Card Back-Test — Executive Summary
 
 **Date:** 2026-06-02 (overnight autonomous run)

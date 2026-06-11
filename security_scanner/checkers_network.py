@@ -29,6 +29,7 @@ class SubdomainChecker:
     ]
 
     # Subdomain takeover signatures: CNAME target patterns → (service, HTTP fingerprint)
+    # review-by: 2026-12-02
     TAKEOVER_SIGNATURES = {
         "github.io":               ("GitHub Pages",  "There isn't a GitHub Pages site here"),
         "s3.amazonaws.com":        ("AWS S3",        "NoSuchBucket"),
@@ -792,6 +793,7 @@ class HighRiskProtocolChecker:
         8069: "Odoo ERP",
     }
 
+    # review-by: 2026-12-02
     SERVICE_INTEL = {
         445: {"known_exploits": "EternalBlue (CVE-2017-0144), relay attacks, ransomware propagation",
               "vuln_metrics": "CVSS 9.8 | EPSS 97% | CISA KEV",

@@ -1,0 +1,47 @@
+#!/bin/sh
+# Pre-push gate for the Phishield scanner (installed via:
+#   git config core.hooksPath security_scanner/tooling/hooks
+# from the repo root). Runs the fast verifiers on EVERY push (~10s) and the
+# live smoke test additionally when pushing master (master push = Render
+# deploy). Emergency bypass: git push --no-verify (use deliberately).
+#
+# Git invokes this with the remote name/url as args and one line per ref on
+# stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
+
+set -e
+
+# Resolve repo root and scanner dir (hook may run from any worktree).
+ROOT="$(git rev-parse --show-toplevel)"
+SC="$ROOT/security_scanner"
+
+# Windows: prefer the py launcher, fall back to python.
+if command -v py >/dev/null 2>&1; then
+  PY=py
+else
+  PY=python
+fi
+
+PUSHING_MASTER=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/master|refs/heads/main) PUSHING_MASTER=1 ;;
+  esac
+done
+
+echo "[pre-push] fast gates (wiring + dropdown + app hardening)..."
+cd "$SC"
+"$PY" tooling/verify_supply_chain_financial_wiring.py || {
+  echo "[pre-push] BLOCKED: financial wiring gate failed."; exit 1; }
+"$PY" tooling/verify_subindustry_dropdown_mapping.py || {
+  echo "[pre-push] BLOCKED: sub-industry dropdown gate failed."; exit 1; }
+"$PY" tooling/verify_app_hardening.py || {
+  echo "[pre-push] BLOCKED: app hardening gate failed."; exit 1; }
+
+if [ "$PUSHING_MASTER" = "1" ]; then
+  echo "[pre-push] master push detected -> live smoke test (60-180s, credit-free)..."
+  "$PY" tooling/verify_scan_smoke.py || {
+    echo "[pre-push] BLOCKED: smoke test failed - do not deploy."; exit 1; }
+fi
+
+echo "[pre-push] all gates passed."
+exit 0
