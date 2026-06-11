@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "version": "2026-05-27",
+    "version": "2026-06-11",
     "description": "Curated public-record breaches at SaaS vendors that this scanner can correlate against the insured's vendor surface (S-5). Same maintenance discipline as darkweb_providers.py — confirmed-only, editorial review before adding new rows. Vendor keys match EmailVendorSurfaceChecker.VENDOR_PATTERNS exactly.",
     "severity_levels": {
       "critical": "Customer data exfiltrated from the vendor itself (vault, mailbox content, customer DB)",
@@ -97,14 +97,14 @@
       "severity": "medium",
       "exposure_class": "vendor_internal_logs",
       "ref": "Zendesk SMS phishing 2022-10"
-    },
+    }
+  ],
+  "_pruned": [
     {
       "vendor": "marketo",
       "date": "2021-06-22",
-      "summary": "Adobe Marketo (BMC, Adobe) employee creds exposed on dark web; Marketo subdomain hosted leaks.",
-      "severity": "medium",
-      "exposure_class": "credential_leak_hosting",
-      "ref": "Marketo 2021-06"
+      "pruned": "2026-06-11",
+      "reason": "Exited the 5-year lookback on 2026-06-21 (linear age-decay contribution ~0.5% at pruning, effectively nil). WATCH ITEM: alleged Adobe breach early-April 2026 (UNC6783, ~13M support tickets exfiltrated via a compromised BPO; Marketo Engage plausibly in scope, GTIG-tracked). NOT added because this DB carries confirmed incidents only. If Adobe confirms, add a fresh marketo/adobe row with the 2026 incident date and disclosed exposure_class."
     }
   ]
 }
