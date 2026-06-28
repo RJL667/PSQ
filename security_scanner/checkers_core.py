@@ -4,6 +4,11 @@ Core security checkers: SSL, Email, HTTP Headers, WAF, Cloud/CDN, Domain Intel, 
 
 from scanner_utils import *
 
+# WS0: route target-apex probes through the single egress seam (per-apex
+# politeness limiter + identifying User-Agent + WAF tracking). HTTP.get returns
+# None on failure instead of raising — handled at each call site.
+from http_client import HTTP
+
 
 # ---------------------------------------------------------------------------
 # 1. SSL / TLS Assessment
@@ -311,9 +316,9 @@ class SSLChecker:
         if not REQUESTS_AVAILABLE:
             return False
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
-            return "strict-transport-security" in r.headers
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            return ("strict-transport-security" in r.headers) if r is not None else False
         except Exception:
             return False
 
@@ -665,9 +670,9 @@ class EmailHardeningChecker:
                     # Also try to fetch the policy file
                     mode = None
                     try:
-                        r = requests.get(f"https://mta-sts.{domain}/.well-known/mta-sts.txt",
-                                         timeout=5, headers={"User-Agent": USER_AGENT})
-                        m = re.search(r"mode:\s*(\w+)", r.text)
+                        r = HTTP.get(f"https://mta-sts.{domain}/.well-known/mta-sts.txt",
+                                     timeout=5)
+                        m = re.search(r"mode:\s*(\w+)", r.text) if r is not None else None
                         mode = m.group(1) if m else "unknown"
                     except Exception:
                         mode = "unknown"
@@ -841,8 +846,10 @@ class HTTPHeaderChecker:
         if not REQUESTS_AVAILABLE:
             result["status"] = "error"; result["error"] = "requests not installed"; return result
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            if r is None:
+                raise RuntimeError("HTTP egress returned no response")
             # Status-code guard. `allow_redirects=True` already follows the
             # apex->www 301/302, but the FINAL response may still be a WAF/CDN
             # block page (403/503/429) served to the scanner's python
@@ -967,8 +974,10 @@ class WAFChecker:
         if not REQUESTS_AVAILABLE:
             result["status"] = "error"; return result
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            if r is None:
+                raise RuntimeError("HTTP egress returned no response")
             headers_lower = {k.lower(): v.lower() for k, v in r.headers.items()}
             cookies_lower = {k.lower(): v.lower() for k, v in r.cookies.items()}
             # Body text is no longer scanned for WAF vendor names — see the
