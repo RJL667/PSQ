@@ -395,18 +395,15 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
 
             update_scan(scan_id, results)
 
-            # Archive PDF: scans/<domain>/<year>/<month>/<day>_<scan_id>.pdf
+            # WS4: render the PDF in the separate PDF worker pool and store it to
+            # object storage (replaces the ephemeral scans/<domain>/ disk archive).
+            # The download endpoint then serves from the store; reportlab is off the
+            # request path for the common case.
             try:
-                from pdf_report import generate_pdf
-                from pathlib import Path
-                scan_date = datetime.now()
-                archive_dir = Path(__file__).parent / "scans" / domain / str(scan_date.year) / f"{scan_date.month:02d}"
-                archive_dir.mkdir(parents=True, exist_ok=True)
-                pdf_path = archive_dir / f"{scan_date.day:02d}_{scan_id[:8]}.pdf"
-                pdf_bytes = generate_pdf(results)
-                pdf_path.write_bytes(pdf_bytes)
+                from pdf_service import enqueue_pdf
+                enqueue_pdf(scan_id, "full", results)
             except Exception:
-                pass  # Don't fail the scan if PDF archiving fails
+                pass  # PDF generation is best-effort; never fails the scan
 
             bus.publish(scan_id, {"type": "complete"})
         except Exception as e:
@@ -820,29 +817,13 @@ def download_pdf(scan_id: str):
     results = json.loads(row["results"])
     results["scan_id"] = scan_id
 
-    # Per-tier PDF cache: generation takes ~10-30s and spikes memory, so
-    # serve a previously generated copy when one exists. Keyed by scan_id +
-    # tier; scan results are immutable once completed, so the cache never
-    # goes stale. Render's disk is ephemeral (wiped on deploy) — that's
-    # acceptable: a miss just regenerates.
-    from pathlib import Path
-    cache_dir = Path(__file__).parent / "scans" / "_pdf_cache"
-    cache_path = cache_dir / f"{scan_id}_{report_type}.pdf"
-    pdf_bytes = None
-    if cache_path.exists():
-        try:
-            pdf_bytes = cache_path.read_bytes()
-        except Exception:
-            pdf_bytes = None
-
+    # WS4: serve from object storage (rendered by the PDF worker pool on scan
+    # completion). On a miss (tier not pre-rendered, or store wiped) render once and
+    # store — render-on-first-request, the spec default.
+    from pdf_service import get_pdf, render_and_store
+    pdf_bytes = get_pdf(scan_id, report_type)
     if pdf_bytes is None:
-        from pdf_report import generate_pdf
-        pdf_bytes = generate_pdf(results, report_type=report_type)
-        try:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(pdf_bytes)
-        except Exception:
-            pass  # caching is best-effort; serving the bytes is what matters
+        pdf_bytes = render_and_store(scan_id, report_type, results)
 
     date_str = results.get('scan_timestamp', '')[:10]
     if report_type == "assessment":

@@ -101,3 +101,81 @@ class LocalObjectStore(ObjectStore):
             if p.is_file() and not p.name.endswith(".tmp"):
                 out.append(p.relative_to(self.root).as_posix())
         return sorted(out)
+
+
+class S3ObjectStore(ObjectStore):
+    """S3 / Cloudflare R2 store (boto3). R2 is egress-free — prefer it in prod.
+    Configured via OBJECT_STORE_BUCKET (+ S3_ENDPOINT_URL for R2) and the standard
+    AWS credential chain. ``url`` returns a presigned, expiring URL."""
+
+    def __init__(self, bucket: str, endpoint_url: Optional[str] = None):
+        import boto3  # only imported when S3 backend is selected
+        self.bucket = bucket
+        self._s3 = boto3.client("s3", endpoint_url=endpoint_url)
+
+    def put(self, key, data, content_type=None):
+        extra = {"ContentType": content_type} if content_type else {}
+        self._s3.put_object(Bucket=self.bucket, Key=_safe_key(key), Body=data, **extra)
+
+    def get(self, key):
+        try:
+            return self._s3.get_object(Bucket=self.bucket, Key=_safe_key(key))["Body"].read()
+        except Exception:
+            return None
+
+    def exists(self, key):
+        try:
+            self._s3.head_object(Bucket=self.bucket, Key=_safe_key(key))
+            return True
+        except Exception:
+            return False
+
+    def url(self, key, expires_seconds=3600):
+        if not self.exists(key):
+            return None
+        return self._s3.generate_presigned_url(
+            "get_object", Params={"Bucket": self.bucket, "Key": _safe_key(key)},
+            ExpiresIn=expires_seconds)
+
+    def delete(self, key):
+        try:
+            self._s3.delete_object(Bucket=self.bucket, Key=_safe_key(key))
+        except Exception:
+            pass
+
+    def list_prefix(self, prefix):
+        out, token = [], None
+        while True:
+            kw = {"Bucket": self.bucket, "Prefix": _safe_key(prefix) if prefix else ""}
+            if token:
+                kw["ContinuationToken"] = token
+            resp = self._s3.list_objects_v2(**kw)
+            out += [o["Key"] for o in resp.get("Contents", [])]
+            token = resp.get("NextContinuationToken")
+            if not token:
+                return sorted(out)
+
+
+_store = None
+
+
+def make_object_store() -> ObjectStore:
+    """S3/R2 when OBJECT_STORE_BACKEND=s3 (+ OBJECT_STORE_BUCKET); else local fs at
+    OBJECT_STORE_DIR (default ``scans/_objstore``)."""
+    global _store
+    if _store is not None:
+        return _store
+    import os
+    if os.environ.get("OBJECT_STORE_BACKEND") == "s3" and os.environ.get("OBJECT_STORE_BUCKET"):
+        _store = S3ObjectStore(os.environ["OBJECT_STORE_BUCKET"],
+                               os.environ.get("S3_ENDPOINT_URL"))
+    else:
+        root = os.environ.get("OBJECT_STORE_DIR") or str(
+            Path(__file__).parent / "scans" / "_objstore")
+        _store = LocalObjectStore(root)
+    return _store
+
+
+def reset_for_tests(store=None):
+    global _store
+    _store = store
