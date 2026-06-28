@@ -134,15 +134,20 @@ verify; synthetic transport, no keys/network):
 transparent pass-throughs (no retry, breaker off, gentle bucket, empty cache/meter
 slots).
 
-**Gate coverage caveats (honest):**
-- Offline gates use **synthetic** responses (real free-provider *shapes*; dummy
-  keys for paid). They prove request-fidelity + output-equivalence on the captured
-  data — not every response-parsing branch.
-- **Not in an automated gate** (migrated + reviewed + import-smoke tested; pattern
-  identical to gated siblings): `checkers_network` subdomain-takeover (109/116,
-  behind DNS/socket) and crt.sh-in-SubdomainChecker; the paid-provider *entry
-  points* in `checkers_threats` (HIBP/Shodan/IntelX/DeHashed/VT/SecurityTrails/
-  HudsonRock/InternetDB-enrichment).
+**Gate coverage (8 offline gates, all green):** `mig_flag_inference`,
+`mig_checkers_core`, `mig_small_providers`, `mig_providers_2`, `mig_checkers_network`,
+`mig_checkers_threats` (free feeds), `mig_threats_full` (every provider checker's
+`check()` entry point — BreachChecker/Payment/VirusTotal/SecurityTrails/Dehashed/
+HudsonRock/IntelX/WebRanking/Glasswing/ShodanVuln, dummy keys + DNS/socket/sleep
+stubs + cache resets), `mig_network_takeover` (the CNAME-takeover HTTP probe). Each
+records the **pre-migration** behaviour and diffs the migrated code under replay.
+- One site is **gated by analogy, not directly**: crt.sh in `SubdomainChecker.check`
+  (168) — byte-identical to the gated `related_domain_discovery` crt.sh pattern
+  (sits behind brute-force DNS enumeration that isn't worth driving offline).
+- Caveat that remains: gates use **synthetic** responses (real free-provider
+  *shapes*; dummy keys for paid), so they prove request-fidelity + output-
+  equivalence on the captured data, not every response-parsing branch. Real-key
+  gold baselines (next step 1) would close that.
 
 ## ▶️ Recommended next steps
 1. **Real-key gold baselines.** Run `record_baseline` against a live target with
