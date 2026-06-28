@@ -1,0 +1,91 @@
+{
+  "entries": {
+    "GET https://api.first.org/data/v1/epss?cve=CVE-2021-44228": {
+      "content_b64": "eyJkYXRhIjpbeyJjdmUiOiJDVkUtMjAyMS00NDIyOCIsImVwc3MiOiIwLjkiLCJwZXJjZW50aWxlIjoiMC45In1dfQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://api.first.org/data/v1/epss"
+    },
+    "GET https://api.shodan.io/shodan/host/203.0.113.4?key=%3Credacted%3E": {
+      "content_b64": "eyJwb3J0cyI6WzgwLDQ0M10sInZ1bG5zIjpbIkNWRS0yMDIxLTQ0MjI4Il0sImRhdGEiOltdLCJ0YWdzIjpbXSwiaG9zdG5hbWVzIjpbXX0=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://api.shodan.io/shodan/host/203.0.113.4"
+    },
+    "GET https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv": {
+      "content_b64": "aWQsZmlsZSxjb2RlcwoxLHgsQ1ZFLTIwMjEtNDQyMjgK",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"
+    },
+    "GET https://internetdb.shodan.io/203.0.113.4": {
+      "content_b64": "eyJwb3J0cyI6WzgwXSwiY3BlcyI6W10sInZ1bG5zIjpbXSwidGFncyI6W119",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://internetdb.shodan.io/203.0.113.4"
+    },
+    "GET https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json": {
+      "content_b64": "eyJtIjp7InJlZmVyZW5jZXMiOlsiQ1ZFLTIwMjEtNDQyMjgiXX19",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json"
+    },
+    "GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228": {
+      "content_b64": "eyJ2dWxuZXJhYmlsaXRpZXMiOlt7ImN2ZSI6eyJpZCI6IkNWRS0yMDIxLTQ0MjI4IiwiZGVzY3JpcHRpb25zIjpbeyJsYW5nIjoiZW4iLCJ2YWx1ZSI6IngifV0sIm1ldHJpY3MiOnsiY3Zzc01ldHJpY1YzMSI6W3siY3Zzc0RhdGEiOnsiYmFzZVNjb3JlIjoxMC4wLCJ2ZWN0b3JTdHJpbmciOiJBVjpOL0FDOkwvUFI6TiJ9fV19LCJwdWJsaXNoZWQiOiIyMDIxLTEyLTEwVDAwOjAwWiIsInJlZmVyZW5jZXMiOltdfX1dfQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    },
+    "GET https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json": {
+      "content_b64": "eyJ2dWxuZXJhYmlsaXRpZXMiOlt7ImN2ZUlEIjoiQ1ZFLTIwMjEtNDQyMjgifV19",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    }
+  },
+  "request_log": [
+    "GET https://api.first.org/data/v1/epss?cve=CVE-2021-44228",
+    "GET https://api.shodan.io/shodan/host/203.0.113.4?key=%3Credacted%3E",
+    "GET https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv",
+    "GET https://internetdb.shodan.io/203.0.113.4",
+    "GET https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json",
+    "GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228",
+    "GET https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+  ],
+  "version": 1
+}

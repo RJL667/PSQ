@@ -1,0 +1,25 @@
+{
+  "entries": {
+    "GET https://example.co.za": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGU8L3RpdGxlPjwvaGVhZD48Ym9keT5vazwvYm9keT48L2h0bWw+",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Security-Policy": "default-src 'self'; object-src 'none'; base-uri 'none'",
+        "Content-Type": "text/html",
+        "Referrer-Policy": "no-referrer",
+        "Server": "cloudflare",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "cf-ray": "8a1b2c3d4e5f-JNB"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://example.co.za"
+    }
+  },
+  "request_log": [
+    "GET https://example.co.za"
+  ],
+  "version": 1
+}

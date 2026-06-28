@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json": {
+      "content_b64": "eyJ2dWxuZXJhYmlsaXRpZXMiOlt7ImN2ZUlEIjoiQ1ZFLTIwMjEtNDQyMjgifV19",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx/1.24"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    }
+  },
+  "request_log": [
+    "GET https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+  ],
+  "version": 1
+}

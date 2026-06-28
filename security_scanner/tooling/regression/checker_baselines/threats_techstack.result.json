@@ -1,0 +1,15 @@
+{
+  "cms": {
+    "detected": null,
+    "version": null
+  },
+  "eol_count": 0,
+  "eol_detected": [],
+  "issues": [],
+  "js_libraries": [],
+  "score": 100,
+  "server_software": [
+    "Server: nginx/1.24"
+  ],
+  "status": "completed"
+}

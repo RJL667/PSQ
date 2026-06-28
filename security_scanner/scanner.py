@@ -14,6 +14,12 @@ from checkers_supply_chain import (
 )
 from scoring_analytics import *
 from http_client import HTTP, _apex_of
+import os
+import scanner_db
+
+# WS3: checkpoints older than this are treated as absent on resume (freshness
+# bound; per-data-type TTLs refine this in WS6). Default 6h.
+CHECKPOINT_TTL_S = int(os.environ.get("CHECKPOINT_TTL_S", "21600"))
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +351,8 @@ class SecurityScanner:
              country: str = "",
              include_fraudulent_domains: bool = False,
              client_ips: list = None,
-             related_domains: list = None) -> dict:
+             related_domains: list = None,
+             scan_id: str = None, resume: bool = False) -> dict:
         domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
         # Fresh DNS cache for this scan — prevents cross-scan leakage and stale records.
         dns_cache.clear()
@@ -461,6 +468,12 @@ class SecurityScanner:
         # Drives the Scan Duration Profile section in the full PDF.
         checker_durations = {}
 
+        # WS3: resumability. With no scan_id this is a no-op (compute all, persist
+        # nothing) — default scans are byte-identical. With a scan_id it skip-and-
+        # loads valid checkpoints and persists each non-failed checker result, so a
+        # requeue resumes without re-spending paid credits.
+        _ckpt = scanner_db.Checkpointer(scan_id, resume, max_age_seconds=CHECKPOINT_TTL_S)
+
         # --- Run lightweight domain-level checkers concurrently ---
         # Wrap each checker so "running" is emitted at execution start, not
         # at submission. The previous behaviour marked all 21 lightweight
@@ -471,10 +484,12 @@ class SecurityScanner:
         def _run_with_timing(name, fn, args, notify):
             notify(on_progress, name, "running")
             t0 = time.perf_counter()
-            try:
-                result = fn(*args)
-            except Exception as e:
-                result = {"status": "error", "error": str(e), "issues": []}
+            def _compute():
+                try:
+                    return fn(*args)
+                except Exception as e:
+                    return {"status": "error", "error": str(e), "issues": []}
+            result = _ckpt.run(name, _compute)   # WS3 skip-and-load / save
             checker_durations[name] = round(time.perf_counter() - t0, 3)
             return result
 
@@ -507,7 +522,9 @@ class SecurityScanner:
         for name, fn, args, timeout in heavy_checkers:
             self._notify(on_progress, name, "running")
             t0 = time.perf_counter()
-            cat_results[name] = run_with_timeout(fn, args=tuple(args), timeout=timeout)
+            cat_results[name] = _ckpt.run(
+                name, lambda fn=fn, args=args, timeout=timeout: run_with_timeout(
+                    fn, args=tuple(args), timeout=timeout))
             checker_durations[name] = round(time.perf_counter() - t0, 3)
             self._notify(on_progress, name, "done", cat_results[name])
 
@@ -520,11 +537,13 @@ class SecurityScanner:
         if related_domains:
             self._notify(on_progress, "related_domains", "running")
             t0 = time.perf_counter()
-            cat_results["related_domains"] = run_with_timeout(
-                RelatedDomainsChecker().check,
-                args=(domain, related_domains),
-                timeout=min(300, 60 * max(1, len(related_domains))),
-            )
+            cat_results["related_domains"] = _ckpt.run(
+                "related_domains",
+                lambda: run_with_timeout(
+                    RelatedDomainsChecker().check,
+                    args=(domain, related_domains),
+                    timeout=min(300, 60 * max(1, len(related_domains))),
+                ))
             checker_durations["related_domains"] = round(time.perf_counter() - t0, 3)
             self._notify(on_progress, "related_domains", "done",
                          cat_results["related_domains"])
@@ -557,13 +576,17 @@ class SecurityScanner:
         # that currently serve THIS domain's certificate are added to the
         # scan pool. Unverified candidates are surfaced for transparency but
         # never scanned (they may have been reassigned to a third party).
-        try:
-            from origin_discovery import discover_origin_ips
-            origin = discover_origin_ips(domain, self.securitytrails_api_key,
-                                         self.shodan_api_key)
-        except Exception as e:
-            origin = {"status": "error", "error": str(e),
-                      "candidates": [], "verified": [], "unverified": []}
+        def _compute_origin():
+            try:
+                from origin_discovery import discover_origin_ips
+                return discover_origin_ips(domain, self.securitytrails_api_key,
+                                           self.shodan_api_key)
+            except Exception as e:
+                return {"status": "error", "error": str(e),
+                        "candidates": [], "verified": [], "unverified": []}
+        # WS3: checkpoint origin_discovery — recomputing it re-spends SecurityTrails
+        # + Shodan credits, so a resume must load it, not re-run it.
+        origin = _ckpt.run("origin_discovery", _compute_origin)
         cat_results["origin_discovery"] = origin
         verified_new = [ip for ip in origin.get("verified", []) if ip not in all_ips]
         if verified_new:
@@ -582,10 +605,12 @@ class SecurityScanner:
         def _run_ip_with_timing(label, fn, fn_args, notify):
             notify(on_progress, label, "running")
             t0 = time.perf_counter()
-            try:
-                result = fn(*fn_args)
-            except Exception as e:
-                result = {"status": "error", "error": str(e), "issues": []}
+            def _compute():
+                try:
+                    return fn(*fn_args)
+                except Exception as e:
+                    return {"status": "error", "error": str(e), "issues": []}
+            result = _ckpt.run(f"ip::{label}", _compute)   # WS3, keyed per (ip,checker)
             checker_durations[label] = round(time.perf_counter() - t0, 3)
             return result
 

@@ -1,0 +1,9 @@
+{
+  "all_detected": [
+    "Cloudflare"
+  ],
+  "detected": true,
+  "issues": [],
+  "status": "completed",
+  "waf_name": "Cloudflare"
+}

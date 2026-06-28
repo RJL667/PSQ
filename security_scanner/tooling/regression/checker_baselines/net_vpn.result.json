@@ -1,0 +1,9 @@
+{
+  "issues": [
+    "No VPN/remote access gateway detected \u2014 remote access method unknown"
+  ],
+  "rdp_exposed": false,
+  "status": "completed",
+  "vpn_detected": false,
+  "vpn_name": null
+}

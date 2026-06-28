@@ -1,0 +1,6 @@
+{
+  "CVE-2021-44228": {
+    "epss_percentile": 0.99,
+    "epss_score": 0.9756
+  }
+}

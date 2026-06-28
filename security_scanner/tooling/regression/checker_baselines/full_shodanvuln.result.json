@@ -1,0 +1,78 @@
+{
+  "asn": null,
+  "cpe_list": [],
+  "critical_count": 1,
+  "cves": [
+    {
+      "age_days": 1661,
+      "attack_groups": [
+        "APT41",
+        "Lazarus",
+        "LockBit"
+      ],
+      "attack_technique": "T1190",
+      "attack_technique_name": "Exploit Public-Facing Application",
+      "cve_id": "CVE-2021-44228",
+      "cvss_score": 10.0,
+      "description": "x",
+      "easily_exploitable": true,
+      "epss_percentile": 0.9,
+      "epss_score": 0.9,
+      "exploit_maturity": "weaponized",
+      "has_patch": false,
+      "in_exploitdb": true,
+      "in_kev": true,
+      "in_msf": true,
+      "published": "2021-12-10",
+      "ransomware_association": "LockBit (Log4Shell)",
+      "severity": "critical",
+      "vector": "AV:N/AC:L/PR:N",
+      "widely_exploited": true,
+      "zero_day": true
+    }
+  ],
+  "data_source": "shodan_full_api",
+  "easily_exploitable_count": 1,
+  "high_count": 0,
+  "high_epss_count": 1,
+  "hostnames": [],
+  "ip": "203.0.113.4",
+  "isp": null,
+  "issues": [
+    "1 CVE(s) in CISA Known Exploited Vulnerabilities catalog \u2014 actively exploited in the wild",
+    "1 CVE(s) with high EPSS score (>0.5) \u2014 high probability of exploitation",
+    "1 CVE(s) have weaponized exploits (CISA KEV / Metasploit) \u2014 immediate patching required",
+    "1 CVE(s) with no vendor patch available \u2014 monitor for updates and apply mitigations",
+    "1 CVE(s) are easily exploitable (network accessible, low complexity, no authentication required)",
+    "1 CVE(s) are widely exploited (EPSS > 40%) \u2014 mass exploitation campaigns likely",
+    "1 CVE(s) associated with known ransomware/malware: LockBit (Log4Shell)",
+    "PATCH MANAGEMENT: Oldest unpatched vulnerability is 1661 days old \u2014 indicates significant patch management deficiency",
+    "CRITICAL: 1 critical CVE(s) found on this IP \u2014 patch immediately"
+  ],
+  "kev_count": 1,
+  "low_count": 0,
+  "malware_exploited_count": 1,
+  "medium_count": 0,
+  "open_ports": [
+    80,
+    443
+  ],
+  "org": null,
+  "os": null,
+  "patch_management": {
+    "90_to_180_days": 0,
+    "average_age_days": 1661,
+    "oldest_unpatched_days": 1661,
+    "over_180_days": 1,
+    "total_cves_aged": 1,
+    "under_90_days": 0
+  },
+  "poc_public_count": 0,
+  "score": 70,
+  "services": [],
+  "status": "completed",
+  "tags": [],
+  "weaponized_count": 1,
+  "widely_exploited_count": 1,
+  "zero_day_count": 1
+}

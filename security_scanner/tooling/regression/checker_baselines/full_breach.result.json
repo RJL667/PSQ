@@ -1,0 +1,23 @@
+{
+  "breach_count": 1,
+  "breaches": [
+    {
+      "data_classes": [
+        "Email addresses",
+        "Passwords"
+      ],
+      "date": "2021-03-01",
+      "name": "Acme",
+      "pwn_count": 1000
+    }
+  ],
+  "data_classes": [
+    "Email addresses",
+    "Passwords"
+  ],
+  "issues": [
+    "Domain found in 1 known data breach(es)"
+  ],
+  "most_recent_breach": "2021-03-01",
+  "status": "completed"
+}

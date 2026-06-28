@@ -1,0 +1,18 @@
+{
+  "entries": {
+    "GET https://mta-sts.example.co.za/.well-known/mta-sts.txt": {
+      "content_b64": "dmVyc2lvbjogU1RTdjEKbW9kZTogZW5mb3JjZQpteDogbWFpbC5leGFtcGxlLmNvLnphCm1heF9hZ2U6IDYwNDgwMAo=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://mta-sts.example.co.za/.well-known/mta-sts.txt"
+    }
+  },
+  "request_log": [
+    "GET https://mta-sts.example.co.za/.well-known/mta-sts.txt"
+  ],
+  "version": 1
+}

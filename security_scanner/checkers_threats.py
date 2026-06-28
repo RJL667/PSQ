@@ -6,6 +6,15 @@ Credential Risk, IntelX, Fraudulent Domains, Privacy, Web Ranking, Info Disclosu
 
 from scanner_utils import *
 
+# WS0: route target-apex probes through HTTP, paid/free providers through their
+# per-provider clients. All return None on a failed request instead of raising;
+# provider clients add no retry (existing per-checker loops keep their semantics).
+from http_client import HTTP
+from providers import (
+    HIBP, NVD, SHODAN, INTERNETDB, KEV, MSF, EXPLOITDB, EPSS, OSV,
+    HUDSONROCK, INTELX, TRANCO, DEHASHED, VIRUSTOTAL, SECURITYTRAILS,
+)
+
 
 # ---------------------------------------------------------------------------
 # 15. Technology Stack & EOL/CVE Check
@@ -95,8 +104,10 @@ class TechStackChecker:
         if not REQUESTS_AVAILABLE:
             result["status"] = "error"; return result
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            if r is None:
+                raise RuntimeError("HTTP egress returned no response")
             body = r.text[:100000]
             all_headers_str = str(r.headers)
 
@@ -154,9 +165,8 @@ class TechStackChecker:
                             m = re.search(r'content="Drupal\s*([\d.]+)"', body, re.I)
                         if not m:
                             try:
-                                cl = requests.get(f"https://{domain}/CHANGELOG.txt", timeout=5,
-                                                  headers={"User-Agent": USER_AGENT})
-                                if cl.status_code == 200:
+                                cl = HTTP.get(f"https://{domain}/CHANGELOG.txt", timeout=5)
+                                if cl is not None and cl.status_code == 200:
                                     cm = re.search(r'Drupal\s+([\d.]+)', cl.text[:500])
                                     if cm:
                                         version = cm.group(1)
@@ -222,8 +232,10 @@ class BreachChecker:
             headers = {"User-Agent": USER_AGENT}
             if api_key:
                 headers["hibp-api-key"] = api_key
-            r = requests.get(self.HIBP_URL, params={"domain": domain},
-                             headers=headers, timeout=DEFAULT_TIMEOUT)
+            r = HIBP.get(self.HIBP_URL, params={"domain": domain},
+                         headers=headers, timeout=DEFAULT_TIMEOUT)
+            if r is None:
+                raise RuntimeError("HIBP egress returned no response")
             if r.status_code == 200:
                 breaches = r.json()
                 if breaches:
@@ -283,18 +295,18 @@ class WebsiteSecurityChecker:
 
     def _check_https_redirect(self, domain: str) -> bool:
         try:
-            r = requests.get(f"http://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
-            return r.url.startswith("https://")
+            r = HTTP.get(f"http://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            return r.url.startswith("https://") if r is not None else False
         except Exception:
             return False
 
     def _check_cookies(self, domain: str) -> dict:
         info = {"secure": True, "httponly": True, "samesite": True, "details": []}
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
-            for cookie in r.cookies:
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            for cookie in (r.cookies if r is not None else []):
                 detail = {
                     "name": cookie.name, "secure": cookie.secure,
                     "httponly": cookie.has_nonstandard_attr("HttpOnly") or
@@ -314,16 +326,20 @@ class WebsiteSecurityChecker:
 
     def _check_mixed_content(self, domain: str) -> bool:
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            if r is None:
+                return False
             return bool(re.search(r'<(?:script|img|link|iframe)[^>]+src=["\']http://', r.text[:50000], re.I))
         except Exception:
             return False
 
     def _detect_cms(self, domain: str) -> dict:
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            if r is None:
+                return {"detected": None, "version": None}
             combined = r.text[:100000] + str(r.headers)
             for cms, sigs in CMS_SIGNATURES.items():
                 if any(sig in combined for sig in sigs):
@@ -383,9 +399,9 @@ class PaymentSecurityChecker:
         payment_page_found = None
         for path in self.PAYMENT_PATHS:
             try:
-                r = requests.get(f"https://{domain}{path}", timeout=4,
-                                 allow_redirects=True, headers={"User-Agent": USER_AGENT})
-                if r.status_code == 200:
+                r = HTTP.get(f"https://{domain}{path}", timeout=4,
+                             allow_redirects=True)
+                if r is not None and r.status_code == 200:
                     body = r.text[:50000].lower()
                     # Check if this looks like a payment page
                     payment_keywords = ["credit card", "card number", "checkout", "payment",
@@ -460,9 +476,9 @@ class ShodanVulnChecker:
 
     def _fetch_cvss(self, cve_id: str) -> dict:
         try:
-            r = requests.get(self.NVD_URL, params={"cveId": cve_id},
-                             headers={"User-Agent": USER_AGENT}, timeout=8)
-            if r.status_code != 200:
+            r = NVD.get(self.NVD_URL, params={"cveId": cve_id},
+                        headers={"User-Agent": USER_AGENT}, timeout=8)
+            if r is None or r.status_code != 200:
                 return {}
             data = r.json()
             vuln = data.get("vulnerabilities", [{}])[0].get("cve", {})
@@ -515,9 +531,11 @@ class ShodanVulnChecker:
     def _check_full_api(self, ip: str, api_key: str, result: dict) -> bool:
         """Use Shodan full API. Returns True if successful, False to fall back."""
         try:
-            r = requests.get(self.SHODAN_HOST_URL.format(ip=ip),
-                             params={"key": api_key},
-                             headers={"User-Agent": USER_AGENT}, timeout=15)
+            r = SHODAN.get(self.SHODAN_HOST_URL.format(ip=ip),
+                           params={"key": api_key},
+                           headers={"User-Agent": USER_AGENT}, timeout=15)
+            if r is None:
+                return False
             if r.status_code in (401, 403):
                 return False  # bad key, fall back to InternetDB
             if r.status_code != 200:
@@ -555,8 +573,11 @@ class ShodanVulnChecker:
 
     def _check_internetdb(self, ip: str, result: dict) -> bool:
         """Use free InternetDB. Returns True if successful."""
-        r = requests.get(self.INTERNETDB_URL.format(ip=ip),
-                         headers={"User-Agent": USER_AGENT}, timeout=10)
+        r = INTERNETDB.get(self.INTERNETDB_URL.format(ip=ip),
+                           headers={"User-Agent": USER_AGENT}, timeout=10)
+        if r is None:
+            # No local try/except here — preserve the original raise-on-failure.
+            raise requests.RequestException("InternetDB egress returned no response")
         if r.status_code == 404:
             return True
         if r.status_code != 200:
@@ -579,9 +600,9 @@ class ShodanVulnChecker:
             return ShodanVulnChecker._kev_cache
         for url in (self.KEV_URL, self.KEV_URL_MIRROR):
             try:
-                r = requests.get(url, timeout=15,
-                                 headers={"User-Agent": USER_AGENT})
-                if r.status_code == 200:
+                r = KEV.get(url, timeout=15,
+                            headers={"User-Agent": USER_AGENT})
+                if r is not None and r.status_code == 200:
                     data = r.json()
                     kev_set = {v["cveID"] for v in data.get("vulnerabilities", [])}
                     if kev_set:
@@ -598,9 +619,9 @@ class ShodanVulnChecker:
         if ShodanVulnChecker._msf_cache is not None and (now - ShodanVulnChecker._msf_cache_time) < 86400:
             return ShodanVulnChecker._msf_cache
         try:
-            r = requests.get(self.MSF_MODULES_URL, timeout=25,
-                             headers={"User-Agent": USER_AGENT})
-            if r.status_code == 200:
+            r = MSF.get(self.MSF_MODULES_URL, timeout=25,
+                        headers={"User-Agent": USER_AGENT})
+            if r is not None and r.status_code == 200:
                 data = r.json()
                 cve_set = set()
                 cve_pat = re.compile(r'(CVE-\d{4}-\d+)', re.I)
@@ -623,9 +644,9 @@ class ShodanVulnChecker:
             return ShodanVulnChecker._exploitdb_cache
         try:
             import csv, io
-            r = requests.get(self.EXPLOITDB_CSV_URL, timeout=25,
-                             headers={"User-Agent": USER_AGENT})
-            if r.status_code == 200:
+            r = EXPLOITDB.get(self.EXPLOITDB_CSV_URL, timeout=25,
+                              headers={"User-Agent": USER_AGENT})
+            if r is not None and r.status_code == 200:
                 cve_set = set()
                 cve_pat = re.compile(r'(CVE-\d{4}-\d+)', re.I)
                 reader = csv.reader(io.StringIO(r.text))
@@ -653,10 +674,10 @@ class ShodanVulnChecker:
         if not cve_ids:
             return {}
         try:
-            r = requests.get(self.EPSS_URL,
-                             params={"cve": ",".join(cve_ids[:30])},
-                             headers={"User-Agent": USER_AGENT}, timeout=10)
-            if r.status_code == 200:
+            r = EPSS.get(self.EPSS_URL,
+                         params={"cve": ",".join(cve_ids[:30])},
+                         headers={"User-Agent": USER_AGENT}, timeout=10)
+            if r is not None and r.status_code == 200:
                 data = r.json()
                 return {
                     item["cve"]: {
@@ -1020,8 +1041,8 @@ class OSVChecker:
             payload = {"version": version, "package": {"name": package}}
             if ecosystem:
                 payload["package"]["ecosystem"] = ecosystem
-            resp = requests.post(self.OSV_API_URL, json=payload, timeout=10)
-            if resp.status_code == 200:
+            resp = OSV.post(self.OSV_API_URL, json=payload, timeout=10)
+            if resp is not None and resp.status_code == 200:
                 data = resp.json()
                 return self._parse_vulns(data.get("vulns", []))
         except Exception:
@@ -1072,8 +1093,8 @@ class OSVChecker:
             if len(parts) >= 2:
                 product = parts[1].lower()
                 payload = {"version": version, "package": {"name": product, "ecosystem": "OSS-Fuzz"}}
-                resp = requests.post(self.OSV_API_URL, json=payload, timeout=10)
-                if resp.status_code == 200:
+                resp = OSV.post(self.OSV_API_URL, json=payload, timeout=10)
+                if resp is not None and resp.status_code == 200:
                     return self._parse_vulns(resp.json().get("vulns", []))
         except Exception:
             pass
@@ -1212,33 +1233,29 @@ class DehashedChecker:
             return result
 
         # Try v2 API first (POST + API key header)
-        try:
-            r = requests.post(
-                self.API_URL_V2,
-                json={"query": f"domain:{domain}", "page": 1, "size": 100},
-                headers={
-                    "Content-Type": "application/json",
-                    "Dehashed-Api-Key": api_key,
-                    "User-Agent": USER_AGENT,
-                },
-                timeout=15,
-            )
-        except Exception:
-            r = None
+        r = DEHASHED.post(
+            self.API_URL_V2,
+            json={"query": f"domain:{domain}", "page": 1, "size": 100},
+            headers={
+                "Content-Type": "application/json",
+                "Dehashed-Api-Key": api_key,
+                "User-Agent": USER_AGENT,
+            },
+            timeout=15,
+        )
 
         # Fall back to v1 if v2 fails completely
         if r is None or r.status_code == 404:
-            try:
-                r = requests.get(
-                    self.API_URL_V1,
-                    params={"query": f"domain:{domain}", "size": 100},
-                    auth=(email or "", api_key),
-                    headers={"Accept": "application/json", "User-Agent": USER_AGENT},
-                    timeout=15,
-                )
-            except Exception as e:
+            r = DEHASHED.get(
+                self.API_URL_V1,
+                params={"query": f"domain:{domain}", "size": 100},
+                auth=(email or "", api_key),
+                headers={"Accept": "application/json", "User-Agent": USER_AGENT},
+                timeout=15,
+            )
+            if r is None:
                 result["status"] = "error"
-                result["error"] = str(e)
+                result["error"] = "Dehashed egress returned no response"
                 return result
 
         try:
@@ -1424,11 +1441,13 @@ class VirusTotalChecker:
             return result
 
         try:
-            r = requests.get(
+            r = VIRUSTOTAL.get(
                 self.API_URL.format(domain=domain),
                 headers={"x-apikey": api_key, "User-Agent": USER_AGENT},
                 timeout=15,
             )
+            if r is None:
+                raise RuntimeError("VirusTotal egress returned no response")
 
             if r.status_code == 401:
                 result["status"] = "auth_failed"
@@ -1543,10 +1562,12 @@ class SecurityTrailsChecker:
 
         try:
             # Domain info
-            r = requests.get(
+            r = SECURITYTRAILS.get(
                 self.DOMAIN_URL.format(domain=domain),
                 headers=headers, timeout=15,
             )
+            if r is None:
+                raise RuntimeError("SecurityTrails egress returned no response")
             if r.status_code == 401 or r.status_code == 403:
                 result["status"] = "auth_failed"
                 result["issues"].append("SecurityTrails API key invalid or quota exceeded")
@@ -1583,11 +1604,11 @@ class SecurityTrailsChecker:
 
             # Associated domains
             try:
-                r2 = requests.get(
+                r2 = SECURITYTRAILS.get(
                     self.ASSOC_URL.format(domain=domain),
                     headers=headers, timeout=15,
                 )
-                if r2.status_code == 200:
+                if r2 is not None and r2.status_code == 200:
                     assoc_data = r2.json()
                     records = assoc_data.get("records", [])
                     result["associated_count"] = assoc_data.get("record_count", len(records))
@@ -1646,9 +1667,9 @@ class HudsonRockChecker:
             "issues": [],
         }
         try:
-            r = requests.get(f"{self.API_URL}?domain={domain}",
-                             headers={"User-Agent": USER_AGENT}, timeout=15)
-            if r.status_code != 200:
+            r = HUDSONROCK.get(f"{self.API_URL}?domain={domain}",
+                               headers={"User-Agent": USER_AGENT}, timeout=15)
+            if r is None or r.status_code != 200:
                 result["status"] = "error"
                 return result
 
@@ -1740,9 +1761,9 @@ class HIBPBreachMetadata:
         if HIBPBreachMetadata._cache is not None and (now - HIBPBreachMetadata._cache_time) < 86400:
             return HIBPBreachMetadata._cache
         try:
-            r = requests.get(self.BREACHES_URL,
-                             headers={"User-Agent": USER_AGENT}, timeout=15)
-            if r.status_code == 200:
+            r = HIBP.get(self.BREACHES_URL,
+                         headers={"User-Agent": USER_AGENT}, timeout=15)
+            if r is not None and r.status_code == 200:
                 breaches = r.json()
                 lookup = {}
                 for b in breaches:
@@ -2079,9 +2100,11 @@ class IntelXChecker:
 
         try:
             # Step 1: Initiate search
-            r = requests.post(f"{self.API_URL}/intelligent/search",
+            r = INTELX.post(f"{self.API_URL}/intelligent/search",
                 json={"term": domain, "maxresults": self.MAX_RESULTS, "timeout": 5, "sort": 4, "media": 0},
                 headers={"X-Key": api_key}, timeout=15)
+            if r is None:
+                raise RuntimeError("IntelX egress returned no response")
             if r.status_code == 401:
                 result["status"] = "auth_failed"
                 return result
@@ -2098,10 +2121,10 @@ class IntelXChecker:
             _time.sleep(3)
             records = []
             for _ in range(3):
-                r2 = requests.get(f"{self.API_URL}/intelligent/search/result",
+                r2 = INTELX.get(f"{self.API_URL}/intelligent/search/result",
                     params={"id": search_id},
                     headers={"X-Key": api_key}, timeout=10)
-                if r2.status_code != 200:
+                if r2 is None or r2.status_code != 200:
                     break
                 data = r2.json()
                 records.extend(data.get("records", []))
@@ -2658,8 +2681,8 @@ class WebRankingChecker:
         if WebRankingChecker._cache and (now - WebRankingChecker._cache_time) < 86400:
             return WebRankingChecker._cache
         try:
-            r = requests.get(self.TRANCO_URL, timeout=30)
-            if r.status_code == 200:
+            r = TRANCO.get(self.TRANCO_URL, timeout=30)
+            if r is not None and r.status_code == 200:
                 ranks = {}
                 for line in r.text.strip().split("\n"):
                     parts = line.strip().split(",")
@@ -2782,10 +2805,9 @@ class GlasswingPartnerChecker:
         # Only runs when no domain match was made — cheap single GET.
         if not result["is_partner"] and REQUESTS_AVAILABLE:
             try:
-                r = requests.get(f"https://{domain}", timeout=5,
-                                 headers={"User-Agent": USER_AGENT},
-                                 allow_redirects=True)
-                html = (r.text or "")[:20000].lower()
+                r = HTTP.get(f"https://{domain}", timeout=5,
+                             allow_redirects=True)
+                html = (r.text or "")[:20000].lower() if r is not None else ""
                 if ("project glasswing" in html or
                         ("glasswing" in html and "anthropic" in html)):
                     result.update(is_partner=True,

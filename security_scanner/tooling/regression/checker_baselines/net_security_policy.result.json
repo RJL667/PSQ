@@ -1,0 +1,14 @@
+{
+  "issues": [],
+  "robots_txt": {
+    "disallows_count": 2,
+    "present": true
+  },
+  "security_txt": {
+    "has_contact": true,
+    "has_pgp": true,
+    "path": "/.well-known/security.txt",
+    "present": true
+  },
+  "status": "completed"
+}

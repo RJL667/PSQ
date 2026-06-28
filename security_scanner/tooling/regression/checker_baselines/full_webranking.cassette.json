@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://tranco-list.eu/download/X5QNN/1000000": {
+      "content_b64": "MSxleGFtcGxlY29ycC5jby56YQoyLG90aGVyLmNvLnphCg==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://tranco-list.eu/download/X5QNN/1000000"
+    }
+  },
+  "request_log": [
+    "GET https://tranco-list.eu/download/X5QNN/1000000"
+  ],
+  "version": 1
+}

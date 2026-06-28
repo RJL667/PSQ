@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json": {
+      "content_b64": "eyJtb2QxIjp7InJlZmVyZW5jZXMiOlsiQ1ZFLTIwMjEtNDQyMjgiLCJVUkwtaHR0cHM6Ly94Il19fQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx/1.24"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json"
+    }
+  },
+  "request_log": [
+    "GET https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json"
+  ],
+  "version": 1
+}

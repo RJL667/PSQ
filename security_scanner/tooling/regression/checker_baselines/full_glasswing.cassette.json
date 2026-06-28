@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://examplecorp.co.za": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za"
+    }
+  },
+  "request_log": [
+    "GET https://examplecorp.co.za"
+  ],
+  "version": 1
+}
