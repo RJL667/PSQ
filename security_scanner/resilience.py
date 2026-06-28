@@ -127,23 +127,32 @@ class RetryPolicy:
 
     def run(self, fn: Callable[[], object], *,
             classify_result: Callable[[object], str] = classify_response,
-            on_retry: Optional[Callable[[int, str, object], None]] = None) -> object:
+            on_retry: Optional[Callable[[int, str, object], None]] = None,
+            can_retry: Optional[Callable[[], bool]] = None) -> object:
         """Call `fn` with retries. `classify_result` maps a returned value to an
         outcome (default: HTTP-status based). Returns the last result (so a
         terminal 4xx or a retry-exhausted response flows back for inspection);
-        re-raises the original exception if the final attempt raised."""
+        re-raises the original exception if the final attempt raised.
+
+        `can_retry`, if given, gates each *would-be* retry (WS7 retry budget): when
+        it returns False the loop stops — re-raising the last exception or returning
+        the last result — so a provider outage can't retry-storm past its budget."""
+        def _budget_ok() -> bool:
+            return can_retry is None or can_retry()
+
         for attempt in range(1, self.max_attempts + 1):
             try:
                 result = fn()
             except Exception as exc:  # noqa: BLE001 — we classify, then re-raise
-                if classify_exception(exc) == RETRIABLE and attempt < self.max_attempts:
+                if (classify_exception(exc) == RETRIABLE and attempt < self.max_attempts
+                        and _budget_ok()):
                     if on_retry:
                         on_retry(attempt, RETRIABLE, exc)
                     self._wait(attempt, retry_after_of(exc))
                     continue
                 raise
             outcome = classify_result(result)
-            if outcome == RETRIABLE and attempt < self.max_attempts:
+            if outcome == RETRIABLE and attempt < self.max_attempts and _budget_ok():
                 if on_retry:
                     on_retry(attempt, RETRIABLE, result)
                 self._wait(attempt, retry_after_of(result) if self.respect_retry_after else None)
@@ -235,14 +244,16 @@ class CircuitBreaker:
 
 def guarded_call(fn: Callable[[], object], *, breaker: CircuitBreaker,
                  retry: RetryPolicy,
-                 classify_result: Callable[[object], str] = classify_response) -> object:
+                 classify_result: Callable[[object], str] = classify_response,
+                 can_retry: Optional[Callable[[], bool]] = None) -> object:
     """Compose a breaker around a retry loop: the breaker gates admission and
     sees the final outcome; the retry policy handles transient failures within
-    one admitted attempt-sequence."""
+    one admitted attempt-sequence. `can_retry` (WS7 budget) is forwarded to the
+    retry loop to bound retries per provider."""
     if not breaker.allow():
         raise CircuitOpenError(f"{breaker.name}: circuit open")
     try:
-        result = retry.run(fn, classify_result=classify_result)
+        result = retry.run(fn, classify_result=classify_result, can_retry=can_retry)
     except Exception:
         breaker.record_failure()
         raise

@@ -26,18 +26,45 @@ from __future__ import annotations
 
 from provider_client import ProviderClient
 from resilience import CircuitBreaker, RetryPolicy
+from usage_ledger import InMemoryUsageLedger
 
-_NO_TRIP = 10 ** 9  # WS0: breaker present but won't trip; WS7 lowers this.
+# WS7 is now ON: clients retry transient failures, trip a breaker on sustained
+# failure (-> checker marked skipped, scoring redistributes), and are bounded by a
+# shared usage ledger so an outage can't retry-storm into rate limits / paid cost.
+#
+# The ledger is in-process (single-box scanner). The distributed version swaps in
+# with the same interface: Redis counters (provider+day / provider+window) mirrored
+# to a Postgres `usage` table (SCALE-17/18). Daily caps below are conservative
+# placeholders — tune against real quotas. Free providers are uncapped.
+_LEDGER = InMemoryUsageLedger(
+    default_daily_cap=None,
+    daily_caps={
+        "shodan": 1000, "hibp": 1000, "dehashed": 1000, "intelx": 1000,
+        "securitytrails": 2000, "virustotal": 500, "snusbase": 2000,
+        "leakcheck": 2000, "whiteintel": 500,
+    },
+    retry_cap_per_window=50,
+    retry_window_seconds=300,
+)
 
 
-def _ws0(name: str, *, rate: float = 5.0, burst: int = 10,
-         default_timeout: float = 15.0) -> ProviderClient:
-    """A behaviour-preserving WS0 client: route + pace only, no retry, no trip."""
+def _client(name: str, *, rate: float = 5.0, burst: int = 10,
+            default_timeout: float = 15.0, max_attempts: int = 3,
+            failure_threshold: int = 5, reset_timeout: float = 60.0) -> ProviderClient:
+    """A WS7 client: route + pace + retry (exp backoff/jitter) + per-provider
+    breaker + ledger-enforced budget. Success path is unchanged from WS0 (no
+    retry/trip on a healthy 2xx), so the migration gates stay green."""
     return ProviderClient(
         name, rate=rate, burst=burst, default_timeout=default_timeout,
-        retry=RetryPolicy(max_attempts=1),
-        breaker=CircuitBreaker(failure_threshold=_NO_TRIP, name=name),
+        retry=RetryPolicy(max_attempts=max_attempts),
+        breaker=CircuitBreaker(failure_threshold=failure_threshold,
+                               reset_timeout=reset_timeout, name=name),
+        ledger=_LEDGER,
     )
+
+
+# Backwards-compatible alias (WS0 call sites built clients via _ws0).
+_ws0 = _client
 
 
 # --- paid / quota'd providers --------------------------------------------

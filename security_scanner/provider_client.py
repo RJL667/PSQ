@@ -42,6 +42,7 @@ except ImportError:  # pragma: no cover - requests is a hard dep of the scanner
 
 if TYPE_CHECKING:
     from requests import Response
+    from usage_ledger import UsageLedger
 
 from http_client import DomainRateLimiter
 from resilience import (
@@ -85,7 +86,8 @@ class ProviderClient:
                  breaker: Optional[CircuitBreaker] = None,
                  cache: Optional[ResultCache] = None,
                  default_timeout: float = 15.0,
-                 on_call: Optional[Callable[[str, str], None]] = None):
+                 on_call: Optional[Callable[[str, str], None]] = None,
+                 ledger: "Optional[UsageLedger]" = None):
         self.name = name
         self._limiter = DomainRateLimiter(rate=rate, burst=burst)
         self._retry = retry or RetryPolicy()
@@ -95,6 +97,9 @@ class ProviderClient:
         # Metering hook: called (provider, method) per real outbound call. The
         # WS5b/SCALE-17 ledger plugs in here; default counts nothing.
         self._on_call = on_call
+        # WS7/WS5b usage ledger: kill-switch (allow_call), spend metering
+        # (record_call), and retry budget (allow_retry). None = unenforced.
+        self._ledger = ledger
 
     # ---- public verbs ----------------------------------------------------
     def get(self, url, **kwargs) -> "Response | None":
@@ -112,27 +117,39 @@ class ProviderClient:
             return None
 
         # 1. WS6b cache read (global (provider, params) key; disabled by default).
+        #    A cache hit spends nothing, so it bypasses the kill-switch below.
         if self._cache is not None:
             hit = self._cache.get(self.name, method, url, kwargs)
             if hit is not None:
                 return cast("Response", hit)
 
-        # 2. per-provider quota pacing (single bucket keyed by provider name).
+        # 2. WS5b credit kill-switch: once the provider's daily budget is spent,
+        #    skip the call entirely (checker sees None -> marked skipped).
+        if self._ledger is not None and not self._ledger.allow_call(self.name):
+            return None
+
+        # 3. per-provider quota pacing (single bucket keyed by provider name).
         self._limiter.acquire(self.name)
 
         kwargs.setdefault("timeout", self._default_timeout)
 
         def _do():
+            # Meter every real outbound attempt (retries count as spend too).
+            if self._ledger is not None:
+                self._ledger.record_call(self.name)
             if self._on_call is not None:
                 self._on_call(self.name, method)
             return requests.request(method, url, **kwargs)
 
-        # 3. retry + breaker. guarded_call returns the last response (so a
+        # 4. retry + breaker. guarded_call returns the last response (so a
         #    terminal 4xx flows back for the caller to inspect) and re-raises only
         #    if every attempt raised; a tripped breaker raises CircuitOpenError.
+        #    can_retry enforces the WS7 retry budget so an outage can't storm cost.
+        can_retry = ((lambda: self._ledger.allow_retry(self.name))
+                     if self._ledger is not None else None)
         try:
             resp = guarded_call(_do, breaker=self._breaker, retry=self._retry,
-                                classify_result=classify_response)
+                                classify_result=classify_response, can_retry=can_retry)
         except CircuitOpenError:
             return None
         except Exception:
