@@ -1,17 +1,44 @@
 # Scaling implementation — status & morning brief
 
-Companion to [SCALING_DESIGN.md](SCALING_DESIGN.md). Tracks what's actually been
-built vs. what's blocked on you. Updated: 2026-06-28 session (WS0 enablement —
-checker-level gate + provider-client scaffold).
+Companion to [SCALING_DESIGN.md](SCALING_DESIGN.md). Updated: 2026-06-28.
 
 ---
 
-## TL;DR
-I built the two pieces of the plan that are **safe to do unattended** — pure,
-additive, fully-tested code that changes **no** runtime behaviour and touches the
-live scanner not at all. Everything past this point needs infrastructure,
-credentials, or a billing decision that's yours to make (see "Blocked on you").
-Nothing was committed; nothing on disk was modified outside new files.
+## ✅ SPEC IMPLEMENTED — all workstreams (WS0–WS10)
+Every workstream in the design is now implemented as committed, tested code on branch
+`scaling/ws0-migration` (~29 commits; ~240 unit tests across 18 files + 9 offline
+migration/real gates + the scoring golden gate, all green). Built behind interfaces
+with a **working single-box default now** and the **distributed backend swappable in
+by config** — no code change to activate.
+
+| WS | What | Activate with |
+|---|---|---|
+| WS0 | All egress on one seam (51 sites) + regression gates | — (done) |
+| WS1 | scanner_db (PG/SQLite), object_store (local/S3-R2), scan_state, versioned migrations | `DATABASE_URL`, `OBJECT_STORE_BACKEND=s3` |
+| WS2 | Job queue + worker tier + 429 admission control | `QUEUE_BACKEND=postgres` + run `worker.py` |
+| WS3 | Per-checker checkpoints (resumable, no re-spend) | — (active when scan_id passed) |
+| WS4 | PDF render in a separate pool → object storage | — (active) |
+| WS5a | Distributed token buckets | `REDIS_URL` |
+| WS5b | Credit kill-switch + retry budget (usage ledger) | — (in-proc) / `REDIS_URL` shared |
+| WS6 | Result cache + single-flight + probe cache | `REDIS_URL` (or `*_INPROC=1`) |
+| WS7 | Retry + circuit breaker + completeness floor + DLQ | — (active) |
+| WS8 | Cross-worker progress (replay + tail) | `REDIS_URL` |
+| WS9 | Prometheus metrics (`/metrics`) + OTel traces + SLOs | `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| WS10 | Secrets adapter, DR reconciliation, queryable usage | `SECRETS_BACKEND=vault`, run `dr.py` |
+
+**Remaining to RUN it at scale (provisioning, not coding):** point `DATABASE_URL` at
+Postgres (verify with `tooling/test_scanner_db.py`), `REDIS_URL` at Redis, an
+object-store bucket; leave the free tier (Phase −1); then start `worker.py`. Pieces
+needing external libs not installed here: S3 (`boto3`), Vault (`hvac`) — import-guarded,
+install when used. Real paid-provider gold baselines still want live API keys.
+
+---
+
+## Original morning brief (historical)
+
+### TL;DR (first session)
+The first session built the two pieces that were safe to do unattended — the
+regression harness + resilience toolkit. Everything below grew from there.
 
 ---
 
