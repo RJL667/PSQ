@@ -352,18 +352,26 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
             )
             scanner._regulatory_flags = regulatory_flags
             scanner._sub_industry = sub_industry
-            results = scanner.scan(
-                domain, on_progress=on_progress,
-                industry=industry, annual_revenue=annual_revenue,
-                annual_revenue_zar=annual_revenue_zar,
-                country=country,
-                include_fraudulent_domains=include_fraudulent_domains,
-                client_ips=client_ips,
-                related_domains=related_domains,
-                # WS3: persist per-checker checkpoints under this scan_id; resume=True
-                # so a requeue (WS2) skips already-done checkers without re-spending.
-                scan_id=scan_id, resume=True,
-            )
+            import observability
+            with observability.observe_scan(scan_id, domain):  # WS9: count + time + trace
+                results = scanner.scan(
+                    domain, on_progress=on_progress,
+                    industry=industry, annual_revenue=annual_revenue,
+                    annual_revenue_zar=annual_revenue_zar,
+                    country=country,
+                    include_fraudulent_domains=include_fraudulent_domains,
+                    client_ips=client_ips,
+                    related_domains=related_domains,
+                    # WS3: persist per-checker checkpoints under this scan_id; resume=True
+                    # so a requeue (WS2) skips already-done checkers without re-spending.
+                    scan_id=scan_id, resume=True,
+                )
+            try:
+                observability.record_checker_durations(
+                    results.get("checker_durations")
+                    or results.get("scan_context", {}).get("checker_durations", {}))
+            except Exception:
+                pass
 
             # Post-scan: scan_context (peer rating needs sub_industry +
             # annual_revenue_zar) + critical findings count + peer rating
@@ -890,6 +898,17 @@ def view_results(scan_id: str):
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()})
+
+
+@app.route("/metrics")
+def metrics():
+    # WS9: Prometheus scrape endpoint. Queue depth is sampled at scrape time.
+    import observability
+    try:
+        observability.set_queue_depth(SCAN_QUEUE.depth())
+    except Exception:
+        pass
+    return Response(observability.metrics_text(), mimetype=observability.CONTENT_TYPE)
 
 
 @app.route("/config")

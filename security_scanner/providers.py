@@ -66,7 +66,16 @@ def _client(name: str, *, rate: float = 5.0, burst: int = 10,
                                reset_timeout=reset_timeout, name=name),
         ledger=_LEDGER,
         cache=_CACHE,
+        on_call=_record_call,   # WS9: per-provider Prometheus counter (credit burn)
     )
+
+
+def _record_call(provider, method=""):
+    try:
+        from observability import record_provider_call
+        record_provider_call(provider, method)
+    except Exception:
+        pass
 
 
 # Backwards-compatible alias (WS0 call sites built clients via _ws0).
