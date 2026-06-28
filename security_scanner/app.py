@@ -54,6 +54,7 @@ DB_PATH = os.environ.get("DB_PATH", "scans.db")
 # when DATABASE_URL is set, else this same SQLite file). The CRM tables stay on the
 # legacy get_db() below; scanner<->CRM links were dropped, so there is no join.
 import scanner_db
+from progress_bus import get_progress_bus
 # Default 2 for the Render 512MB / 1-worker tier (env-overridable via
 # MAX_CONCURRENT_SCANS; production sets it explicitly). Per-process semaphore.
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SCANS", "2"))
@@ -75,26 +76,9 @@ _semaphore = threading.Semaphore(MAX_CONCURRENT)
 # 15 min ≈ two back-to-back worst-case full scans (~510s each).
 SCAN_QUEUE_TIMEOUT_S = int(os.environ.get("SCAN_QUEUE_TIMEOUT_S", "900"))
 
-# In-memory SSE progress tracking: scan_id -> queue.Queue()
-_scan_progress = {}
-_scan_progress_created = {}  # scan_id -> epoch seconds, for the TTL sweep
-_SSE_QUEUE_TTL_S = int(os.environ.get("SSE_QUEUE_TTL_S", str(2 * 3600)))
-
-
-def _sweep_progress_queues():
-    """Drop SSE queues whose scan started more than the TTL ago. Entries
-    are normally popped when the progress stream ends, but an abrupt client
-    disconnect (browser close, network drop) leaks them — this opportunistic
-    sweep, run at each scan start, bounds that growth."""
-    cutoff = time.time() - _SSE_QUEUE_TTL_S
-    for sid in [s for s, ts in list(_scan_progress_created.items()) if ts < cutoff]:
-        _scan_progress.pop(sid, None)
-        _scan_progress_created.pop(sid, None)
-
-
-def _drop_progress_queue(scan_id: str):
-    _scan_progress.pop(scan_id, None)
-    _scan_progress_created.pop(scan_id, None)
+# WS8: SSE progress now flows through progress_bus (get_progress_bus) — an
+# append-only log with replay+tail (in-process default, Redis cross-worker). The old
+# in-process queue.Queue dict + TTL sweep were removed.
 
 
 @contextmanager
@@ -341,19 +325,18 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
              skip_dehashed: bool = False, skip_intelx: bool = False,
              regulatory_flags: dict = None, sub_industry: str = None,
              related_domains: list = None):
-    progress_q = queue.Queue()
-    _sweep_progress_queues()
-    _scan_progress[scan_id] = progress_q
-    _scan_progress_created[scan_id] = time.time()
+    # WS8: progress flows through the bus (in-process default, Redis cross-worker
+    # when REDIS_URL is set), so a reconnecting/late SSE client replays the backlog.
+    bus = get_progress_bus()
 
     def on_progress(event):
-        progress_q.put(event)
+        bus.publish(scan_id, event)
 
     if not _semaphore.acquire(timeout=SCAN_QUEUE_TIMEOUT_S):
         msg = (f"No scan slot became free within {SCAN_QUEUE_TIMEOUT_S // 60} "
                "minutes (scanner busy or a previous scan hung) — please retry")
         mark_failed(scan_id, msg)
-        progress_q.put({"type": "error", "message": msg})
+        bus.publish(scan_id, {"type": "error", "message": msg})
         return
     with _release_on_exit(_semaphore):
         try:
@@ -424,10 +407,10 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
             except Exception:
                 pass  # Don't fail the scan if PDF archiving fails
 
-            progress_q.put({"type": "complete"})
+            bus.publish(scan_id, {"type": "complete"})
         except Exception as e:
             mark_failed(scan_id, str(e))
-            progress_q.put({"type": "error", "message": str(e)})
+            bus.publish(scan_id, {"type": "error", "message": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +727,7 @@ def get_scan(scan_id: str):
             msg = ("Scan lost — exceeded the maximum pending window (likely "
                    "interrupted by a service restart). Please re-run the scan.")
             mark_failed(scan_id, msg)
-            _drop_progress_queue(scan_id)
+            get_progress_bus().close(scan_id)
             return jsonify({"scan_id": scan_id, "status": "failed",
                             "error": msg}), 500
         return jsonify({"scan_id": scan_id, "status": "pending"}), 202
@@ -776,23 +759,21 @@ def scan_progress(scan_id: str):
         return Response(fail_stream(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    progress_q = _scan_progress.get(scan_id)
-    if not progress_q:
-        def empty_stream():
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-        return Response(empty_stream(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    # WS8: stream from the progress bus — replays the backlog (so a late/reconnecting
+    # client catches up) then tails, surviving the web/worker split when on Redis.
+    bus = get_progress_bus()
 
     def event_stream():
-        while True:
-            try:
-                event = progress_q.get(timeout=30)
-                yield f"data: {json.dumps(event, default=str)}\n\n"
-                if event.get("type") in ("complete", "error"):
-                    break
-            except queue.Empty:
-                yield ": keepalive\n\n"
-        _drop_progress_queue(scan_id)
+        emitted = False
+        for event in bus.listen(scan_id, idle_timeout=30):
+            emitted = True
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+            if event.get("type") in ("complete", "error"):
+                return
+        if not emitted:
+            # no events buffered (e.g. worker on another box, pre-Redis) — let the
+            # client fall back to polling GET /api/scan rather than hanging.
+            yield f"data: {json.dumps({'type': 'idle'})}\n\n"
 
     return Response(event_stream(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
