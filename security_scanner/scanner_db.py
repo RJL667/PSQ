@@ -119,12 +119,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# --- schema ---------------------------------------------------------------
-def init_schema() -> None:
-    """Create the scanner tables if absent. Idempotent; safe on every boot.
-    (Alembic replaces this hand-rolled bootstrap once it's added.)"""
-    _run("""
-        CREATE TABLE IF NOT EXISTS scans (
+# --- schema / migrations (WS1 / SCALE-01) ---------------------------------
+# Ordered, recorded migrations applied once each (a schema_migrations ledger tracks
+# applied versions). This is the lightweight equivalent of Alembic — when alembic is
+# added, point its env at the same ledger and continue numbering. Each migration is a
+# (version, [statements]) pair; statements use '?' placeholders / portable DDL.
+MIGRATIONS = [
+    ("0001_initial", [
+        """CREATE TABLE IF NOT EXISTS scans (
             id             TEXT PRIMARY KEY,
             domain         TEXT NOT NULL,
             status         TEXT NOT NULL DEFAULT 'pending',
@@ -141,23 +143,19 @@ def init_schema() -> None:
             attempts       INTEGER DEFAULT 0,
             worker_id      TEXT,
             last_heartbeat TEXT
-        )
-    """)
-    _run("CREATE INDEX IF NOT EXISTS idx_scans_domain ON scans(domain)")
-    _run("CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status)")
-    _run("""
-        CREATE TABLE IF NOT EXISTS scan_checkpoints (
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_scans_domain ON scans(domain)",
+        "CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status)",
+        """CREATE TABLE IF NOT EXISTS scan_checkpoints (
             scan_id      TEXT NOT NULL,
             checker_name TEXT NOT NULL,
             result_json  TEXT NOT NULL,
             completed_at TEXT NOT NULL,
             PRIMARY KEY (scan_id, checker_name)
-        )
-    """)
-    # WS2: durable job queue. Postgres dequeue uses FOR UPDATE SKIP LOCKED; SQLite is
-    # single-writer so the same SELECT-then-UPDATE is already serialized.
-    _run("""
-        CREATE TABLE IF NOT EXISTS scan_jobs (
+        )""",
+    ]),
+    ("0002_job_queue", [
+        """CREATE TABLE IF NOT EXISTS scan_jobs (
             id            TEXT PRIMARY KEY,
             scan_id       TEXT NOT NULL,
             pool          TEXT NOT NULL DEFAULT 'default',
@@ -169,9 +167,44 @@ def init_schema() -> None:
             started_at    TEXT,
             last_heartbeat TEXT,
             error         TEXT
-        )
-    """)
-    _run("CREATE INDEX IF NOT EXISTS idx_jobs_status ON scan_jobs(status, pool)")
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_status ON scan_jobs(status, pool)",
+    ]),
+    ("0003_usage_ledger", [
+        # WS10/SCALE-17: durable spend ledger (the Redis counters are a rebuildable
+        # cache of this append-only-ish per-(provider,day) record).
+        """CREATE TABLE IF NOT EXISTS usage (
+            provider  TEXT NOT NULL,
+            day       TEXT NOT NULL,
+            calls     INTEGER DEFAULT 0,
+            PRIMARY KEY (provider, day)
+        )""",
+    ]),
+]
+
+
+def migrate() -> list:
+    """Apply pending migrations in order; record each in schema_migrations. Returns
+    the versions applied this run. Idempotent."""
+    _run("""CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)""")
+    applied = {r["version"] for r in
+               _run("SELECT version FROM schema_migrations", fetch="all")}
+    done = []
+    for version, statements in MIGRATIONS:
+        if version in applied:
+            continue
+        for stmt in statements:
+            _run(stmt)
+        _run("INSERT INTO schema_migrations (version, applied_at) VALUES (?,?)",
+             (version, _now()))
+        done.append(version)
+    return done
+
+
+def init_schema() -> None:
+    """Apply migrations (idempotent; safe on every boot)."""
+    migrate()
 
 
 # --- WS2 job queue ops ----------------------------------------------------
