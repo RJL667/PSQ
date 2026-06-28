@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from requests import Response
     from usage_ledger import UsageLedger
 
-from http_client import DomainRateLimiter
+from rate_limiter import make_rate_limiter
 from resilience import (
     CircuitBreaker, CircuitOpenError, RetryPolicy, classify_response, guarded_call,
 )
@@ -89,7 +89,9 @@ class ProviderClient:
                  on_call: Optional[Callable[[str, str], None]] = None,
                  ledger: "Optional[UsageLedger]" = None):
         self.name = name
-        self._limiter = DomainRateLimiter(rate=rate, burst=burst)
+        # WS5a: per-provider bucket — Redis-shared across workers when REDIS_URL is
+        # set, else the in-process token bucket.
+        self._limiter = make_rate_limiter(rate, burst, namespace=f"prov:{name}")
         self._retry = retry or RetryPolicy()
         self._breaker = breaker or CircuitBreaker(name=name)
         self._cache = cache

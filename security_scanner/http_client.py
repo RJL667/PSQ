@@ -448,3 +448,14 @@ class HttpClient:
 # ---------------------------------------------------------------------------
 
 HTTP = HttpClient()
+
+# WS5a: if REDIS_URL is set, share the per-apex politeness bucket across workers
+# (the in-process bucket can't, so the limit is ~2x today under --workers 2). Falls
+# back silently to the in-process bucket when Redis is absent.
+try:
+    from rate_limiter import maybe_redis_limiter
+    _redis_apex = maybe_redis_limiter(rate=2.0, burst=5, namespace="apex")
+    if _redis_apex is not None:
+        HTTP.rate_limiter = _redis_apex
+except Exception:
+    pass
