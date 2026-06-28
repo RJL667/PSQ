@@ -31,6 +31,11 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
+# WS0: route apex probes through the single egress seam (per-apex politeness
+# limiter + identifying User-Agent + WAF tracking). HTTP.get returns None on
+# failure instead of raising — handled at each call site below.
+from http_client import HTTP
+
 USER_AGENT = "Mozilla/5.0 (Phishield Scanner) flag-inference/1.0"
 HTTP_TIMEOUT = 8  # pre-flight is interactive, keep snappy
 
@@ -154,9 +159,9 @@ def infer_listed_company(domain: str, html_content: Optional[str] = None) -> dic
     # Footer ticker scrape - cheap HTTP probe if html not already provided
     if html_content is None and REQUESTS_AVAILABLE:
         try:
-            r = requests.get(f"https://{domain}", timeout=HTTP_TIMEOUT,
-                             headers={"User-Agent": USER_AGENT}, allow_redirects=True)
-            html_content = (r.text or "")[:40000]  # cap to footer-reachable size
+            r = HTTP.get(f"https://{domain}", timeout=HTTP_TIMEOUT,
+                         allow_redirects=True)
+            html_content = (r.text or "")[:40000] if r is not None else None
         except Exception:
             html_content = None
 
@@ -562,14 +567,15 @@ def run_preflight(domain: str, sub_industry: Optional[str] = None,
 
     if REQUESTS_AVAILABLE:
         try:
-            r = requests.get(f"https://{domain}", timeout=HTTP_TIMEOUT,
-                             headers={"User-Agent": USER_AGENT}, allow_redirects=True)
-            html_content = (r.text or "")[:60000]
+            r = HTTP.get(f"https://{domain}", timeout=HTTP_TIMEOUT,
+                         allow_redirects=True)
+            html_content = (r.text or "")[:60000] if r is not None else None
             # Pull <title>
-            title_match = re.search(r"<title[^>]*>([^<]+)</title>", html_content,
-                                    re.IGNORECASE)
-            if title_match:
-                page_title = title_match.group(1).strip()
+            if html_content:
+                title_match = re.search(r"<title[^>]*>([^<]+)</title>", html_content,
+                                        re.IGNORECASE)
+                if title_match:
+                    page_title = title_match.group(1).strip()
         except Exception:
             html_content = None
 

@@ -1,0 +1,6 @@
+{
+  "auto_detected": true,
+  "evidence": "Homepage footer references 'JSE: ABC'",
+  "jse_ticker": "ABC",
+  "match_method": "footer_ticker"
+}

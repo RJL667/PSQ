@@ -1,0 +1,48 @@
+{
+  "domain": "examplelisted.co.za",
+  "flags": {
+    "accountable_institution": {
+      "auto_detected": false,
+      "evidence": "Sub-industry not flagged as FIC accountable institution"
+    },
+    "b2c": {
+      "auto_detected": true,
+      "evidence": "Multiple independent consumer-facing signals: consumer account / login; commerce/checkout UI"
+    },
+    "gdpr_applicable": {
+      "auto_detected": false,
+      "evidence": "No EU / GDPR signals detected"
+    },
+    "insurance_subtype": {
+      "auto_detected": false,
+      "evidence": "Not an insurance-related sub-industry",
+      "insurance_subtype": null
+    },
+    "listed_company": {
+      "auto_detected": true,
+      "evidence": "Homepage footer references 'JSE: ABC'",
+      "jse_ticker": "ABC",
+      "match_method": "footer_ticker"
+    },
+    "pci_applicable": {
+      "auto_detected": true,
+      "evidence": "Payment / checkout signal detected (Add to cart)"
+    },
+    "sub_industry_detail": {
+      "auto_detected": false,
+      "evidence": "Not a Health Services sub-industry",
+      "sub_industry_detail": null
+    }
+  },
+  "industry": null,
+  "page_title": "Example Listed Co (Pty) Ltd",
+  "related_candidates": {
+    "candidates": [],
+    "error": null,
+    "methods_used": [],
+    "primary_domain": "examplelisted.co.za",
+    "status": "no_data"
+  },
+  "status": "ok",
+  "sub_industry": "other"
+}
