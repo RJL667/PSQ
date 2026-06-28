@@ -4,6 +4,12 @@ Network and infrastructure security checkers: Subdomains, VPN, DNS, Ports, Secur
 
 from scanner_utils import *
 
+# WS0: route target probes through the egress seam (HTTP) and crt.sh through its
+# per-provider client (CRTSH). Both return None on a failed request instead of
+# raising; CRTSH adds no retry so the hand-rolled crt.sh loop is preserved.
+from http_client import HTTP
+from providers import CRTSH
+
 
 # ---------------------------------------------------------------------------
 # 8. Subdomain Discovery (Certificate Transparency)
@@ -105,21 +111,18 @@ class SubdomainChecker:
                     socket.getaddrinfo(cname_target, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
                     # Target resolves — check HTTP fingerprint if available
                     if fingerprint:
+                        # HTTPS first; on a failed request (None) fall back to
+                        # HTTP — preserving the original raise-driven fallback.
+                        r = HTTP.get(f"https://{subdomain}", timeout=5,
+                                     allow_redirects=True, verify=False)
+                        if r is None:
+                            r = HTTP.get(f"http://{subdomain}", timeout=5,
+                                         allow_redirects=True)
                         try:
-                            r = requests.get(f"https://{subdomain}", timeout=5,
-                                             headers={"User-Agent": USER_AGENT},
-                                             allow_redirects=True, verify=False)
-                            if fingerprint.lower() in r.text.lower():
+                            if r is not None and fingerprint.lower() in r.text.lower():
                                 is_dangling = True
                         except Exception:
-                            try:
-                                r = requests.get(f"http://{subdomain}", timeout=5,
-                                                 headers={"User-Agent": USER_AGENT},
-                                                 allow_redirects=True)
-                                if fingerprint.lower() in r.text.lower():
-                                    is_dangling = True
-                            except Exception:
-                                pass
+                            pass
                 except socket.gaierror:
                     # CNAME target doesn't resolve — dangling!
                     is_dangling = True
@@ -165,11 +168,11 @@ class SubdomainChecker:
         ct_count = 0
         for attempt in range(2):
             try:
-                r = requests.get(
+                r = CRTSH.get(
                     f"https://crt.sh/?q=%25.{domain}&output=json",
                     timeout=20, headers={"User-Agent": USER_AGENT}
                 )
-                if r.status_code == 200 and r.text.strip():
+                if r is not None and r.status_code == 200 and r.text.strip():
                     entries = r.json()
                     for entry in entries:
                         names = entry.get("name_value", "").split("\n")
@@ -418,12 +421,12 @@ class VPNRemoteAccessChecker:
         for vpn_name, sigs in self.VPN_SIGNATURES.items():
             for path in sigs["paths"]:
                 try:
-                    r = requests.get(
+                    r = HTTP.get(
                         f"https://{domain}{path}", timeout=5,
-                        allow_redirects=True, headers={"User-Agent": USER_AGENT}
+                        allow_redirects=True
                     )
                     # Gate 1: must be a real 200 (not a 3xx/4xx/5xx or soft-404).
-                    if r.status_code != 200:
+                    if r is None or r.status_code != 200:
                         continue
                     body = r.text[:3000].lower()
                     # Gate 2: body sanity — reject trivial/empty bodies and
@@ -725,11 +728,12 @@ class DNSInfrastructureChecker:
             return {}
         info = {}
         try:
-            r = requests.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
-                             allow_redirects=True, headers={"User-Agent": USER_AGENT})
-            for h in ["Server", "X-Powered-By", "X-Generator", "X-AspNet-Version"]:
-                if h in r.headers:
-                    info[h] = r.headers[h]
+            r = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                         allow_redirects=True)
+            if r is not None:
+                for h in ["Server", "X-Powered-By", "X-Generator", "X-AspNet-Version"]:
+                    if h in r.headers:
+                        info[h] = r.headers[h]
         except Exception:
             pass
         return info
@@ -956,9 +960,8 @@ class SecurityPolicyChecker:
         # Check security.txt
         for path in ["/.well-known/security.txt", "/security.txt"]:
             try:
-                r = requests.get(f"https://{domain}{path}", timeout=5,
-                                 headers={"User-Agent": USER_AGENT})
-                if r.status_code == 200 and "Contact:" in r.text:
+                r = HTTP.get(f"https://{domain}{path}", timeout=5)
+                if r is not None and r.status_code == 200 and "Contact:" in r.text:
                     result["security_txt"] = {
                         "present": True, "path": path,
                         "has_contact": "Contact:" in r.text,
@@ -973,9 +976,8 @@ class SecurityPolicyChecker:
 
         # Check robots.txt
         try:
-            r = requests.get(f"https://{domain}/robots.txt", timeout=5,
-                             headers={"User-Agent": USER_AGENT})
-            if r.status_code == 200:
+            r = HTTP.get(f"https://{domain}/robots.txt", timeout=5)
+            if r is not None and r.status_code == 200:
                 disallows = r.text.lower().count("disallow:")
                 result["robots_txt"] = {"present": True, "disallows_count": disallows}
         except Exception:
