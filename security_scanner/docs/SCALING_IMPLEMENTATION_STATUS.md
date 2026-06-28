@@ -130,9 +130,9 @@ verify; synthetic transport, no keys/network):
 | `checkers_network` | 7 (apex → HTTP, crt.sh) | `d6c66c2` |
 | `checkers_threats` | 27 (apex + 15 providers) | `e51665b` |
 
-`providers.py` is the registry: one `ProviderClient` per provider (19), all WS0
-transparent pass-throughs (no retry, breaker off, gentle bucket, empty cache/meter
-slots).
+`providers.py` is the registry: one `ProviderClient` per provider (21). Originally
+WS0 transparent pass-throughs; **WS7 (below) since turned on retry + breaker + the
+usage ledger** on them.
 
 **Gate coverage (8 offline gates, all green):** `mig_flag_inference`,
 `mig_checkers_core`, `mig_small_providers`, `mig_providers_2`, `mig_checkers_network`,
@@ -154,20 +154,35 @@ records the **pre-migration** behaviour and diffs the migrated code under replay
   real baselines for them is a one-command follow-up (`record_real_free.py` pattern
   + load `.env`) whenever you want to spend the credits.
 
-## ▶️ Recommended next steps
-1. **Real-key gold baselines.** Run `record_baseline` against a live target with
-   real API keys for the paid providers + the DNS/socket-bound takeover path, to
-   upgrade those from review-gated to gold-gated. (The only thing keys are needed
-   for now.)
-2. **WS7 turn-on** (later): raise `ProviderClient` `max_attempts` / lower the
-   breaker threshold in `providers.py` to activate retry + circuit-breaking — one
-   edit per provider, no checker touched. Add tests for the new failure paths.
-3. **WS5a**: tighten per-provider buckets / swap for the Redis distributed bucket.
-4. Then **WS1** (Postgres, needs Phase −1) and the rest of the rollout.
-2. **WS1** Postgres + Alembic + state machine (note the present-tense
-   `SQLITE_BUSY` hazard — current `get_db()` has no pool/WAL). Needs Phase −1.
-3. Then WS2 (queue) → WS4 (PDF worker) → WS6b (cache) → WS5/WS7 wiring, per the
-   rollout table.
+## ✅ WS7 DONE — retry + breaker + usage ledger (commit `f7e5829`)
+Egress resilience is ON and bounded: `usage_ledger.py` (in-memory, Redis/Postgres-
+ready) backs a WS5b credit kill-switch (`allow_call`) + WS7 retry budget
+(`allow_retry`) + spend metering; `resilience.RetryPolicy`/`guarded_call` gained a
+`can_retry` budget hook; `ProviderClient` enforces all three; `providers.py` `_client`
+builds real retry (3 attempts, exp backoff/jitter) + per-provider breaker (trip @5,
+60s reset) + the shared ledger with conservative daily caps. Success path unchanged,
+so all gates stay green. 13 ledger tests.
+
+## ✅ WS1 foundations DONE — object store + state machine (commit `d15e614`)
+`object_store.py` (LocalObjectStore + S3/R2-ready) and `scan_state.py` (lifecycle +
+heartbeat/visibility-timeout + poison/DLQ helpers), additive + 28 tests, imported by
+no runtime code yet.
+
+## ▶️ Recommended next steps (now all need live infra / billing)
+1. **WS1 cutover** — rewrite `app.py`'s `get_db`/schema onto **Postgres + Alembic**
+   (fixes the present-tense `SQLITE_BUSY` hazard — no pool/WAL), adopt `scan_state`,
+   wire `object_store` into the archive/PDF paths. Needs a live Postgres, **Phase −1**
+   (leave the free tier), and — build this first — an **app-layer regression gate**
+   (today's golden harness gates scoring + checkers, not `app.py`'s DB/HTTP handlers).
+2. **Distributed ledger / WS5a** — swap `InMemoryUsageLedger` for a Redis impl (same
+   interface), mirror metered calls to a Postgres `usage` table; tighten buckets.
+3. **WS2 → WS4 → WS6b → WS8 → WS9 → WS10** — queue+workers, PDF worker, paid-API
+   cache, progress, observability/SLOs, DR — per the rollout table.
+4. **Completeness floor** (WS7 tail, scoring-side, gated by `golden.py`): mark a scan
+   `partial`/low-confidence when breaker-`skipped` coverage exceeds the
+   `excluded_weight` cap, via the existing WAFTracker disclaimer plumbing.
+5. **(Optional) real paid-provider baselines** — `.env` has the keys; spend the
+   credits when you want live-data gates for HIBP/Shodan/VT/SecurityTrails/DeHashed.
 
 ---
 
