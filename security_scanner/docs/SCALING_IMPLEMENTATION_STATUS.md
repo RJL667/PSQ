@@ -115,31 +115,45 @@ In rough priority order:
    session — whether the **single-tenant** scope (CRM/PII/multi-tenancy removed)
    is what you want long-term.
 
-## WS0 migration progress (branch `scaling/ws0-migration`)
-Per-module, each gated offline by a `tooling/regression/mig_<module>.py`
-(record original → migrate → verify; synthetic transport, no keys/network):
-- ✅ `flag_inference.py` — 2 apex probes → `HTTP.*` (commit `5c1f29d`)
-- ✅ `checkers_core.py` — 4 apex probes (HSTS/MTA-STS/headers/WAF) → `HTTP.*` (`d8fbc5c`)
-- ⏳ **6 of 51 sites done.** Remaining target-apex (shape a): `checkers_network.py`
-  (VPN/header/security.txt/robots probes are simple; **subdomain-takeover 109/116
-  are NOT cleanly offline-gateable** — they sit behind subdomain enumeration +
-  DNS CNAME + socket logic and the HTTPS→HTTP fallback relies on `requests`
-  *raising*; want real baselines or review).
-- ⛔ Remaining providers (shape b → `ProviderClient`): crt.sh, OSV, NVD, EPSS,
-  ExploitDB, MSF, Tranco, Shodan-InternetDB (free); HIBP, DeHashed, IntelX,
-  Shodan-paid, SecurityTrails, VT, Snusbase, LeakCheck, WhiteIntel (paid). Two
-  snags to decide per provider: (1) routing crt.sh through `ProviderClient`'s
-  retry collides with its hand-rolled `retries=2` loop — consolidate (intentional
-  re-baseline); (2) paid providers need a dummy-key stub to reach the HTTP path in
-  an offline gate, and **real keys for a gold-standard baseline**.
+## WS0 migration — ✅ COMPLETE (branch `scaling/ws0-migration`)
+**All 50 direct `requests.*` call sites across the scanner now route through the
+seam** (`checkers_supply_chain` was already there). Done per-module, each gated
+offline by a `tooling/regression/mig_<module>.py` (record original → migrate →
+verify; synthetic transport, no keys/network):
+
+| Module | Sites | Commit |
+|---|---|---|
+| `flag_inference` | 2 (apex → HTTP) | `5c1f29d` |
+| `checkers_core` | 4 (apex → HTTP) | `d8fbc5c` |
+| `related_domain_discovery` + `credential_export` | 2 (CRTSH, DEHASHED) | `644b2b4` |
+| `origin_discovery` + `darkweb_providers` | 8 (ST, Shodan, IntelX, Snusbase, LeakCheck, WhiteIntel) | `349de12` |
+| `checkers_network` | 7 (apex → HTTP, crt.sh) | `d6c66c2` |
+| `checkers_threats` | 27 (apex + 15 providers) | `e51665b` |
+
+`providers.py` is the registry: one `ProviderClient` per provider (19), all WS0
+transparent pass-throughs (no retry, breaker off, gentle bucket, empty cache/meter
+slots).
+
+**Gate coverage caveats (honest):**
+- Offline gates use **synthetic** responses (real free-provider *shapes*; dummy
+  keys for paid). They prove request-fidelity + output-equivalence on the captured
+  data — not every response-parsing branch.
+- **Not in an automated gate** (migrated + reviewed + import-smoke tested; pattern
+  identical to gated siblings): `checkers_network` subdomain-takeover (109/116,
+  behind DNS/socket) and crt.sh-in-SubdomainChecker; the paid-provider *entry
+  points* in `checkers_threats` (HIBP/Shodan/IntelX/DeHashed/VT/SecurityTrails/
+  HudsonRock/InternetDB-enrichment).
 
 ## ▶️ Recommended next steps
-1. **Continue the WS0 migration** on the branch, module by module, each behind a
-   `mig_<module>.py` gate. The workflow is proven; `resilience.py` is mounted in
-   `ProviderClient`. Do the simple `checkers_network` apex probes next; take the
-   takeover probes + paid providers with real baselines (`record_baseline` against
-   a live target + keys). Leave `checkers_threats.py` (39 sites) for last. Run
-   `golden.py --check` alongside for the scoring layer.
+1. **Real-key gold baselines.** Run `record_baseline` against a live target with
+   real API keys for the paid providers + the DNS/socket-bound takeover path, to
+   upgrade those from review-gated to gold-gated. (The only thing keys are needed
+   for now.)
+2. **WS7 turn-on** (later): raise `ProviderClient` `max_attempts` / lower the
+   breaker threshold in `providers.py` to activate retry + circuit-breaking — one
+   edit per provider, no checker touched. Add tests for the new failure paths.
+3. **WS5a**: tighten per-provider buckets / swap for the Redis distributed bucket.
+4. Then **WS1** (Postgres, needs Phase −1) and the rest of the rollout.
 2. **WS1** Postgres + Alembic + state machine (note the present-tense
    `SQLITE_BUSY` hazard — current `get_db()` has no pool/WAL). Needs Phase −1.
 3. Then WS2 (queue) → WS4 (PDF worker) → WS6b (cache) → WS5/WS7 wiring, per the
