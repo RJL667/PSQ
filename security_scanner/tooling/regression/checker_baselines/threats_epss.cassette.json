@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://api.first.org/data/v1/epss?cve=CVE-2021-44228": {
+      "content_b64": "eyJkYXRhIjpbeyJjdmUiOiJDVkUtMjAyMS00NDIyOCIsImVwc3MiOiIwLjk3NTYwIiwicGVyY2VudGlsZSI6IjAuOTkifV19",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx/1.24"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://api.first.org/data/v1/epss"
+    }
+  },
+  "request_log": [
+    "GET https://api.first.org/data/v1/epss?cve=CVE-2021-44228"
+  ],
+  "version": 1
+}

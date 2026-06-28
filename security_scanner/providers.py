@@ -46,6 +46,7 @@ HIBP = _ws0("hibp")                     # haveibeenpwned.com (breach + metadata)
 DEHASHED = _ws0("dehashed", default_timeout=30.0)
 INTELX = _ws0("intelx")                 # free.intelx.io (search initiate + poll)
 SECURITYTRAILS = _ws0("securitytrails")
+VIRUSTOTAL = _ws0("virustotal")
 SNUSBASE = _ws0("snusbase")
 LEAKCHECK = _ws0("leakcheck")
 WHITEINTEL = _ws0("whiteintel")
@@ -60,3 +61,4 @@ MSF = _ws0("msf")                       # raw.githubusercontent metasploit modul
 TRANCO = _ws0("tranco", default_timeout=30.0)
 INTERNETDB = _ws0("internetdb")         # internetdb.shodan.io (free, != paid Shodan)
 HUDSONROCK = _ws0("hudsonrock")         # cavalier.hudsonrock.com (free domain API)
+KEV = _ws0("kev")                       # CISA Known Exploited Vulns catalog + mirror

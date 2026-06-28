@@ -1,0 +1,10 @@
+{
+  "cve_id": "CVE-2021-44228",
+  "cvss_score": 10.0,
+  "description": "Log4Shell RCE",
+  "easily_exploitable": true,
+  "has_patch": true,
+  "published": "2021-12-10",
+  "severity": "critical",
+  "vector": "CVSS:3.1/AV:N/AC:L/PR:N"
+}

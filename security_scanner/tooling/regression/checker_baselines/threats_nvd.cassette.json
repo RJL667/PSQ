@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228": {
+      "content_b64": "eyJ2dWxuZXJhYmlsaXRpZXMiOlt7ImN2ZSI6eyJpZCI6IkNWRS0yMDIxLTQ0MjI4IiwiZGVzY3JpcHRpb25zIjpbeyJsYW5nIjoiZW4iLCJ2YWx1ZSI6IkxvZzRTaGVsbCBSQ0UifV0sIm1ldHJpY3MiOnsiY3Zzc01ldHJpY1YzMSI6W3siY3Zzc0RhdGEiOnsiYmFzZVNjb3JlIjoxMC4wLCJ2ZWN0b3JTdHJpbmciOiJDVlNTOjMuMS9BVjpOL0FDOkwvUFI6TiJ9fV19LCJwdWJsaXNoZWQiOiIyMDIxLTEyLTEwVDAwOjAwWiIsInJlZmVyZW5jZXMiOlt7InRhZ3MiOlsiUGF0Y2giXX1dfX1dfQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx/1.24"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    }
+  },
+  "request_log": [
+    "GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228"
+  ],
+  "version": 1
+}
