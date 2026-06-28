@@ -1,0 +1,31 @@
+.pageTitle { margin: 6px 0 2px; }
+.pageTitle h2 { font-size: 18px; font-weight: 600; }
+.pageTitle p { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--panel-gap); }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--panel-gap); }
+
+.scoreLine { display: flex; align-items: baseline; gap: 5px; margin-bottom: 10px; }
+.scoreVal { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.scoreMax { font-size: 12px; color: var(--text-muted); }
+.scoreMuted { font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px; font-style: italic; }
+
+.kv { display: grid; gap: 0; margin: 0; }
+.kv div { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.kv div:last-child { border-bottom: none; }
+.kv dt { color: var(--text-muted); flex-shrink: 0; }
+.kv dd { color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; min-width: 0; }
+
+.checkLine { display: flex; align-items: center; gap: 9px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.checkLine:last-child { border-bottom: none; }
+.checkDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.checkLabel { flex: 1; color: var(--text-secondary); }
+.checkVal { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.issues { margin: 10px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 5px; }
+.issues li { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+
+.statGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-bg-elevated); }
+.statVal { font-size: 20px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1; }
+.statLabel { font-size: 10.5px; color: var(--text-muted); }

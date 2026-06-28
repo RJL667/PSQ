@@ -1,0 +1,77 @@
+.grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1.15fr 1.05fr 1.7fr;
+  gap: var(--panel-gap);
+}
+
+.gaugeBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+}
+.critNote {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: var(--critical);
+  padding: 3px 9px; border-radius: 999px; background: var(--critical-soft);
+}
+
+.metricBody { display: flex; flex-direction: column; gap: 12px; height: 100%; justify-content: center; }
+.bigRow { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.outOf { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tag { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; margin-left: auto; }
+
+.compTrack {
+  position: relative; display: flex; height: 7px; border-radius: 4px;
+  background: var(--border); overflow: hidden;
+}
+.compBase { background: var(--accent); height: 100%; }
+.compAdd { height: 100%; }
+
+.subline {
+  display: flex; flex-wrap: wrap; gap: 10px 16px;
+  font-size: 11.5px; color: var(--text-secondary);
+}
+.subline strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.factorHint { color: var(--text-muted); }
+.trend { display: inline-flex; align-items: center; gap: 4px; color: var(--positive); }
+
+.dbiBars { display: flex; align-items: flex-end; gap: 4px; height: 30px; }
+.dbiSeg {
+  flex: 1; display: flex; align-items: flex-end; height: 100%;
+  background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.dbiSeg > span { display: block; width: 100%; border-radius: 3px; }
+
+.finGrid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 14px; height: 100%; align-items: center; }
+.finPrimary { display: flex; flex-direction: column; gap: 3px; }
+.finLabel { font-size: 11px; color: var(--text-muted); }
+.finBig { font-size: 27px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1.05; }
+.finRange { font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+.finStats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0; }
+.finStats div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.finStats dt { font-size: 10.5px; color: var(--text-muted); }
+.finStats dd { font-size: 12.5px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+.tip { position: relative; display: inline-flex; color: var(--text-muted); cursor: help; }
+.tip:hover .tipBody, .tip:focus .tipBody { opacity: 1; visibility: visible; }
+.tipBody {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 230px;
+  background: var(--panel-bg-elevated); border: 1px solid var(--border-emphasis);
+  border-radius: 8px; padding: 9px 11px; font-size: 11px; font-weight: 400;
+  color: var(--text-secondary); line-height: 1.45; z-index: 50;
+  opacity: 0; visibility: hidden; transition: opacity .12s;
+  box-shadow: 0 16px 36px -16px rgba(0,0,0,.7);
+}
+
+@media (max-width: 1199px) {
+  .grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 700px) {
+  .grid { grid-template-columns: 1fr; }
+  .finGrid { grid-template-columns: 1fr; }
+}

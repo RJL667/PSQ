@@ -1,0 +1,126 @@
+.sidebar {
+  grid-area: sidebar;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 14px;
+}
+.logo {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(150deg, var(--accent-bright), var(--accent));
+  box-shadow: 0 0 0 1px rgba(140, 114, 255, 0.25), 0 6px 16px -8px var(--accent);
+  flex-shrink: 0;
+}
+.brandText { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+.brandName { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-primary); }
+.brandSub { font-size: 9px; font-weight: 600; letter-spacing: 0.16em; color: var(--text-muted); }
+
+.nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group { display: flex; flex-direction: column; gap: 1px; }
+.groupLabel {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 8px 4px;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  text-decoration: none;
+}
+.item:hover { background: var(--panel-hover); color: var(--text-primary); }
+.label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.rail {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-bright);
+  transition: height 0.15s;
+}
+
+.active { background: var(--accent-soft); color: var(--text-primary); }
+.active .rail { height: 20px; }
+.active svg { color: var(--accent-bright); }
+
+.disabled { opacity: 0.4; cursor: not-allowed; }
+.disabled:hover { background: none; color: var(--text-secondary); }
+
+/* Tablet: collapse to an icon rail (spec §4/§30) */
+@media (max-width: 1099px) {
+  .label, .groupLabel, .brandText, .accountText, .accountChevron { display: none; }
+  .brand { justify-content: center; padding: 16px 0 14px; }
+  .item { justify-content: center; padding: 9px 0; }
+  .nav { padding: 6px 6px 12px; align-items: center; }
+  .group { width: 100%; align-items: center; }
+  .rail { left: -6px; }
+  .account { justify-content: center; padding: 12px 0; }
+}
+
+/* Mobile: sidebar hidden (command bar + content only) */
+@media (max-width: 767px) {
+  .sidebar { display: none; }
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+  text-align: left;
+}
+.account:hover { background: var(--panel-hover); }
+.avatar {
+  display: grid; place-items: center;
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  font-size: 10.5px; font-weight: 700; color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.accountText { display: flex; flex-direction: column; line-height: 1.2; flex: 1; min-width: 0; }
+.accountName { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.accountRole { font-size: 10px; color: var(--text-muted); }
+.accountChevron { color: var(--text-muted); flex-shrink: 0; }

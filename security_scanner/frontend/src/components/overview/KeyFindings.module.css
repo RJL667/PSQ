@@ -1,0 +1,36 @@
+.count {
+  display: inline-grid; place-items: center;
+  min-width: 20px; height: 18px; padding: 0 6px;
+  border-radius: 999px; font-size: 11px; font-weight: 700;
+  background: var(--panel-bg-elevated); border: 1px solid var(--border-emphasis);
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.list { list-style: none; margin: 0; padding: 0; }
+.row {
+  display: flex; align-items: center; gap: 11px;
+  width: 100%; padding: 11px 14px; text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.list li:last-child .row { border-bottom: none; }
+.row:hover { background: var(--panel-hover); }
+
+.rank {
+  flex-shrink: 0; width: 18px; text-align: center;
+  font-size: 12px; font-weight: 700; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.iconBox {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 30px; height: 30px; border-radius: 8px;
+}
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.title { font-size: 12.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.evidence { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+.countLabel { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.chev { color: var(--text-muted); flex-shrink: 0; }
+.row:hover .chev { color: var(--text-secondary); }
+
+@media (max-width: 520px) {
+  .evidence, .countLabel { white-space: normal; }
+}
