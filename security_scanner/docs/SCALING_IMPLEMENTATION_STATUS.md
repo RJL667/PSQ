@@ -144,10 +144,15 @@ records the **pre-migration** behaviour and diffs the migrated code under replay
 - One site is **gated by analogy, not directly**: crt.sh in `SubdomainChecker.check`
   (168) — byte-identical to the gated `related_domain_discovery` crt.sh pattern
   (sits behind brute-force DNS enumeration that isn't worth driving offline).
-- Caveat that remains: gates use **synthetic** responses (real free-provider
-  *shapes*; dummy keys for paid), so they prove request-fidelity + output-
-  equivalence on the captured data, not every response-parsing branch. Real-key
-  gold baselines (next step 1) would close that.
+- **Live-validated against real free-provider data** (`record_real_free.py`,
+  records live with no keys then replays offline): TechStack apex (phishield.com),
+  OSV, NVD, EPSS, HudsonRock — 5/5 deterministic, confirming the migrated checkers
+  parse *real* responses, not just synthetic shapes. (crt.sh excluded — its
+  retry loop makes a live recording flaky; synthetic-gated + live-confirmed.)
+- Still synthetic-only: the **paid** providers (HIBP/Shodan/VT/SecurityTrails/
+  DeHashed — keys are in `.env`), by choice (no-paid-credits decision). Recording
+  real baselines for them is a one-command follow-up (`record_real_free.py` pattern
+  + load `.env`) whenever you want to spend the credits.
 
 ## ▶️ Recommended next steps
 1. **Real-key gold baselines.** Run `record_baseline` against a live target with
