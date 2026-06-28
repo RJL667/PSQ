@@ -1,0 +1,115 @@
+{
+  "entries": {
+    "GET https://examplecorp.co.za/basket": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/basket"
+    },
+    "GET https://examplecorp.co.za/buy": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/buy"
+    },
+    "GET https://examplecorp.co.za/cart": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/cart"
+    },
+    "GET https://examplecorp.co.za/checkout": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/checkout"
+    },
+    "GET https://examplecorp.co.za/order": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/order"
+    },
+    "GET https://examplecorp.co.za/pay": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/pay"
+    },
+    "GET https://examplecorp.co.za/payment": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/payment"
+    },
+    "GET https://examplecorp.co.za/purchase": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/purchase"
+    },
+    "GET https://examplecorp.co.za/shop/cart": {
+      "content_b64": "PGh0bWw+PGhlYWQ+PHRpdGxlPkV4YW1wbGUgQ29ycDwvdGl0bGU+PC9oZWFkPjxib2R5PmhpPC9ib2R5PjwvaHRtbD4=",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://examplecorp.co.za/shop/cart"
+    }
+  },
+  "request_log": [
+    "GET https://examplecorp.co.za/basket",
+    "GET https://examplecorp.co.za/buy",
+    "GET https://examplecorp.co.za/cart",
+    "GET https://examplecorp.co.za/checkout",
+    "GET https://examplecorp.co.za/order",
+    "GET https://examplecorp.co.za/pay",
+    "GET https://examplecorp.co.za/payment",
+    "GET https://examplecorp.co.za/purchase",
+    "GET https://examplecorp.co.za/shop/cart"
+  ],
+  "version": 1
+}

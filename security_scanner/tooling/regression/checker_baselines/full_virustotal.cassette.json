@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://www.virustotal.com/api/v3/domains/examplecorp.co.za": {
+      "content_b64": "eyJkYXRhIjp7ImF0dHJpYnV0ZXMiOnsibGFzdF9hbmFseXNpc19zdGF0cyI6eyJtYWxpY2lvdXMiOjAsInN1c3BpY2lvdXMiOjAsImhhcm1sZXNzIjo4MCwidW5kZXRlY3RlZCI6NX0sInJlcHV0YXRpb24iOjAsInRvdGFsX3ZvdGVzIjp7Im1hbGljaW91cyI6MCwiaGFybWxlc3MiOjF9LCJjYXRlZ29yaWVzIjp7fX19fQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://www.virustotal.com/api/v3/domains/examplecorp.co.za"
+    }
+  },
+  "request_log": [
+    "GET https://www.virustotal.com/api/v3/domains/examplecorp.co.za"
+  ],
+  "version": 1
+}

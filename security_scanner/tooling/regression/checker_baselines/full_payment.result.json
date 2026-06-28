@@ -1,0 +1,8 @@
+{
+  "has_payment_page": false,
+  "issues": [],
+  "payment_page_https": false,
+  "payment_provider": null,
+  "self_hosted_payment_form": false,
+  "status": "completed"
+}

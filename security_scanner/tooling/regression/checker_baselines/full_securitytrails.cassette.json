@@ -1,0 +1,31 @@
+{
+  "entries": {
+    "GET https://api.securitytrails.com/v1/domain/examplecorp.co.za": {
+      "content_b64": "eyJjdXJyZW50X2RucyI6eyJhIjp7InZhbHVlcyI6W3siaXAiOiIyMDMuMC4xMTMuNCJ9XX0sIm14Ijp7InZhbHVlcyI6W119LCJucyI6eyJ2YWx1ZXMiOltdfX0sImFsZXhhX3JhbmsiOjEyMzQ1fQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://api.securitytrails.com/v1/domain/examplecorp.co.za"
+    },
+    "GET https://api.securitytrails.com/v1/domain/examplecorp.co.za/associated": {
+      "content_b64": "eyJyZWNvcmRzIjpbXSwicmVjb3JkX2NvdW50IjowfQ==",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://api.securitytrails.com/v1/domain/examplecorp.co.za/associated"
+    }
+  },
+  "request_log": [
+    "GET https://api.securitytrails.com/v1/domain/examplecorp.co.za",
+    "GET https://api.securitytrails.com/v1/domain/examplecorp.co.za/associated"
+  ],
+  "version": 1
+}

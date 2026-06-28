@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "GET https://haveibeenpwned.com/api/v3/breaches?domain=examplecorp.co.za": {
+      "content_b64": "W3siTmFtZSI6IkFjbWUiLCJUaXRsZSI6IkFjbWUiLCJCcmVhY2hEYXRlIjoiMjAyMS0wMy0wMSIsIkRhdGFDbGFzc2VzIjpbIkVtYWlsIGFkZHJlc3NlcyIsIlBhc3N3b3JkcyJdLCJQd25Db3VudCI6MTAwMH1d",
+      "encoding": "utf-8",
+      "headers": {
+        "Content-Type": "application/json",
+        "Server": "nginx"
+      },
+      "reason": null,
+      "status_code": 200,
+      "url": "https://haveibeenpwned.com/api/v3/breaches"
+    }
+  },
+  "request_log": [
+    "GET https://haveibeenpwned.com/api/v3/breaches?domain=examplecorp.co.za"
+  ],
+  "version": 1
+}
