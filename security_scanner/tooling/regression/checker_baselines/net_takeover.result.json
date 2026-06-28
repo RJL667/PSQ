@@ -1,0 +1,6 @@
+{
+  "cname_target": "deleted-app-xyz.github.io",
+  "risk": "critical",
+  "service": "GitHub Pages",
+  "subdomain": "pages.examplecorp.co.za"
+}
