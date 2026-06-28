@@ -1,0 +1,111 @@
+/* ==========================================================================
+   Phishield CyberRisk — design tokens & base reset
+   Near-black navy application shell. Thin borders, restrained glows.
+   ========================================================================== */
+:root {
+  /* surfaces */
+  --app-bg: #060b14;
+  --sidebar-bg: #07101d;
+  --panel-bg: #0b1422;
+  --panel-bg-elevated: #0e192a;
+  --panel-hover: #122039;
+  --border: #1c2b43;
+  --border-emphasis: #293b5a;
+
+  /* text */
+  --text-primary: #f2f5fb;
+  --text-secondary: #a0acc2;
+  --text-muted: #67758f;
+
+  /* accent */
+  --accent: #7357f5;
+  --accent-bright: #8c72ff;
+  --accent-soft: rgba(115, 87, 245, 0.12);
+
+  /* status */
+  --positive: #2bd576;
+  --positive-soft: rgba(43, 213, 118, 0.10);
+  --warning: #f5a524;
+  --warning-soft: rgba(245, 165, 36, 0.10);
+  --high: #ff6b3d;
+  --high-soft: rgba(255, 107, 61, 0.10);
+  --critical: #ff4d5e;
+  --critical-soft: rgba(255, 77, 94, 0.10);
+  --info: #4f91ff;
+  --info-soft: rgba(79, 145, 255, 0.10);
+  --unknown: #71809a;
+  --unknown-soft: rgba(113, 128, 154, 0.10);
+
+  /* geometry */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 14px;
+  --gutter: 24px;
+  --panel-gap: 8px;
+  --sidebar-w: 184px;
+
+  /* typography */
+  --font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* subtle panel gradient */
+  --panel-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0) 60%);
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--app-bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular numerals everywhere scores / money / timestamps render */
+.tnum, .metric-value, .mono { font-variant-numeric: tabular-nums; }
+
+h1, h2, h3, h4, p { margin: 0; }
+
+a { color: inherit; text-decoration: none; }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-emphasis);
+  border-radius: 6px;
+  border: 2px solid var(--app-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: #36486b; }
+
+/* Accessible focus ring — keyboard only */
+:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

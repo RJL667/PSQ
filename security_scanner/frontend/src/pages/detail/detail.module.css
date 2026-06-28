@@ -1,0 +1,17 @@
+.page { display: flex; flex-direction: column; gap: var(--panel-gap); }
+
+.kev {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: var(--critical-soft); color: var(--critical);
+}
+.cvss { font-weight: 700; font-variant-numeric: tabular-nums; }
+.dash { color: var(--text-muted); }
+
+.cves { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; white-space: normal; }
+.cve { font-size: 10.5px; padding: 1px 6px; border-radius: 5px; background: var(--panel-bg-elevated); border: 1px solid var(--border); color: var(--text-secondary); }
+.impact { white-space: normal; max-width: 260px; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.svc { display: flex; flex-direction: column; gap: 1px; }
+.svcName { font-weight: 600; color: var(--text-primary); }
+.svcVer { font-size: 10.5px; color: var(--text-muted); }
+.note { font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.45; }

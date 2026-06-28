@@ -1,0 +1,20 @@
+.h { font-size: 18px; font-weight: 600; margin: 8px 0 2px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--panel-gap);
+}
+.score { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.score strong { color: var(--text-primary); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+.fields { display: grid; gap: 0; margin: 0 0 8px; }
+.field {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 5px 0; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.field dt { color: var(--text-muted); text-transform: capitalize; }
+.field dd { color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+
+.issues { margin: 6px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
+.issues li { font-size: 12px; color: var(--text-secondary); }

@@ -1,0 +1,17 @@
+.scroll { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.table thead th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--text-muted);
+  padding: 9px 11px; border-bottom: 1px solid var(--border-emphasis);
+  white-space: nowrap; background: var(--panel-bg);
+}
+.table tbody td {
+  padding: 9px 11px; border-bottom: 1px solid var(--border);
+  color: var(--text-secondary); vertical-align: middle; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover { background: var(--panel-hover); }
+.empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px; }

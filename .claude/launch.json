@@ -9,8 +9,9 @@
     },
     {
       "name": "security-scanner",
-      "runtimeExecutable": "C:/Users/sarel/AppData/Local/Programs/Python/Python312/python.exe",
-      "runtimeArgs": ["security_scanner/app.py"],
+      "runtimeExecutable": "C:/Program Files/Python312/python.exe",
+      "runtimeArgs": ["-c", "import os, runpy; os.chdir(r'C:/Users/rudol/.gemini/antigravity/PSQ/security_scanner'); runpy.run_path('app.py', run_name='__main__')"],
+      "cwd": "C:/Users/rudol/.gemini/antigravity/PSQ/security_scanner",
       "port": 5001
     },
     {
@@ -18,6 +19,20 @@
       "runtimeExecutable": "C:/Users/sarel/AppData/Local/Programs/Python/Python312/python.exe",
       "runtimeArgs": ["SME Rating Engine/app.py"],
       "port": 5002
+    },
+    {
+      "name": "dashboard-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js", "--port", "5174", "--strictPort"],
+      "cwd": "C:/Users/rudol/.gemini/antigravity/PSQ/security_scanner/frontend",
+      "port": 5174
+    },
+    {
+      "name": "scanner-pg",
+      "runtimeExecutable": "C:/Program Files/Python312/python.exe",
+      "runtimeArgs": ["-c", "import os, runpy; os.environ['PORT']='5057'; os.chdir(r'C:/Users/rudol/.gemini/antigravity/PSQ/security_scanner'); runpy.run_path('app.py', run_name='__main__')"],
+      "cwd": "C:/Users/rudol/.gemini/antigravity/PSQ/security_scanner",
+      "port": 5057
     }
   ]
 }

@@ -69,7 +69,20 @@
       "Bash(python -m json.tool)",
       "Bash(curl -s -X DELETE https://sme-rating-engine.onrender.com/api/quotes/8eb17d1d-073d-47f1-8e7e-1900d672eb4e)",
       "Bash(curl -s -X DELETE https://sme-rating-engine.onrender.com/api/quotes/00efee01-4550-4703-910e-74743afcfb27)",
-      "Bash(start \"\" \"C:/Users/sarel/Desktop/Sarel/SML Consulting/PSQ/Corporate Rating Engine/SIC_to_IBM_Industry_Mapping.csv\")"
+      "Bash(start \"\" \"C:/Users/sarel/Desktop/Sarel/SML Consulting/PSQ/Corporate Rating Engine/SIC_to_IBM_Industry_Mapping.csv\")",
+      "Bash(curl -s http://localhost:4000/health)",
+      "Bash(ANTHROPIC_BASE_URL=http://localhost:4000 claude --print \"My name is Sarel van der Walt, my email is sarel@phishield.ai, my phone is +27725551234, and my credit card is 4111111111111111. Just say hello and confirm you received my details.\")",
+      "Bash(unset CLAUDECODE)",
+      "WebFetch(domain:support.claude.com)",
+      "Bash(where claude.exe)",
+      "Read(//c/Users/rudol/AppData/Local/Programs/**)",
+      "Read(//c/Users/rudol/AppData/Local/**)",
+      "Read(//c/Users/rudol/AppData/Local/Claude/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Bash(powershell.exe -Command \"Get-Process | Where-Object { $_.Name -like ''*claude*'' -or $_.Name -like ''*anthropic*'' } | Select-Object Name, Path | Format-Table -AutoSize\")",
+      "Bash(powershell.exe -Command \":*)",
+      "Bash(pip show:*)"
     ]
   }
 }
