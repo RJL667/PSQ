@@ -376,6 +376,9 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
                 include_fraudulent_domains=include_fraudulent_domains,
                 client_ips=client_ips,
                 related_domains=related_domains,
+                # WS3: persist per-checker checkpoints under this scan_id; resume=True
+                # so a requeue (WS2) skips already-done checkers without re-spending.
+                scan_id=scan_id, resume=True,
             )
 
             # Post-scan: scan_context (peer rating needs sub_industry +

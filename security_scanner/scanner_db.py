@@ -202,7 +202,67 @@ def save_checkpoint(scan_id: str, checker_name: str, result: dict) -> None:
          (scan_id, checker_name, json.dumps(result, default=str), _now()))
 
 
-def load_checkpoints(scan_id: str) -> dict:
-    rows = _run("SELECT checker_name, result_json FROM scan_checkpoints "
+def load_checkpoints(scan_id: str, max_age_seconds: "float | None" = None) -> dict:
+    """Return {checker_name: result} for a scan. With ``max_age_seconds``, rows
+    older than that (by ``completed_at``) are treated as absent (WS3 freshness
+    bound, so a long-resumed scan re-runs stale checkers rather than serving a
+    stale vintage — mirrors the WS6 data-type TTL)."""
+    rows = _run("SELECT checker_name, result_json, completed_at FROM scan_checkpoints "
                 "WHERE scan_id=?", (scan_id,), fetch="all")
-    return {r["checker_name"]: json.loads(r["result_json"]) for r in rows}
+    out = {}
+    cutoff = None
+    if max_age_seconds is not None:
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    for r in rows:
+        if cutoff is not None:
+            try:
+                ts = datetime.fromisoformat(r["completed_at"]).timestamp()
+                if ts < cutoff:
+                    continue  # stale -> treat as absent
+            except (TypeError, ValueError):
+                pass
+        out[r["checker_name"]] = json.loads(r["result_json"])
+    return out
+
+
+# Statuses that mean a checker did NOT successfully complete — never checkpointed,
+# so they re-run on resume (matches scoring_analytics _FAILED_/_SKIPPED_STATUSES).
+_NOT_DONE_STATUSES = frozenset(
+    {"error", "timeout", "no_api_key", "auth_failed", "disabled", "skipped"})
+
+
+def _is_done(result) -> bool:
+    """True if a checker result should be checkpointed: a dict whose status (if any)
+    is not a failed/skipped marker. Most successful checkers carry no 'status' key."""
+    return isinstance(result, dict) and result.get("status") not in _NOT_DONE_STATUSES
+
+
+class Checkpointer:
+    """WS3 resumability helper used by scanner.scan(). With no scan_id it is a pure
+    no-op (compute every checker, persist nothing) — so default scans are unchanged.
+    With a scan_id it skip-and-loads a valid checkpoint, else computes and (best-
+    effort) persists a non-failed result so a requeue doesn't re-spend credits."""
+
+    def __init__(self, scan_id: "str | None" = None, resume: bool = False,
+                 max_age_seconds: "float | None" = None):
+        self.scan_id = scan_id
+        self.enabled = bool(scan_id)
+        self._loaded = (load_checkpoints(scan_id, max_age_seconds)
+                        if (scan_id and resume) else {})
+
+    def run(self, name: str, compute_fn):
+        if name in self._loaded:
+            return self._loaded[name]            # skip-and-load
+        result = compute_fn()
+        if self.enabled and _is_done(result):
+            try:
+                save_checkpoint(self.scan_id, name, result)
+            except Exception:
+                pass  # best-effort: a failed write just re-runs the checker on resume
+        return result
+
+    def loaded(self, name: str):
+        return self._loaded.get(name)
+
+    def has(self, name: str) -> bool:
+        return name in self._loaded
