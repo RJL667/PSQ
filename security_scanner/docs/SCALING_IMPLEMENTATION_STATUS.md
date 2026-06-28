@@ -115,15 +115,31 @@ In rough priority order:
    session — whether the **single-tenant** scope (CRM/PII/multi-tenancy removed)
    is what you want long-term.
 
+## WS0 migration progress (branch `scaling/ws0-migration`)
+Per-module, each gated offline by a `tooling/regression/mig_<module>.py`
+(record original → migrate → verify; synthetic transport, no keys/network):
+- ✅ `flag_inference.py` — 2 apex probes → `HTTP.*` (commit `5c1f29d`)
+- ✅ `checkers_core.py` — 4 apex probes (HSTS/MTA-STS/headers/WAF) → `HTTP.*` (`d8fbc5c`)
+- ⏳ **6 of 51 sites done.** Remaining target-apex (shape a): `checkers_network.py`
+  (VPN/header/security.txt/robots probes are simple; **subdomain-takeover 109/116
+  are NOT cleanly offline-gateable** — they sit behind subdomain enumeration +
+  DNS CNAME + socket logic and the HTTPS→HTTP fallback relies on `requests`
+  *raising*; want real baselines or review).
+- ⛔ Remaining providers (shape b → `ProviderClient`): crt.sh, OSV, NVD, EPSS,
+  ExploitDB, MSF, Tranco, Shodan-InternetDB (free); HIBP, DeHashed, IntelX,
+  Shodan-paid, SecurityTrails, VT, Snusbase, LeakCheck, WhiteIntel (paid). Two
+  snags to decide per provider: (1) routing crt.sh through `ProviderClient`'s
+  retry collides with its hand-rolled `retries=2` loop — consolidate (intentional
+  re-baseline); (2) paid providers need a dummy-key stub to reach the HTTP path in
+  an offline gate, and **real keys for a gold-standard baseline**.
+
 ## ▶️ Recommended next steps
-1. **WS0 call-site migration (the keystone) — now unblocked except for baselines.**
-   For each checker: `record_baseline(...)` (one live run), refactor its
-   `requests.*` calls onto `ProviderClient` (paid providers + crt.sh) or `HTTP.*`
-   (target-apex probes), then `verify(...)` must stay green. `resilience.py` is
-   already mounted in `ProviderClient`. Order: start with one self-contained
-   provider checker as the pattern (e.g. HudsonRock or HIBP), then the rest;
-   `checkers_threats.py` (39 sites) last and most carefully (it's partially
-   migrated). Run `golden.py --check` alongside for the scoring layer.
+1. **Continue the WS0 migration** on the branch, module by module, each behind a
+   `mig_<module>.py` gate. The workflow is proven; `resilience.py` is mounted in
+   `ProviderClient`. Do the simple `checkers_network` apex probes next; take the
+   takeover probes + paid providers with real baselines (`record_baseline` against
+   a live target + keys). Leave `checkers_threats.py` (39 sites) for last. Run
+   `golden.py --check` alongside for the scoring layer.
 2. **WS1** Postgres + Alembic + state machine (note the present-tense
    `SQLITE_BUSY` hazard — current `get_db()` has no pool/WAL). Needs Phase −1.
 3. Then WS2 (queue) → WS4 (PDF worker) → WS6b (cache) → WS5/WS7 wiring, per the
