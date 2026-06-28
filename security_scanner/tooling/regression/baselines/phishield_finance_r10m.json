@@ -1,0 +1,861 @@
+{
+  "categories_overall_score": 282,
+  "insurance": {
+    "dbi": {
+      "components": {
+        "breach_count": {
+          "max": 30,
+          "points": 30,
+          "value": 0
+        },
+        "credential_leaks": {
+          "max": 20,
+          "points": 10,
+          "value": "Unknown (no API key)"
+        },
+        "data_severity": {
+          "max": 15,
+          "points": 15,
+          "value": "No data exposed"
+        },
+        "recency": {
+          "max": 20,
+          "points": 20,
+          "value": "No breaches"
+        },
+        "trend": {
+          "max": 15,
+          "points": 15,
+          "value": "Improving"
+        }
+      },
+      "dbi_score": 90,
+      "label": "Excellent",
+      "max_score": 100
+    },
+    "financial_impact": {
+      "annual_revenue_zar": 10000000,
+      "cost_components": {
+        "C1_liability": 2041399,
+        "C2_regulatory_fine": 100000,
+        "C4_ransom_payment": 848315,
+        "C5_incident_response": 350000
+      },
+      "cover_ladder": {
+        "bad": {
+          "label": "Bad breach (P95 severity)",
+          "loss_zar": 10378248
+        },
+        "basis": "single-severe-event severity percentiles; cover-sizing tiers; posture-independent",
+        "catastrophic": {
+          "label": "Catastrophic breach (1-in-250 / P99.6 severity)",
+          "loss_zar": 12922434
+        },
+        "typical_severe": {
+          "label": "Typical severe breach (P50 severity)",
+          "loss_zar": 6241310
+        }
+      },
+      "coverage_adjustment": {
+        "applied": false
+      },
+      "currency": "ZAR",
+      "estimated_annual_loss": {
+        "maximum": 1334370,
+        "minimum": 436793,
+        "most_likely": 447252
+      },
+      "incident_types": {
+        "data_extortion": {
+          "components": {
+            "C1": 18193,
+            "C2": 891,
+            "C3": 535,
+            "C4": 3024,
+            "C5": 3119
+          },
+          "downtime_days": 3,
+          "expected_loss": 25762,
+          "has_downtime": true,
+          "has_exfiltration": true,
+          "has_ransom": true,
+          "label": "Data Extortion (No Encryption)",
+          "probability": 0.0089
+        },
+        "ddos_infra": {
+          "components": {
+            "C3": 9012
+          },
+          "downtime_days": 5,
+          "expected_loss": 9012,
+          "has_downtime": true,
+          "has_exfiltration": false,
+          "has_ransom": false,
+          "label": "DDoS / Infrastructure Failure",
+          "probability": 0.09
+        },
+        "double_extortion": {
+          "components": {
+            "C1": 113516,
+            "C2": 5561,
+            "C3": 16377,
+            "C4": 47172,
+            "C5": 19462
+          },
+          "downtime_days": 25,
+          "expected_loss": 202089,
+          "has_downtime": true,
+          "has_exfiltration": true,
+          "has_ransom": true,
+          "label": "Double Extortion Ransomware",
+          "probability": 0.0556
+        },
+        "opportunistic_breach": {
+          "components": {
+            "C1": 13644,
+            "C2": 1337,
+            "C3": 268,
+            "C5": 1871
+          },
+          "downtime_days": 1,
+          "expected_loss": 17120,
+          "has_downtime": true,
+          "has_exfiltration": true,
+          "has_ransom": false,
+          "label": "Opportunistic Breach",
+          "probability": 0.0134
+        },
+        "ransomware_only": {
+          "components": {
+            "C3": 26204,
+            "C4": 75476,
+            "C5": 31140
+          },
+          "downtime_days": 25,
+          "expected_loss": 132820,
+          "has_downtime": true,
+          "has_exfiltration": false,
+          "has_ransom": true,
+          "label": "Ransomware (No Exfiltration)",
+          "probability": 0.089
+        },
+        "silent_breach": {
+          "components": {
+            "C1": 45482,
+            "C2": 2228,
+            "C3": 892,
+            "C5": 4679
+          },
+          "downtime_days": 2,
+          "expected_loss": 53281,
+          "has_downtime": true,
+          "has_exfiltration": true,
+          "has_ransom": false,
+          "label": "Silent Data Breach",
+          "probability": 0.0223
+        },
+        "wiper_destructive": {
+          "components": {
+            "C3": 3275,
+            "C5": 3892
+          },
+          "downtime_days": 25,
+          "expected_loss": 7168,
+          "has_downtime": true,
+          "has_exfiltration": false,
+          "has_ransom": false,
+          "label": "Destructive Attack (Wiper)",
+          "probability": 0.0111
+        }
+      },
+      "industry": "Finance",
+      "insurance_recommendation": {
+        "_deprecated": true,
+        "_use_instead": "loss_exposure.scenarios",
+        "minimum_cover_zar": 1000000,
+        "premium_risk_tier": "High",
+        "recommended_cover_zar": 1000000
+      },
+      "insurance_recommendations": {
+        "deductible_pct": 3.8,
+        "expected_annual_loss": 447252,
+        "recommended_coverage": 1000000,
+        "suggested_deductible": 38000.0
+      },
+      "loss_exposure": {
+        "currency": "ZAR",
+        "disclaimer": "Figures presented are statistical model output and exclude civil liability (see Civil Liability Disclosure). Selection of cover limit is the responsibility of the insured in consultation with the broker. Phishield does not recommend a specific cover amount.",
+        "scenarios": {
+          "median": {
+            "annual_prob": 0.5,
+            "label": "Median (P50)",
+            "loss_zar": 780416
+          },
+          "most_likely": {
+            "annual_prob": null,
+            "label": "Most likely (mode)",
+            "loss_zar": 676911
+          },
+          "return_1_100": {
+            "annual_prob": null,
+            "label": "Severe event (P99 severity)",
+            "loss_zar": 12109838
+          },
+          "return_1_200": {
+            "annual_prob": null,
+            "label": "Extreme event (P99.5 severity)",
+            "loss_zar": 12734821
+          },
+          "return_1_250": {
+            "annual_prob": null,
+            "label": "Catastrophic (P99.6 severity)",
+            "loss_zar": 12922434
+          }
+        }
+      },
+      "monte_carlo": {
+        "compound_total": {
+          "mean": 805996,
+          "mode": 281208,
+          "p25": 0,
+          "p5": 0,
+          "p50": 0,
+          "p75": 99146,
+          "p95": 5735838,
+          "p99": 9611891,
+          "p99_5": 11051771,
+          "p99_5_raw": 10623536,
+          "p99_6": 11488942,
+          "p99_6_raw": 10968382,
+          "p99_fit_applied": true,
+          "p99_raw": 9433410,
+          "std_dev": 2039534
+        },
+        "confidence_interval_50": {
+          "lower": 615121,
+          "upper": 981310
+        },
+        "confidence_interval_90": {
+          "lower": 436793,
+          "upper": 1334370
+        },
+        "iterations": 50000,
+        "method": "PERT distribution (lambda=4), incident-type decomposition",
+        "severity_pml": {
+          "mean": 6517176,
+          "mode": 5488706,
+          "p25": 4937240,
+          "p5": 3586225,
+          "p50": 6241310,
+          "p75": 7823470,
+          "p95": 10378248,
+          "p99": 12109838,
+          "p99_5": 12734821,
+          "p99_5_raw": 12683563,
+          "p99_6": 12922434,
+          "p99_6_raw": 12869549,
+          "p99_fit_applied": false,
+          "p99_raw": 12094450,
+          "std_dev": 2082557
+        },
+        "total": {
+          "mean": 819266,
+          "mode": 676911,
+          "p25": 615121,
+          "p5": 436793,
+          "p50": 780416,
+          "p75": 981310,
+          "p95": 1334370,
+          "p99": 1628517,
+          "p99_5": 1735538,
+          "p99_5_raw": 1735538,
+          "p99_6": 1767742,
+          "p99_6_raw": 1761210,
+          "p99_fit_applied": false,
+          "p99_raw": 1628517,
+          "std_dev": 277795
+        }
+      },
+      "probability_drivers": {
+        "formula": "p_breach = vulnerability \u00d7 TEF \u00d7 0.3",
+        "p_breach": 0.0446,
+        "tef": 1.45,
+        "vulnerability": 0.1024
+      },
+      "regulatory_exposure": {
+        "c2_gdpr": 0,
+        "c2_other": 0,
+        "c2_pci": 0,
+        "c2_popia": 100000,
+        "c2_total": 100000,
+        "catastrophe_stack": {
+          "capacity_factor": 0.15,
+          "cpa_cat_zar": 0,
+          "ecta_cat_scaled_zar": 800000,
+          "fine_capacity_factor": 0.8,
+          "gdpr_cat_zar": 0,
+          "note": "Statutory maxima per applicable framework, scaled by the enterprise capacity factor for the entity's revenue band. Sanlam-scale (>= R10B) faces the full stack; a micro FSP (< R10M) faces 10% of the stack. Excludes uncapped POPIA Section 99 civil exposure - see Civil Liability Disclosure.",
+          "other_jurisdictions_cat_zar": 0,
+          "pci_cat_zar": 0,
+          "popia_statutory_scaled_zar": 8000000,
+          "revenue_band_zar": 10000000,
+          "sector_cat_total_zar": 0,
+          "sector_frameworks": [],
+          "total_cat_stack_zar": 8800000
+        },
+        "flags": {},
+        "note": "C2 = POPIA (Section 109; statutory ceiling R10M, 2% turnover used as internal capacity-scaling heuristic for s109(3) factors - not a statutory formula) + GDPR (4% uncapped) + PCI (R1M x non-compliance) + other jurisdictions (R2M each)",
+        "popia_statutory_max_zar": 10000000
+      },
+      "return_periods": {
+        "1_in_100": {
+          "exceedance_prob": 0.01,
+          "loss_zar": 12109838,
+          "percentile": "P99"
+        },
+        "1_in_200": {
+          "exceedance_prob": 0.005,
+          "loss_zar": 12734821,
+          "percentile": "P99.5"
+        },
+        "1_in_250": {
+          "exceedance_prob": 0.004,
+          "loss_zar": 12922434,
+          "percentile": "P99.6"
+        },
+        "basis": "severity-PML (single severe event); posture-independent; conditional on a severe breach, not an annual frequency"
+      },
+      "risk_mitigations": {
+        "current_annual_loss": 447250,
+        "findings": [
+          {
+            "estimated_annual_savings_zar": 42847,
+            "finding": "CRITICAL: 8 critical CVE(s) across 1 IP(s)",
+            "recommendation": "Patch critical CVEs on public-facing servers",
+            "scenario_impact": "ransomware",
+            "severity": "Critical"
+          },
+          {
+            "estimated_annual_savings_zar": 104188,
+            "finding": "High-risk port open: 3306 (MySQL) \u2014 Direct database access enables mass data theft; ransomware encryption of data",
+            "recommendation": "Restrict database access to private networks/VPN",
+            "scenario_impact": "data_breach",
+            "severity": "High"
+          },
+          {
+            "estimated_annual_savings_zar": 69459,
+            "finding": "HTTPS not enforced \u2014 HTTP does not redirect to HTTPS",
+            "recommendation": "Enforce HTTPS across all endpoints",
+            "scenario_impact": "data_breach",
+            "severity": "High"
+          },
+          {
+            "estimated_annual_savings_zar": 52095,
+            "finding": "DMARC policy is 'none' \u2014 not enforced",
+            "recommendation": "Enforce DMARC (move policy from p=none to quarantine or reject)",
+            "scenario_impact": "data_breach",
+            "severity": "High"
+          },
+          {
+            "estimated_annual_savings_zar": 34729,
+            "finding": "Missing security header: Content-Security-Policy",
+            "recommendation": "Implement security headers (HSTS, CSP, X-Frame-Options)",
+            "scenario_impact": "data_breach",
+            "severity": "Medium"
+          },
+          {
+            "estimated_annual_savings_zar": 34729,
+            "finding": "Domain/IP listed on 1 blacklist(s): dbl.spamhaus.org",
+            "recommendation": "Resolve DNS blocklist entries",
+            "scenario_impact": "data_breach",
+            "severity": "Medium"
+          },
+          {
+            "estimated_annual_savings_zar": 26047,
+            "finding": "No DKIM selectors found across 40 common selector names",
+            "recommendation": "Enable DKIM signing on your mail server",
+            "scenario_impact": "data_breach",
+            "severity": "Medium"
+          },
+          {
+            "estimated_annual_savings_zar": 16067,
+            "finding": "No VPN/remote access gateway detected \u2014 remote access method unknown",
+            "recommendation": "Implement VPN or Zero Trust Network Access for remote workers",
+            "scenario_impact": "ransomware",
+            "severity": "Medium"
+          }
+        ],
+        "mitigated_annual_loss": 67088,
+        "remediation_summary": {
+          "breach_grade_after": "Strong",
+          "breach_grade_before": "Elevated",
+          "breach_probability_after": 0.0068,
+          "breach_probability_after_pct": 0.68,
+          "breach_probability_before": 0.045,
+          "breach_probability_before_pct": 4.5,
+          "catastrophe_cover_zar": 12922434,
+          "catastrophe_note": "The 1-in-250 catastrophe cover requirement is severity-driven and posture-independent - remediation lowers the LIKELIHOOD of loss, not the worst-case severity, so the cover figure is unchanged.",
+          "exposure_reduction_pct": 85.0
+        },
+        "summary": {
+          "critical": {
+            "count": 1,
+            "total_savings_zar": 42847
+          },
+          "high": {
+            "count": 3,
+            "total_savings_zar": 225742
+          },
+          "medium": {
+            "count": 4,
+            "total_savings_zar": 111572
+          }
+        },
+        "total_potential_savings": 380162
+      },
+      "risk_probability": {
+        "_note": "Reporting-only FAIR loss-event-frequency view. Three distinct annual-likelihood concepts with segregated bands. No scoring weight - new view of already-scored signals.",
+        "availability_resilience": {
+          "basis": "FAIR-anchored base (Uptime Institute AOA serious/severe outage rate ~3%/yr) plus availability-control increments: CDN/DDoS-mitigation (primary), hosting redundancy / multi-ASN (secondary), WAF (L7-flood only). Base FAIR-anchored; per-control increments directional.",
+          "calibrated": false,
+          "definition": "Indicative resilience signal for outage / availability risk spanning DDoS and system / infrastructure-failure causes. Describes the RISK only - it is NOT a coverage statement (outage / system-failure cover varies by policy and over time). Base FAIR-anchored to outage data; per-control increments directional.",
+          "indicator": 0.09,
+          "indicator_pct": 9.0,
+          "label": "Availability resilience indicator (INDICATIVE)"
+        },
+        "cyber_incident": {
+          "band_anchor": "Relative multi-channel posture bands (8/18/28). The combined breach+ransomware rate sits above per-org material-incident claims frequency (Coalition 2025 1.2%/yr <$25M to 5.7%/yr >$100M; Cyentia IRIS <2% SMB) because it aggregates both channels as an index; read as relative posture, not a calibrated annual claim rate. A frequency-calibration pass (ransomware LEF) is next.",
+          "bands": [
+            {
+              "grade": "Low",
+              "upper_pct": 8
+            },
+            {
+              "grade": "Typical",
+              "upper_pct": 18
+            },
+            {
+              "grade": "Elevated",
+              "upper_pct": 28
+            },
+            {
+              "grade": "High",
+              "upper_pct": null
+            }
+          ],
+          "channels": {
+            "data_breach": 0.0446,
+            "ransomware": 0.1557
+          },
+          "definition": "Annual likelihood of ANY modelled cyber incident - nested ABOVE the data-breach figure and always >= it. Independent union of the breach and ransomware channels: 1 - (1 - p_breach) * (1 - rsi_score x 0.30).",
+          "grade": "Elevated",
+          "label": "Total cyber-incident probability (annual)",
+          "probability": 0.1933,
+          "probability_pct": 19.33
+        },
+        "data_breach": {
+          "band_anchor": "Firm public breach-rate anchors: Cyentia IRIS (SMB material breach <2%/yr), BitSight, SecurityScorecard.",
+          "bands": [
+            {
+              "grade": "Strong",
+              "upper_pct": 1
+            },
+            {
+              "grade": "Good",
+              "upper_pct": 2
+            },
+            {
+              "grade": "Typical",
+              "upper_pct": 3
+            },
+            {
+              "grade": "Elevated",
+              "upper_pct": 6
+            },
+            {
+              "grade": "High",
+              "upper_pct": 12
+            },
+            {
+              "grade": "Critical",
+              "upper_pct": null
+            }
+          ],
+          "definition": "Annual likelihood of a data breach - confidentiality loss / exfiltration of sensitive records. FAIR loss-event frequency p_breach = vulnerability x TEF x 0.30.",
+          "grade": "Elevated",
+          "label": "Data-breach probability (annual)",
+          "probability": 0.0446,
+          "probability_pct": 4.46
+        }
+      },
+      "scenarios": {
+        "business_interruption": {
+          "estimated_loss": 56563,
+          "monte_carlo": {
+            "mean": 63800,
+            "mode": 43281,
+            "p25": 39170,
+            "p5": 22660,
+            "p50": 57416,
+            "p75": 81972,
+            "p95": 127137,
+            "p99": 163007,
+            "p99_5": 176384,
+            "p99_5_raw": 176384,
+            "p99_6": 180586,
+            "p99_6_raw": 179411,
+            "p99_fit_applied": false,
+            "p99_raw": 163007,
+            "std_dev": 32740
+          },
+          "note": "Aggregated C3 (revenue loss from downtime) across ALL incident types",
+          "probability": 0.09
+        },
+        "data_breach": {
+          "cost_per_record": 2992,
+          "estimated_loss": 200852,
+          "estimated_records": 1333,
+          "monte_carlo": {
+            "mean": 461495,
+            "mode": 343676,
+            "p25": 290900,
+            "p5": 160336,
+            "p50": 424015,
+            "p75": 594056,
+            "p95": 891254,
+            "p99": 1130206,
+            "p99_5": 1222658,
+            "p99_5_raw": 1215268,
+            "p99_6": 1252636,
+            "p99_6_raw": 1252636,
+            "p99_fit_applied": false,
+            "p99_raw": 1127480,
+            "std_dev": 227674
+          },
+          "note": "Aggregated C1+C2 costs across all incident types involving data exfiltration",
+          "probability": 0.045,
+          "records_assumption_disclosure": {
+            "estimated_records": 1333,
+            "industry_key": "finance",
+            "model_anchor": "IBM SA Cost of a Data Breach 2025",
+            "model_anchor_zar": 70120000,
+            "model_validity_ceiling": 500000,
+            "rationale": "The financial-impact model anchors the data-breach component on the IBM SA Cost of a Data Breach study, calibrated against industry-typical breach sizes (~25,000-100,000 records per incident). For context, the 'Finance' industry heuristic of ~1 record per R7,500 of revenue implies this organisation likely holds approximately 1,333 sensitive records. The catastrophe modelling is reliable up to approximately 500,000 records for the 'Finance' industry calibration. If the organisation actually holds more than 500,000 sensitive records under POPIA / GDPR / HIPAA / PCI DSS or other applicable regulation, the cat exposure in this report should be treated as a FLOOR estimate only. Common outliers: fintechs, health-tech aggregators, marketing platforms, data brokers, breach-list resellers - small-revenue entities with record holdings 10-1000x the industry average.",
+            "records_divisor_zar": 7500
+          },
+          "regulatory_fine": 100000
+        },
+        "ransomware": {
+          "estimated_loss": 189835,
+          "ir_cost": 350000,
+          "monte_carlo": {
+            "mean": 293971,
+            "mode": 207190,
+            "p25": 202573,
+            "p5": 136161,
+            "p50": 269769,
+            "p75": 362024,
+            "p95": 532900,
+            "p99": 672685,
+            "p99_5": 726538,
+            "p99_5_raw": 726538,
+            "p99_6": 744708,
+            "p99_6_raw": 744708,
+            "p99_fit_applied": false,
+            "p99_raw": 670860,
+            "std_dev": 124190
+          },
+          "note": "Combined C4+C5 for backward compatibility; see scenarios_4cat for split",
+          "ransom_estimate": 848315,
+          "rsi_score": 0.519
+        }
+      },
+      "scenarios_4cat": {
+        "business_interruption": {
+          "components": "C3",
+          "estimated_loss": 56563,
+          "ibm_equivalent": "Lost business (~30% of IBM breach cost)",
+          "label": "Business Interruption",
+          "monte_carlo": {
+            "mean": 63800,
+            "mode": 43281,
+            "p25": 39170,
+            "p5": 22660,
+            "p50": 57416,
+            "p75": 81972,
+            "p95": 127137,
+            "p99": 163007,
+            "p99_5": 176384,
+            "p99_5_raw": 176384,
+            "p99_6": 180586,
+            "p99_6_raw": 179411,
+            "p99_fit_applied": false,
+            "p99_raw": 163007,
+            "std_dev": 32740
+          },
+          "note": "Revenue loss from downtime across ALL incident types"
+        },
+        "data_breach": {
+          "components": "C1 + C2",
+          "estimated_loss": 200852,
+          "ibm_equivalent": "Post-breach response + Notification",
+          "label": "Data Breach Exposure",
+          "monte_carlo": {
+            "mean": 461495,
+            "mode": 343676,
+            "p25": 290900,
+            "p5": 160336,
+            "p50": 424015,
+            "p75": 594056,
+            "p95": 891254,
+            "p99": 1130206,
+            "p99_5": 1222658,
+            "p99_5_raw": 1215268,
+            "p99_6": 1252636,
+            "p99_6_raw": 1252636,
+            "p99_fit_applied": false,
+            "p99_raw": 1127480,
+            "std_dev": 227674
+          },
+          "note": "Record costs + regulatory fines across incident types with data exfiltration"
+        },
+        "detection_escalation": {
+          "components": "C5",
+          "estimated_loss": 64163,
+          "ibm_equivalent": "Detection & escalation (~40% of IBM breach cost)",
+          "label": "Detection & Escalation",
+          "monte_carlo": {
+            "mean": 80382,
+            "mode": 66797,
+            "p25": 57347,
+            "p5": 39450,
+            "p50": 75499,
+            "p75": 98429,
+            "p95": 137863,
+            "p99": 167678,
+            "p99_5": 178859,
+            "p99_5_raw": 178859,
+            "p99_6": 182253,
+            "p99_6_raw": 182253,
+            "p99_fit_applied": false,
+            "p99_raw": 167176,
+            "std_dev": 30495
+          },
+          "note": "DFIR, forensics, triage, negotiation across all incident types"
+        },
+        "ransom_demand": {
+          "components": "C4",
+          "estimated_loss": 125672,
+          "ibm_equivalent": "Not included in IBM breach costs (separate)",
+          "label": "Ransom Demand",
+          "monte_carlo": {
+            "mean": 213589,
+            "mode": 130052,
+            "p25": 128369,
+            "p5": 77202,
+            "p50": 189077,
+            "p75": 274486,
+            "p95": 433842,
+            "p99": 564454,
+            "p99_5": 613017,
+            "p99_5_raw": 612956,
+            "p99_6": 627767,
+            "p99_6_raw": 626640,
+            "p99_fit_applied": false,
+            "p99_raw": 564156,
+            "std_dev": 113029
+          },
+          "note": "Extortion payment across incident types with ransom demands"
+        }
+      },
+      "score": 70,
+      "split_ratios": {
+        "data_extortion": 0.2,
+        "double_extortion": 0.25,
+        "opportunistic_breach": 0.3,
+        "ransomware_only": 0.4,
+        "silent_breach": 0.5,
+        "wiper_destructive": 0.05
+      },
+      "supply_chain_tail_adjustment": {
+        "applied": false,
+        "basis": "Supply-chain effect flows through vulnerability uplift (see supply_chain_vulnerability_uplift) and the natural MC distribution shift. Separate cat-tail widening would double-count. Future work: conditional LGB widening anchored to MOVEit per-org Pareto distribution."
+      },
+      "supply_chain_vulnerability_uplift": {
+        "factors": [],
+        "value": 0.0
+      },
+      "systemic_supply_chain_exposure": {
+        "basis": "Supply-chain severity is captured in the records-driven catastrophe C1 (a supplier-vectored breach still exposes the insured's record base) and the supply-chain signal raises p_breach via supply_chain_vulnerability_uplift (one signal, one channel). A correlated SYSTEMIC supply-chain catastrophe - many insureds compromised through a single shared vendor (MOVEit 2023 class) - is a portfolio accumulation risk disclosed here and managed at portfolio level, not modelled as an individual insured's loss (SA Covid-19 BI precedent: disclose correlated systemic loss rather than price it per policy).",
+        "channel": "disclosure",
+        "modelled_as_loss": false
+      },
+      "total": {
+        "max": 1334370,
+        "min": 436793,
+        "most_likely": 447252
+      }
+    },
+    "remediation": {
+      "current_financial_impact": {
+        "max": 1334370,
+        "min": 436793,
+        "most_likely": 447252
+      },
+      "current_rsi": 0.519,
+      "rsi_improvement": 0.441,
+      "simulated_financial_impact": {
+        "max": 200156,
+        "min": 65519,
+        "most_likely": 67088
+      },
+      "simulated_rsi": 0.078,
+      "step_count": 11,
+      "steps": [
+        {
+          "action": "Firewall exposed database ports (MongoDB, Redis, PostgreSQL, MySQL, etc.) \u2014 restrict to VPN/private network only.",
+          "annual_savings_estimate": 78270,
+          "category": "high_risk_protocols",
+          "estimated_cost": "R9,000\u2013R36,000",
+          "priority": 1,
+          "rsi_reduction": 0.15
+        },
+        {
+          "action": "Patch critical vulnerabilities detected via version analysis (OSV.dev) \u2014 update affected software packages to latest stable versions.",
+          "annual_savings_estimate": 52179,
+          "category": "osv_vulns",
+          "estimated_cost": "R18,000\u2013R90,000",
+          "priority": 1,
+          "rsi_reduction": 0.1
+        },
+        {
+          "action": "Patch high-EPSS CVEs (>50% exploitation probability within 30 days) \u2014 prioritise by EPSS score for maximum risk reduction.",
+          "annual_savings_estimate": 26090,
+          "category": "shodan_vulns",
+          "estimated_cost": "R18,000\u2013R90,000",
+          "priority": 2,
+          "rsi_reduction": 0.05
+        },
+        {
+          "action": "Upgrade SSL/TLS configuration \u2014 enable TLS 1.2+, disable weak ciphers. sslyze analysis shows vulnerable protocols or cipher suites.",
+          "annual_savings_estimate": 26090,
+          "category": "ssl",
+          "estimated_cost": "R0\u2013R3,600",
+          "priority": 2,
+          "rsi_reduction": 0.05
+        },
+        {
+          "action": "Investigate and resolve IP/domain blacklisting \u2014 indicates prior compromise, spam, or malware distribution.",
+          "annual_savings_estimate": 26090,
+          "category": "dnsbl",
+          "estimated_cost": "R9,000\u2013R36,000",
+          "priority": 2,
+          "rsi_reduction": 0.05
+        },
+        {
+          "action": "Implement security headers: HSTS, Content-Security-Policy, X-Frame-Options, Permissions-Policy \u2014 prevents XSS, clickjacking, and data leakage.",
+          "annual_savings_estimate": 15654,
+          "category": "http_headers",
+          "estimated_cost": "R0\u2013R3,600",
+          "priority": 3,
+          "rsi_reduction": 0.03
+        },
+        {
+          "action": "Deploy a CDN for DDoS resilience and improved availability \u2014 single-origin hosting is vulnerable to volumetric attacks.",
+          "annual_savings_estimate": 10436,
+          "category": "cloud_cdn",
+          "estimated_cost": "R0\u2013R9,000/mo",
+          "priority": 3,
+          "rsi_reduction": 0.02
+        },
+        {
+          "action": "Configure web server to redirect all HTTP traffic to HTTPS (301 redirect) \u2014 prevents credential interception.",
+          "annual_savings_estimate": 10436,
+          "category": "website_security",
+          "estimated_cost": "R0\u2013R3,600",
+          "priority": 3,
+          "rsi_reduction": 0.02
+        },
+        {
+          "action": "Audit risky-named subdomains (dev / staging / admin) for restricted access; reclaim or remove any dangling DNS records that point to unclaimed cloud services (subdomain takeover risk).",
+          "annual_savings_estimate": 10436,
+          "category": "subdomains",
+          "estimated_cost": "R3,600\u2013R18,000",
+          "priority": 3,
+          "rsi_reduction": 0.02
+        },
+        {
+          "action": "Create a security.txt file at /.well-known/security.txt \u2014 establishes a vulnerability disclosure policy for responsible reporting.",
+          "annual_savings_estimate": 5218,
+          "category": "security_policy",
+          "estimated_cost": "R0",
+          "priority": 3,
+          "rsi_reduction": 0.01
+        },
+        {
+          "action": "Enable DNSSEC to protect against DNS spoofing and cache poisoning attacks.",
+          "annual_savings_estimate": 5218,
+          "category": "dns_infrastructure",
+          "estimated_cost": "R3,600\u2013R9,000",
+          "priority": 3,
+          "rsi_reduction": 0.01
+        }
+      ],
+      "total_potential_savings": 266117
+    },
+    "rsi": {
+      "annual_revenue": 10000000,
+      "base_score": 0.41,
+      "contributing_factors": [
+        {
+          "factor": "1 exposed database port(s)",
+          "impact": 0.08,
+          "priority": 1
+        },
+        {
+          "factor": "4 high-EPSS CVE(s) (>50% exploit probability)",
+          "impact": 0.12,
+          "priority": 2
+        },
+        {
+          "factor": "12 unpatched critical/high CVE(s)",
+          "impact": 0.08,
+          "priority": 2
+        },
+        {
+          "factor": "DMARC policy is 'none' \u2014 not enforced",
+          "impact": 0.05,
+          "priority": 3
+        },
+        {
+          "factor": "Weak SSL (grade F)",
+          "impact": 0.03,
+          "priority": 3
+        }
+      ],
+      "factor_count": 5,
+      "industry": "finance",
+      "industry_multiplier": 1.15,
+      "risk_label": "High",
+      "rsi_score": 0.519,
+      "size_multiplier": 1.1
+    }
+  },
+  "overall_risk_score": 282,
+  "recommendations": [
+    "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on 90% of available data. A re-scan is recommended for a complete assessment.",
+    "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.",
+    "Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures.",
+    "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to enforce email authentication.",
+    "Configure DKIM signing for outbound email and publish the public key in DNS.",
+    "Implement a Content Security Policy to mitigate XSS attacks.",
+    "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing.",
+    "Create a security.txt file at /.well-known/security.txt to establish a vulnerability disclosure policy.",
+    "Configure your web server to redirect all HTTP traffic to HTTPS (301 redirect).",
+    "Implement a VPN or Zero Trust Network Access (ZTNA) solution for remote workers.",
+    "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'.",
+    "Immediately investigate and remediate the critically exposed service.",
+    "Investigate blacklist listings \u2014 likely indicates past spam, malware distribution, or compromise."
+  ],
+  "risk_level": "Medium"
+}
