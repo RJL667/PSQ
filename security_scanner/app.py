@@ -55,6 +55,7 @@ DB_PATH = os.environ.get("DB_PATH", "scans.db")
 # legacy get_db() below; scanner<->CRM links were dropped, so there is no join.
 import scanner_db
 from progress_bus import get_progress_bus
+from job_queue import make_job_queue
 # Default 2 for the Render 512MB / 1-worker tier (env-overridable via
 # MAX_CONCURRENT_SCANS; production sets it explicitly). Per-process semaphore.
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SCANS", "2"))
@@ -425,6 +426,18 @@ def valid_domain(domain: str) -> bool:
     return bool(_DOMAIN_RE.match(domain)) and len(domain) <= 253
 
 
+# WS2: the job queue + in-process worker pool. The job is run_scan(**payload). With
+# QUEUE_BACKEND=postgres, enqueue is durable and a separate worker tier (worker.py)
+# runs the jobs instead of the in-process pool.
+def _run_scan_job(payload: dict):
+    run_scan(**payload)
+
+
+SCAN_QUEUE = make_job_queue(
+    _run_scan_job, workers=MAX_CONCURRENT,
+    maxsize=int(os.environ.get("SCAN_QUEUE_MAXSIZE", "100")))
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -691,14 +704,23 @@ def start_scan():
     save_scan(scan_id, domain, industry, effective_revenue, country)
 
 
-    t = threading.Thread(
-        target=run_scan,
-        args=(scan_id, domain, industry, annual_revenue, annual_revenue_zar, country,
-              include_fraudulent_domains, client_ips, skip_dehashed, skip_intelx,
-              regulatory_flags, sub_industry, related_domains),
-        daemon=True,
-    )
-    t.start()
+    # WS2: enqueue instead of spawning a thread. Returns 429 when the queue is full
+    # (the system's first submit-time admission control). In-process workers run the
+    # job by default; with QUEUE_BACKEND=postgres a separate worker tier drains it.
+    payload = {
+        "scan_id": scan_id, "domain": domain, "industry": industry,
+        "annual_revenue": annual_revenue, "annual_revenue_zar": annual_revenue_zar,
+        "country": country, "include_fraudulent_domains": include_fraudulent_domains,
+        "client_ips": client_ips, "skip_dehashed": skip_dehashed,
+        "skip_intelx": skip_intelx, "regulatory_flags": regulatory_flags,
+        "sub_industry": sub_industry, "related_domains": related_domains,
+    }
+    if not SCAN_QUEUE.enqueue(scan_id, payload):
+        mark_failed(scan_id, "Scan queue full — please retry shortly")
+        return jsonify({
+            "error": "Scanner at capacity — queue full, please retry shortly",
+            "scan_id": scan_id, "status": "rejected",
+        }), 429
 
     response = {
         "scan_id": scan_id,

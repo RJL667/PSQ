@@ -154,6 +154,96 @@ def init_schema() -> None:
             PRIMARY KEY (scan_id, checker_name)
         )
     """)
+    # WS2: durable job queue. Postgres dequeue uses FOR UPDATE SKIP LOCKED; SQLite is
+    # single-writer so the same SELECT-then-UPDATE is already serialized.
+    _run("""
+        CREATE TABLE IF NOT EXISTS scan_jobs (
+            id            TEXT PRIMARY KEY,
+            scan_id       TEXT NOT NULL,
+            pool          TEXT NOT NULL DEFAULT 'default',
+            payload       TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'queued',
+            attempts      INTEGER DEFAULT 0,
+            worker_id     TEXT,
+            created_at    TEXT NOT NULL,
+            started_at    TEXT,
+            last_heartbeat TEXT,
+            error         TEXT
+        )
+    """)
+    _run("CREATE INDEX IF NOT EXISTS idx_jobs_status ON scan_jobs(status, pool)")
+
+
+# --- WS2 job queue ops ----------------------------------------------------
+def enqueue_job(job_id: str, scan_id: str, payload: dict, pool: str = "default") -> None:
+    _run("INSERT INTO scan_jobs (id, scan_id, pool, payload, status, created_at) "
+         "VALUES (?,?,?,?, 'queued', ?)",
+         (job_id, scan_id, pool, json.dumps(payload, default=str), _now()))
+
+
+def queue_depth(pool: "str | None" = None) -> int:
+    if pool:
+        row = _run("SELECT COUNT(*) AS n FROM scan_jobs WHERE status='queued' AND pool=?",
+                   (pool,), fetch="one")
+    else:
+        row = _run("SELECT COUNT(*) AS n FROM scan_jobs WHERE status='queued'", fetch="one")
+    return int(row["n"]) if row else 0
+
+
+def claim_job(worker_id: str, pool: str = "default") -> "dict | None":
+    """Atomically claim the oldest queued job. Postgres: FOR UPDATE SKIP LOCKED so
+    workers never collide; SQLite: serialized single-writer."""
+    _ensure()
+    skip = " FOR UPDATE SKIP LOCKED" if _cfg["url"] else ""
+    sql = (f"UPDATE scan_jobs SET status='running', worker_id=?, "
+           f"started_at=?, last_heartbeat=?, attempts=attempts+1 "
+           f"WHERE id = (SELECT id FROM scan_jobs WHERE status='queued' AND pool=? "
+           f"ORDER BY created_at LIMIT 1{skip}) RETURNING *")
+    now = _now()
+    row = _run(sql, (worker_id, now, now, pool), fetch="one")
+    if row and isinstance(row.get("payload"), str):
+        try:
+            row["payload"] = json.loads(row["payload"])
+        except ValueError:
+            pass
+    return row
+
+
+def heartbeat_job(job_id: str) -> None:
+    _run("UPDATE scan_jobs SET last_heartbeat=? WHERE id=?", (_now(), job_id))
+
+
+def complete_job(job_id: str) -> None:
+    _run("UPDATE scan_jobs SET status='completed' WHERE id=?", (job_id,))
+
+
+def fail_job(job_id: str, error: str, requeue: bool = False) -> None:
+    status = "queued" if requeue else "failed"
+    _run("UPDATE scan_jobs SET status=?, error=? WHERE id=?",
+         (status, (error or "")[:500], job_id))
+
+
+def requeue_stale_jobs(visibility_timeout_s: float, max_attempts: int = 3) -> int:
+    """Return running jobs whose heartbeat is older than the visibility timeout to
+    'queued' (dead-worker recovery); jobs past max_attempts go to the DLQ ('dead')."""
+    cutoff = datetime.now(timezone.utc).timestamp() - visibility_timeout_s
+    rows = _run("SELECT id, attempts, last_heartbeat, started_at FROM scan_jobs "
+                "WHERE status='running'", fetch="all")
+    n = 0
+    for r in rows:
+        hb = r.get("last_heartbeat") or r.get("started_at")
+        try:
+            ts = datetime.fromisoformat(hb).timestamp() if hb else 0
+        except (TypeError, ValueError):
+            ts = 0
+        if ts < cutoff:
+            if int(r.get("attempts", 0)) >= max_attempts:
+                _run("UPDATE scan_jobs SET status='dead' WHERE id=?", (r["id"],))
+            else:
+                _run("UPDATE scan_jobs SET status='queued', worker_id=NULL WHERE id=?",
+                     (r["id"],))
+            n += 1
+    return n
 
 
 # --- scans CRUD (mirrors the old app.py helpers) --------------------------
