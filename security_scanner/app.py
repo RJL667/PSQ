@@ -332,7 +332,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
              include_fraudulent_domains: bool = False, client_ips: list = None,
              skip_dehashed: bool = False, skip_intelx: bool = False,
              regulatory_flags: dict = None, sub_industry: str = None,
-             related_domains: list = None):
+             related_domains: list = None, records_held: int = None):
     # WS8: progress flows through the bus (in-process default, Redis cross-worker
     # when REDIS_URL is set), so a reconnecting/late SSE client replays the backlog.
     bus = get_progress_bus()
@@ -359,6 +359,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
             )
             scanner._regulatory_flags = regulatory_flags
             scanner._sub_industry = sub_industry
+            scanner._records_held = records_held
             import observability
             with observability.observe_scan(scan_id, domain):  # WS9: count + time + trace
                 results = scanner.scan(
@@ -648,6 +649,14 @@ def start_scan():
         annual_revenue_zar = 0
     country = str(data.get("country", "")).strip()
     sub_industry = str(data.get("sub_industry", "")).strip() or None
+    # Optional broker-supplied total records held (supersedes the revenue/divisor
+    # heuristic in the data-breach severity model). None when absent/invalid.
+    try:
+        records_held = int(data.get("records_held", 0)) or None
+        if records_held is not None and records_held <= 0:
+            records_held = None
+    except (ValueError, TypeError):
+        records_held = None
     include_fraudulent_domains = bool(data.get("include_fraudulent_domains", False))
     skip_dehashed = bool(data.get("skip_dehashed", False))
     skip_intelx = bool(data.get("skip_intelx", False))
@@ -732,6 +741,7 @@ def start_scan():
         "client_ips": client_ips, "skip_dehashed": skip_dehashed,
         "skip_intelx": skip_intelx, "regulatory_flags": regulatory_flags,
         "sub_industry": sub_industry, "related_domains": related_domains,
+        "records_held": records_held,
     }
     if not SCAN_QUEUE.enqueue(scan_id, payload):
         mark_failed(scan_id, "Scan queue full — please retry shortly")

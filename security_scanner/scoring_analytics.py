@@ -55,6 +55,24 @@ CAT_RESIDUAL_TAPER_MIN    = _cat_env_float("CAT_RESIDUAL_TAPER_MIN", 0.30, 0.0, 
 CAT_RESIDUAL_TAPER_HI_ZAR = _cat_env_float("CAT_RESIDUAL_TAPER_HI_ZAR", 2_000_000_000.0, 1e7, 1e12)
 FINE_CAPACITY_FLOOR       = _cat_env_float("FINE_CAPACITY_FLOOR", 0.80, 0.0, 1.0)
 
+# ── Data-breach severity floor (OWNER 2026-06-30, COLLEAGUE-GATED, DEFAULT OFF) ──
+# Fixes the residual-collapse anomaly: C1 (data-breach liability) is a RESIDUAL of
+# total_breach_magnitude minus the other pillars, so for a large high-BI-factor org
+# the BI pillar (C3) exhausts the total and the analytical C1 -> ~0 (Takealot R13.5bn
+# -> data-breach ~R6,655). When enabled, the analytical C1 is FLOORED at the SAME
+# records-driven cat-C1 severity the catastrophe MC already uses (records_held x
+# CAT_C1_PER_RECORD_ZAR, the R90 class-action settlement anchor — see the mc_c1 line
+# in the MC block), ramped in from DB_FLOOR_R_START_ZAR to DB_FLOOR_R_FULL_ZAR so the
+# small/mid book is byte-identical (no double-count). Floor (max), not addition, and
+# the SAME per-record anchor as the cat tail -> central and 1-in-250 stay consistent.
+# DEFAULT ON (owner-approved 2026-06-30): set DB_SEVERITY_FLOOR_ENABLED=0 to disable.
+# Only affects large high-BI orgs above the R200M ramp; small/mid book is unchanged,
+# so gates + PDF snapshots stay byte-identical (fixtures render below the ramp).
+CAT_C1_PER_RECORD_ZAR = 90.0   # class-action settlement per affected record (Anthem/Capital One/Equifax); = cat-C1 mc_c1 basis
+DB_SEVERITY_FLOOR_ENABLED = _os.environ.get("DB_SEVERITY_FLOOR_ENABLED", "1").strip().lower() not in ("0", "", "false", "no", "off")
+DB_FLOOR_R_START_ZAR = _cat_env_float("DB_FLOOR_R_START_ZAR", 200_000_000.0, 1e7, 1e12)
+DB_FLOOR_R_FULL_ZAR  = _cat_env_float("DB_FLOOR_R_FULL_ZAR", 5_000_000_000.0, 1e7, 1e12)
+
 
 def _revenue_elasticity(rev):
     """Continuous (kink-free) revenue-scaling exponent. Linear in log10(revenue)
@@ -1828,7 +1846,8 @@ class FinancialImpactCalculator:
                   annual_revenue_zar: int = 0,
                   regulatory_flags: dict = None,
                   sub_industry: str = None,
-                  scan_completeness: dict = None) -> dict:
+                  scan_completeness: dict = None,
+                  records_override: int = None) -> dict:
 
         # Production always uses the SA ZAR model. The scanner resolves the
         # revenue basis via resolve_effective_revenue_zar() (peer_benchmarking),
@@ -1841,7 +1860,8 @@ class FinancialImpactCalculator:
             annual_revenue_zar = 10_000_000  # peer_benchmarking.DEFAULT_REVENUE_ZAR_WHEN_ABSENT
         return self._calculate_zar(categories, rsi_result, annual_revenue_zar, industry,
                                    regulatory_flags, sub_industry,
-                                   scan_completeness=scan_completeness)
+                                   scan_completeness=scan_completeness,
+                                   records_override=records_override)
 
     # ------------------------------------------------------------------
     # Threat Event Frequency (TEF) multipliers per industry
@@ -2022,7 +2042,8 @@ class FinancialImpactCalculator:
                        annual_revenue_zar: int, industry: str,
                        regulatory_flags: dict = None,
                        sub_industry: str = None,
-                       scan_completeness: dict = None) -> dict:
+                       scan_completeness: dict = None,
+                       records_override: int = None) -> dict:
         """SA-specific ZAR calculation using incident-type decomposition.
 
         Architecture: Rather than three independent scenarios, the model
@@ -2242,6 +2263,20 @@ class FinancialImpactCalculator:
         ind_key = (industry or "other").strip().lower()
         records_divisor = record_density_divisor.get(ind_key, 50_000)
         estimated_records = max(100, annual_revenue_zar // records_divisor)
+        # Per-client broker records-held override. When the broker supplies an actual
+        # total record count (incl. historical), it SUPERSEDES the revenue/divisor
+        # heuristic — the divisor is only a fallback estimate. Flows into both the
+        # cat-tail mc_c1 and (when enabled) the central C1 floor, keeping them
+        # consistent. A factual input, always respected; no calibration flag needed.
+        records_is_broker_supplied = False
+        if records_override is not None:
+            try:
+                _ro = int(records_override)
+                if _ro > 0:
+                    estimated_records = max(100, _ro)
+                    records_is_broker_supplied = True
+            except (TypeError, ValueError):
+                pass
         # Catastrophe model validity ceiling. The financial-impact model
         # anchors on IBM SA Cost of a Data Breach 2025, which regresses
         # against industry-typical breach sizes (~25,000-100,000 records
@@ -2499,6 +2534,21 @@ class FinancialImpactCalculator:
         cat_residual_taper = float(min(1.0, max(CAT_RESIDUAL_TAPER_MIN,
                                        CAT_RESIDUAL_TAPER_MIN + (1.0 - CAT_RESIDUAL_TAPER_MIN) * _cat_t)))
         c1_liability = cat_residual_taper * max(0, total_breach_magnitude - c2_regulatory_fine - c3_bi - c4_ransom - c5_ir)
+
+        # ── Data-breach severity floor (DEFAULT OFF; see DB_SEVERITY_FLOOR_ENABLED) ──
+        # The analytical residual C1 collapses to ~0 for large high-BI orgs (BI eats
+        # the IBM total). When enabled, floor it at the SAME records-driven cat-C1
+        # severity the catastrophe MC uses (estimated_records x R90 settlement anchor),
+        # ramped in by revenue. Floor (max), never a sum -> no double-count; ramp ~0
+        # below DB_FLOOR_R_START_ZAR so the small/mid book is unchanged. Using the cat
+        # tail's own per-record anchor keeps the central most-likely consistent with
+        # (and below) the 1-in-250 tail. estimated_records / annual_revenue_zar above.
+        if DB_SEVERITY_FLOOR_ENABLED:
+            _db_anchor = estimated_records * CAT_C1_PER_RECORD_ZAR
+            _db_t = (_math.log10(max(float(annual_revenue_zar), 1.0)) - _math.log10(DB_FLOOR_R_START_ZAR)) / \
+                    (_math.log10(DB_FLOOR_R_FULL_ZAR) - _math.log10(DB_FLOOR_R_START_ZAR))
+            _db_ramp = min(1.0, max(0.0, _db_t))
+            c1_liability = max(c1_liability, _db_ramp * _db_anchor)
 
         # ── Split ratios ──
         R = self.INCIDENT_SPLIT_RATIOS
@@ -3050,6 +3100,8 @@ class FinancialImpactCalculator:
                     # disclosure compliance.
                     "records_assumption_disclosure": {
                         "estimated_records":            int(estimated_records),
+                        "records_source":               "broker_supplied" if records_is_broker_supplied else "industry_heuristic",
+                        "records_is_broker_supplied":   bool(records_is_broker_supplied),
                         "records_divisor_zar":          int(records_divisor),
                         "model_validity_ceiling":       int(records_validity_ceiling),
                         "industry_key":                 ind_key,
@@ -3063,7 +3115,11 @@ class FinancialImpactCalculator:
                             f"the '{industry}' industry heuristic of ~1 record per "
                             f"R{records_divisor:,} of revenue implies this organisation "
                             f"likely holds approximately {int(estimated_records):,} "
-                            f"sensitive records. The catastrophe modelling is "
+                            f"sensitive records. "
+                            + (f"The broker has supplied an actual total of "
+                               f"{int(estimated_records):,} records held, which supersedes "
+                               f"this heuristic in the model. " if records_is_broker_supplied else "")
+                            + f"The catastrophe modelling is "
                             f"reliable up to approximately "
                             f"{int(records_validity_ceiling):,} records for the "
                             f"'{industry}' industry calibration. If the organisation "

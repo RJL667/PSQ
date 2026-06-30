@@ -222,6 +222,12 @@
           <div class="field-hint">Required for FAIR-based financial impact estimation. Leave blank to skip.</div>
         </div>
 
+        <div class="field">
+          <label class="field-label" for="records-held">Total records held (optional)</label>
+          <input type="text" inputmode="numeric" id="records-held" name="records_held" placeholder="e.g. 5 000 000" autocomplete="off" />
+          <div class="field-hint">Total sensitive/personal records (incl. historical). Supersedes the revenue-based estimate in the data-breach model — best for data-heavy businesses.</div>
+        </div>
+
         <div class="sec-label">Scan Options</div>
 
         <div class="field">
@@ -660,14 +666,16 @@ document.getElementById('industry').addEventListener('change', () => {
 // Raw digits on focus for easy editing, space-grouped on blur; the submit
 // handler reads digits-only so the formatted display never reaches the API.
 (function () {
-  const rev = document.getElementById('revenue');
-  if (!rev) return;
   const digits = (v) => (v || '').replace(/[^\d]/g, '');
   const grouped = (v) => { const d = digits(v); return d ? Number(d).toLocaleString('en-ZA') : ''; };
-  rev.addEventListener('focus', () => { rev.value = digits(rev.value); });
-  rev.addEventListener('blur', () => { rev.value = grouped(rev.value); });
-  rev.addEventListener('paste', () => { setTimeout(() => { rev.value = grouped(rev.value); }, 0); });
-  rev.value = grouped(rev.value);  // format any pre-filled value on load
+  ['revenue', 'records-held'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('focus', () => { el.value = digits(el.value); });
+    el.addEventListener('blur', () => { el.value = grouped(el.value); });
+    el.addEventListener('paste', () => { setTimeout(() => { el.value = grouped(el.value); }, 0); });
+    el.value = grouped(el.value);  // format any pre-filled value on load
+  });
 })();
 
 form.addEventListener('submit', async (e) => {
@@ -684,6 +692,10 @@ form.addEventListener('submit', async (e) => {
 
   const revenue = parseInt(document.getElementById('revenue').value.replace(/[^\d]/g, ''), 10);
   if (revenue > 0) body.annual_revenue_zar = revenue;
+
+  const recordsEl = document.getElementById('records-held');
+  const recordsHeld = recordsEl ? parseInt(recordsEl.value.replace(/[^\d]/g, ''), 10) : NaN;
+  if (recordsHeld > 0) body.records_held = recordsHeld;
 
   if (document.getElementById('fraud-check').checked) body.include_fraudulent_domains = true;
   if (!document.getElementById('dehashed-check').checked) body.skip_dehashed = true;

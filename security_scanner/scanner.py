@@ -1257,12 +1257,14 @@ class SecurityScanner:
             _zar = resolve_effective_revenue_zar(annual_revenue_zar)
             _reg_flags = getattr(self, '_regulatory_flags', None)
             _sub_industry = getattr(self, '_sub_industry', None)
+            _records_held = getattr(self, '_records_held', None)
             fin_result = fin_calc.calculate(
                 cat_results, rsi_result, annual_revenue, industry,
                 annual_revenue_zar=_zar,
                 regulatory_flags=_reg_flags,
                 sub_industry=_sub_industry,
                 scan_completeness=results.get("_scan_completeness"),
+                records_override=_records_held,
             )
             results["insurance"]["financial_impact"] = fin_result
 
