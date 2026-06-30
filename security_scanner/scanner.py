@@ -16,6 +16,12 @@ from scoring_analytics import *
 from http_client import HTTP, _apex_of
 import os
 import scanner_db
+# as_completed() raises concurrent.futures.TimeoutError, which on Python <3.11 is
+# a DISTINCT class from the builtin TimeoutError. Production runs on Python 3.10,
+# so the phase-timeout handlers below MUST catch this class — a bare
+# `except TimeoutError` silently fails to catch it and crashes the whole scan
+# the moment a phase exceeds its 180s budget (e.g. a target with many IPs).
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 # WS3: checkpoints older than this are treated as absent on resume (freshness
 # bound; per-data-type TTLs refine this in WS6). Default 6h.
@@ -521,7 +527,7 @@ class SecurityScanner:
                     except Exception as e:
                         cat_results[label] = {"status": "error", "error": str(e), "issues": []}
                     self._notify(on_progress, label, "done", cat_results[label])
-            except TimeoutError:
+            except FuturesTimeoutError:
                 # Gracefully handle checkers that didn't finish in time
                 for fut, name in futures.items():
                     if name not in cat_results:
@@ -651,7 +657,7 @@ class SecurityScanner:
                     checker_name, ip = label.split(":", 1)
                     per_ip_results[ip][checker_name] = result
                     self._notify(on_progress, label, "done", result)
-            except TimeoutError:
+            except FuturesTimeoutError:
                 for fut, lbl in futures.items():
                     checker_name, ip = lbl.split(":", 1)
                     if checker_name not in per_ip_results.get(ip, {}):

@@ -38,6 +38,12 @@ cd "$SC"
   echo "[pre-push] BLOCKED: app hardening gate failed."; exit 1; }
 "$PY" tooling/verify_rsi_revenue_wiring.py || {
   echo "[pre-push] BLOCKED: RSI is not scored on the resolved ZAR revenue (size-multiplier band bug)."; exit 1; }
+# scan() phase-timeout handlers must catch concurrent.futures.TimeoutError
+# (FuturesTimeoutError), not the builtin — on production Python 3.10 those are
+# distinct classes, so a bare `except TimeoutError` crashes the whole scan when a
+# phase exceeds its budget (real takealot crash, 2026-06-30; invisible on dev 3.12).
+"$PY" tooling/verify_scan_timeout_handling.py || {
+  echo "[pre-push] BLOCKED: a scan() as_completed timeout loop does not catch FuturesTimeoutError (crashes on Python 3.10)."; exit 1; }
 # Adversarial ground-truth gate: checker output must classify known adversarial
 # inputs (tarpit / CDN / shared-host / real-exposure) correctly. Encodes the
 # analyst judgment a golden-replay/cassette harness can't — runs every push, no
