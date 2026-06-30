@@ -3,7 +3,7 @@ import { SeverityBadge, SeverityDot } from '../../components/primitives/Status'
 import EvidenceTable, { type Column } from '../../components/detail/EvidenceTable'
 import { PageTitle, KV, StatGrid, IssueList } from '../../components/detail/parts'
 import { getResults } from '../../data/results'
-import { cat, getOpenServices, type OpenService } from '../../data/selectors'
+import { cat, getOpenServices, getVulnerabilitySummary, type OpenService } from '../../data/selectors'
 import { SEVERITY_COLOR } from '../../data/checkerState'
 import type { Results } from '../../types/results'
 import styles from './detail.module.css'
@@ -38,6 +38,10 @@ export default function NetworkPage({ r = getResults()! }: { r?: Results }) {
   ]
 
   const aggregate = ext?.aggregate_vulns as Record<string, number> | undefined
+  // Unified vuln summary — folds in open-service CVEs so "Aggregate CVEs" and
+  // "KEV exposed" agree with the Open Services table below (and the Vuln page),
+  // instead of reading only the external_ips aggregate (which omits open ports).
+  const vsum = getVulnerabilitySummary(r)
 
   return (
     <div className={styles.page}>
@@ -48,8 +52,8 @@ export default function NetworkPage({ r = getResults()! }: { r?: Results }) {
           { label: 'External IPs', value: ips.length || (ext?.total_unique_ips as number) || '—' },
           { label: 'Open services', value: services.length },
           { label: 'High-risk services', value: services.filter((s) => s.severity === 'critical' || s.severity === 'high').length, severity: 'high' },
-          { label: 'Aggregate CVEs', value: aggregate?.total_cves ?? '—' },
-          { label: 'KEV exposed', value: aggregate?.kev_count ?? 0, severity: (aggregate?.kev_count ?? 0) > 0 ? 'critical' : 'positive' },
+          { label: 'Aggregate CVEs', value: vsum.total || (aggregate?.total_cves ?? '—') },
+          { label: 'KEV exposed', value: vsum.kevCount, severity: vsum.kevCount > 0 ? 'critical' : 'positive' },
           { label: 'DNSSEC', value: dnssec ? 'On' : 'Off', severity: dnssec ? 'positive' : 'medium' },
         ]} />
       </Panel>

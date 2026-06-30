@@ -954,18 +954,30 @@ export function getVulnerabilitySummary(r: Results | null): VulnSummary {
   const ext = cat(r, 'external_ips')?.aggregate_vulns as Record<string, number> | undefined
   const shodan = cat(r, 'shodan_vulns')
   const osv = cat(r, 'osv_vulns')
-  const total = (ext?.total_cves ?? 0) || ((osv?.total_vulns as number) ?? 0) || ((shodan?.cves as unknown[] | undefined)?.length ?? 0)
+  // Derive from the UNIFIED, deduped vuln list (which now includes open-service
+  // CVEs) and take the max with any structured aggregate counts. This guarantees
+  // the summary can never undercount the list/Open-Services table (the old bug:
+  // a KEV-flagged open port showing "KEV exposed: 0"), while still honouring a
+  // richer external_ips aggregate when it reports more than we can enumerate.
+  const list = getVulnerabilityList(r)
+  const aggTotal = (ext?.total_cves ?? 0) || ((osv?.total_vulns as number) ?? 0) || ((shodan?.cves as unknown[] | undefined)?.length ?? 0)
+  const cnt = (test: (v: VulnRecord) => boolean) => list.filter(test).length
+  const listMaxCvss = list.reduce((m, v) => Math.max(m, v.cvss ?? 0), 0)
+  const listMaxEpss = list.reduce((m, v) => Math.max(m, v.epss ?? 0), 0)
+  const mx = (a: number | null | undefined, b: number) => Math.max(a ?? 0, b)
+  const maxCvss = mx(ext?.max_cvss, listMaxCvss)
+  const maxEpss = mx(ext?.max_epss, listMaxEpss)
   return {
-    available: !!(ext || shodan || osv),
-    total,
-    critical: ext?.critical_count ?? (osv?.critical_count as number) ?? (shodan?.critical_count as number) ?? 0,
-    high: ext?.high_count ?? (osv?.high_count as number) ?? (shodan?.high_count as number) ?? 0,
-    medium: ext?.medium_count ?? (shodan?.medium_count as number) ?? 0,
-    kevCount: ext?.kev_count ?? (shodan?.kev_count as number) ?? 0,
-    highEpssCount: (shodan?.high_epss_count as number) ?? 0,
+    available: !!(ext || shodan || osv) || list.length > 0,
+    total: Math.max(aggTotal, list.length),
+    critical: mx(ext?.critical_count ?? (osv?.critical_count as number) ?? (shodan?.critical_count as number), cnt((v) => v.severity === 'critical')),
+    high: mx(ext?.high_count ?? (osv?.high_count as number) ?? (shodan?.high_count as number), cnt((v) => v.severity === 'high')),
+    medium: mx(ext?.medium_count ?? (shodan?.medium_count as number), cnt((v) => v.severity === 'medium')),
+    kevCount: mx(ext?.kev_count ?? (shodan?.kev_count as number), cnt((v) => v.kev)),
+    highEpssCount: mx(shodan?.high_epss_count as number, cnt((v) => (v.epss ?? 0) > 0.5)),
     zeroDay: (shodan?.zero_day_count as number) ?? 0,
-    maxCvss: ext?.max_cvss ?? null,
-    maxEpss: ext?.max_epss ?? null,
+    maxCvss: maxCvss > 0 ? maxCvss : null,
+    maxEpss: maxEpss > 0 ? maxEpss : null,
     ipsWithVulns: ext?.ips_with_vulns ?? null,
   }
 }
@@ -1057,6 +1069,30 @@ export function getVulnerabilityList(r: Results | null): VulnRecord[] {
       widelyExploited: !!v.widely_exploited,
       zeroDay: !!v.zero_day,
     })
+  }
+  // Open-service CVEs (dns_infrastructure.open_ports notable_cves). These are
+  // real findings the Open Services table surfaces but the structured vuln feeds
+  // (osv/shodan/external_ips) often miss, so they were absent from the vuln list
+  // and every aggregate count. Added AFTER the richer sources so a CVE already
+  // enriched by shodan keeps that record (dedupe via `seen`). The port's
+  // vuln_metrics carries the worst-CVE CVSS/EPSS/KEV; attribute it to each CVE.
+  for (const svc of getOpenServices(r)) {
+    for (const cveId of svc.cves) {
+      const id = String(cveId)
+      push({
+        id,
+        cve: /CVE-\d{4}-\d+/i.test(id) ? id : null,
+        pkg: svc.service && svc.service !== '—' ? `${svc.service}${svc.version ? ` ${svc.version}` : ''}` : null,
+        version: null,
+        severity: svc.severity,
+        cvss: svc.cvss,
+        epss: svc.epss != null ? svc.epss / 100 : null,   // open-port EPSS is a percent (85) → 0.85
+        kev: svc.kev,
+        published: null,
+        source: `port ${svc.port}`,
+        description: svc.exploits ?? null,
+      })
+    }
   }
   // critical/high first, then by cvss desc, unknown sorts to the middle (not last)
   return out.sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || (b.cvss ?? 0) - (a.cvss ?? 0))

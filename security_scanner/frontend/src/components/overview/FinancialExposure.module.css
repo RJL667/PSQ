@@ -1,7 +1,7 @@
 .cur { font-size: 11px; font-weight: 600; color: var(--text-muted); }
 .grid {
   display: grid;
-  grid-template-columns: 216px minmax(300px, 1.6fr) minmax(240px, 1fr);
+  grid-template-columns: 240px minmax(280px, 1.6fr) minmax(220px, 1fr);
   gap: 20px;
 }
 
@@ -11,9 +11,12 @@
 .sBig { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .sMid { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .sStats { display: flex; flex-direction: column; gap: 7px; margin: 4px 0 0; }
-.sStats div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.sStats dt { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.sStats dd { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sStats div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-width: 0; }
+.sStats dt { font-size: 11px; color: var(--text-muted); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* flex-shrink:0 pins every value to the same right edge regardless of label
+   length, so "R 2.1bn" lines up with the rows above it. The label (dt) absorbs
+   any tightness via ellipsis — the column is sized so it never actually clips. */
+.sStats dd { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
 
 .distHead { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 14px; }
 .dist { display: flex; flex-direction: column; }
