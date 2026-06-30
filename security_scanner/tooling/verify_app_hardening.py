@@ -190,6 +190,25 @@ def main():
           isinstance(RESULTS_SCHEMA_VERSION, str) and RESULTS_SCHEMA_VERSION,
           f"value={RESULTS_SCHEMA_VERSION!r}")
 
+    # --- 8. Frontend X-Api-Key injection (P1-3) ---------------------------
+    # The submit page exposes SCANNER_API_KEY via a meta tag and sends it as
+    # X-Api-Key. Empty when unset (auth off, no header); populated when set.
+    import re as _re
+    html_unset = client.get("/").get_data(as_text=True)
+    m_unset = _re.search(r'name="scanner-api-key" content="([^"]*)"', html_unset)
+    check("submit page exposes scanner-api-key meta (empty when unset)",
+          m_unset is not None and m_unset.group(1) == "")
+    check("submit page wires apiHeaders + X-Api-Key onto its fetches",
+          "function apiHeaders" in html_unset and "headers: apiHeaders(" in html_unset)
+    A.SCANNER_API_KEY = "gate-frontend-key"
+    try:
+        m_set = _re.search(r'name="scanner-api-key" content="([^"]*)"',
+                           client.get("/").get_data(as_text=True))
+        check("scanner-api-key meta carries the key when set",
+              m_set is not None and m_set.group(1) == "gate-frontend-key")
+    finally:
+        A.SCANNER_API_KEY = None
+
     print()
     if FAILURES:
         print(f"RESULT: {len(FAILURES)} check(s) FAILED — DO NOT DEPLOY")

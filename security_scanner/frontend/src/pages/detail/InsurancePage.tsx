@@ -1,6 +1,7 @@
 import Panel from '../../components/primitives/Panel'
 import EmptyState from '../../components/primitives/EmptyState'
 import FinancialExposure from '../../components/overview/FinancialExposure'
+import FinancialProbability from '../../components/overview/FinancialProbability'
 import PeerBenchmark from '../../components/overview/PeerBenchmark'
 import { PageTitle, KV, DetailGrid } from '../../components/detail/parts'
 import { getResults } from '../../data/results'
@@ -67,6 +68,7 @@ export default function InsurancePage({ r = getResults()! }: { r?: Results }) {
       </DetailGrid>
 
       <FinancialExposure r={r} />
+      <FinancialProbability r={r} />
       <PeerBenchmark r={r} />
     </div>
   )

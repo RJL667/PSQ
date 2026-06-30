@@ -223,6 +223,81 @@ export function getFinancialSummary(r: Results | null): FinancialSummary {
   }
 }
 
+// === Risk-probability + cover-sizing (return-period) views ===================
+// Surface insurance.financial_impact.risk_probability / loss_exposure /
+// cover_ladder — the FAIR annual-likelihood and catastrophe-severity views the
+// PDF/on-Render report renders. Produced by the current scoring; absent on
+// older cached scans, in which case `available` is false and the panels hide.
+
+export interface RiskProbabilityRow {
+  key: string
+  label: string
+  pct: number | null
+  grade: string | null
+  definition: string | null
+  indicative: boolean
+}
+export interface RiskProbability {
+  available: boolean
+  rows: RiskProbabilityRow[]
+  channels: { dataBreach: number | null; ransomware: number | null } | null
+}
+
+export function getRiskProbability(r: Results | null): RiskProbability {
+  const fi = r?.insurance?.financial_impact as Record<string, unknown> | undefined
+  const rp = fi?.risk_probability as Record<string, Record<string, unknown>> | undefined
+  if (!rp) return { available: false, rows: [], channels: null }
+  const num = (v: unknown): number | null => (typeof v === 'number' ? v : null)
+  const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
+  const db = rp.data_breach ?? {}
+  const ci = rp.cyber_incident ?? {}
+  const av = rp.availability_resilience ?? {}
+  const rows: RiskProbabilityRow[] = [
+    { key: 'data_breach', label: 'Data-breach probability (annual)', pct: num(db.probability_pct), grade: str(db.grade), definition: str(db.definition), indicative: false },
+    { key: 'cyber_incident', label: 'Total cyber-incident probability (annual)', pct: num(ci.probability_pct), grade: str(ci.grade), definition: str(ci.definition), indicative: false },
+    { key: 'availability', label: 'Availability resilience (indicative)', pct: num(av.indicator_pct), grade: null, definition: str(av.definition), indicative: av.calibrated !== true },
+  ]
+  const ch = ci.channels as Record<string, number> | undefined
+  return {
+    available: rows.some((x) => x.pct != null),
+    rows,
+    channels: ch ? { dataBreach: num(ch.data_breach), ransomware: num(ch.ransomware) } : null,
+  }
+}
+
+export interface LossTier { key: string; label: string; loss: number | null; annualProb: number | null }
+export interface LossExposure {
+  available: boolean
+  currency: string
+  scenarios: LossTier[]
+  coverLadder: LossTier[]
+  disclaimer: string | null
+}
+
+export function getLossExposure(r: Results | null): LossExposure {
+  const fi = r?.insurance?.financial_impact as Record<string, unknown> | undefined
+  const le = fi?.loss_exposure as Record<string, unknown> | undefined
+  const cl = fi?.cover_ladder as Record<string, Record<string, unknown>> | undefined
+  const num = (v: unknown): number | null => (typeof v === 'number' ? v : null)
+  const tiersFrom = (obj: Record<string, Record<string, unknown>> | undefined, order: string[]): LossTier[] =>
+    !obj ? [] : order.filter((k) => obj[k]).map((k) => ({
+      key: k,
+      label: (obj[k].label as string) ?? k.replace(/_/g, ' '),
+      loss: num(obj[k].loss_zar),
+      annualProb: num(obj[k].annual_prob),
+    }))
+  const scenarios = tiersFrom(le?.scenarios as Record<string, Record<string, unknown>> | undefined,
+    ['most_likely', 'median', 'return_1_100', 'return_1_200', 'return_1_250'])
+  const coverLadder = tiersFrom(cl, ['typical_severe', 'bad', 'catastrophic'])
+  return {
+    available: scenarios.length > 0 || coverLadder.length > 0,
+    currency: (le?.currency as string) ?? (fi?.currency as string) ?? 'ZAR',
+    scenarios,
+    coverLadder,
+    disclaimer: (le?.disclaimer as string) ?? null,
+  }
+}
+
 // === Risk Snapshot (§9) — bespoke per-row state logic =======================
 
 export interface SnapshotRow {

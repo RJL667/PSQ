@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>New CyberRisk Assessment · Phishield</title>
   <meta name="robots" content="noindex, nofollow">
+  <meta name="scanner-api-key" content="{{ scanner_api_key }}">
   <!-- Shared design tokens + Inter font from the dashboard bundle, so the
        scan form matches the results dashboard exactly. -->
   <link rel="stylesheet" href="{{ request.script_root }}/static/dashboard/app.css">
@@ -472,10 +473,19 @@ const progress = document.getElementById('scan-progress');
 const errorEl = document.getElementById('error');
 const submitBtn = document.getElementById('submit-btn');
 
+// Attach X-Api-Key (server-injected via the meta tag) to API calls. Empty
+// when SCANNER_API_KEY is unset -> no header sent -> auth stays off (current).
+const SCANNER_API_KEY = (document.querySelector('meta[name="scanner-api-key"]') || {}).content || '';
+function apiHeaders(base) {
+  const h = Object.assign({}, base || {});
+  if (SCANNER_API_KEY) h['X-Api-Key'] = SCANNER_API_KEY;
+  return h;
+}
+
 // Fetch Dehashed credit balance on page load
 (async () => {
   try {
-    const r = await fetch('{{ request.script_root }}/api/dehashed/balance');
+    const r = await fetch('{{ request.script_root }}/api/dehashed/balance', { headers: apiHeaders() });
     const d = await r.json();
     const el = document.getElementById('dehashed-balance');
     if (d.status === 'active' && d.balance !== null) {
@@ -497,7 +507,7 @@ const submitBtn = document.getElementById('submit-btn');
 // Fetch IntelX credit balance on page load
 (async () => {
   try {
-    const r = await fetch('{{ request.script_root }}/api/intelx/balance');
+    const r = await fetch('{{ request.script_root }}/api/intelx/balance', { headers: apiHeaders() });
     const d = await r.json();
     const el = document.getElementById('intelx-balance');
     if (d.status === 'active' && d.balance !== null) {
@@ -551,7 +561,7 @@ async function runPreflight() {
   try {
     const r = await fetch('{{ request.script_root }}/api/preflight', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ domain, sub_industry: sub })
     });
     const d = await r.json();
@@ -717,7 +727,7 @@ form.addEventListener('submit', async (e) => {
   try {
     const res = await fetch('{{ request.script_root }}/api/scan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     const data = await res.json();

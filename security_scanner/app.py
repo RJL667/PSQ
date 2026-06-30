@@ -456,7 +456,13 @@ SCAN_QUEUE = make_job_queue(
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    # Expose the API key to the submit page so its fetches can send X-Api-Key.
+    # Empty when SCANNER_API_KEY is unset -> no header sent -> auth stays off
+    # (current behaviour). This removes the prerequisite that blocked enabling
+    # auth: with the key set, the form/preflight/balance calls authenticate
+    # instead of 401-ing. (Embedding the key gates casual direct-API access; a
+    # per-user key model is the production follow-up.)
+    return render_template("index.html", scanner_api_key=SCANNER_API_KEY or "")
 
 
 @app.route("/scanner-info", methods=["GET"])
