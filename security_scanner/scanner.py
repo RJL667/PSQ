@@ -1240,21 +1240,24 @@ class SecurityScanner:
         # --- Phase 6: Insurance Analytics ---
         self._notify(on_progress, "insurance_analytics", "running")
         try:
-            # RSI
+            # Resolve the effective revenue via the shared peer_benchmarking
+            # helper so RSI, the financial-impact card, and peer benchmarking all
+            # use the SAME ZAR revenue basis (provided revenue when present, else
+            # the documented R10M default). The size-multiplier bands are in ZAR.
+            from peer_benchmarking import resolve_effective_revenue_zar
+            _zar = resolve_effective_revenue_zar(annual_revenue_zar)
+
+            # RSI — pass the resolved ZAR revenue. Previously this passed the
+            # vestigial `annual_revenue` (0 for form scans, which send only
+            # annual_revenue_zar), which pinned EVERY form scan to the <R10M
+            # "micro" size multiplier (1.12) regardless of real revenue — over-
+            # loading RSI (and premium) for every non-micro client.
             rsi_calc = RansomwareIndex()
-            rsi_result = rsi_calc.calculate(cat_results, industry, annual_revenue)
+            rsi_result = rsi_calc.calculate(cat_results, industry, _zar)
             results["insurance"]["rsi"] = rsi_result
 
-            # Financial Impact — default to ZAR (SA product); use 10M estimate if no revenue given.
-            # Resolve the effective revenue via the shared peer_benchmarking
-            # helper so the financial-impact card and the peer-benchmarking
-            # card always use the SAME revenue basis (provided revenue when
-            # present, else the documented R10M default). Previously each path
-            # applied its own fallback (FIC -> R10M, peer -> 0/"micro"), so the
-            # two cards could disagree on revenue band for the same scan.
-            from peer_benchmarking import resolve_effective_revenue_zar
+            # Financial Impact — default to ZAR (SA product); R10M default if absent.
             fin_calc = FinancialImpactCalculator()
-            _zar = resolve_effective_revenue_zar(annual_revenue_zar)
             _reg_flags = getattr(self, '_regulatory_flags', None)
             _sub_industry = getattr(self, '_sub_industry', None)
             _records_held = getattr(self, '_records_held', None)

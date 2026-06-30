@@ -36,6 +36,8 @@ cd "$SC"
   echo "[pre-push] BLOCKED: sub-industry dropdown gate failed."; exit 1; }
 "$PY" tooling/verify_app_hardening.py || {
   echo "[pre-push] BLOCKED: app hardening gate failed."; exit 1; }
+"$PY" tooling/verify_rsi_revenue_wiring.py || {
+  echo "[pre-push] BLOCKED: RSI is not scored on the resolved ZAR revenue (size-multiplier band bug)."; exit 1; }
 # Adversarial ground-truth gate: checker output must classify known adversarial
 # inputs (tarpit / CDN / shared-host / real-exposure) correctly. Encodes the
 # analyst judgment a golden-replay/cassette harness can't — runs every push, no
