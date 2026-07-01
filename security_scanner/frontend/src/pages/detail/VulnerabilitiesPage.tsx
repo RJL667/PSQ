@@ -40,7 +40,9 @@ export default function VulnerabilitiesPage({ r = getResults()! }: { r?: Results
     { key: 'kev', header: 'KEV', align: 'center', render: (v) => v.kev ? <span className={styles.kev}>KEV</span> : <span className={styles.dash}>—</span> },
     { key: 'pub', header: 'Published', align: 'right', render: (v) => v.published ? fmtDate(v.published) : <span className={styles.dash}>—</span> },
     { key: 'src', header: 'Source', render: (v) => <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.source}</span> },
-    { key: 'status', header: 'Status', render: (v) => <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.severity === 'unknown' || v.cvss == null ? 'Needs validation' : 'Open'}</span> },
+    { key: 'status', header: 'Status', render: (v) => v.versionConfirmed === false
+      ? <span style={{ fontSize: 11, color: '#c98a1b', fontWeight: 600 }} title="Software matched from the service banner, but the exact version was not fingerprinted — this CVE may or may not apply. Shown conservatively as a potential exposure pending version validation.">Potential · unconfirmed</span>
+      : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.severity === 'unknown' || v.cvss == null ? 'Needs validation' : 'Open'}</span> },
     { key: 'detail', header: '', align: 'right', render: () => <span style={{ fontSize: 11, color: 'var(--accent-bright)', fontWeight: 600 }}>Detail ›</span> },
   ]
 
@@ -55,10 +57,20 @@ export default function VulnerabilitiesPage({ r = getResults()! }: { r?: Results
           { label: 'High', value: sum.high, severity: sum.high > 0 ? 'high' : 'positive' },
           { label: 'KEV', value: sum.kevCount, severity: sum.kevCount > 0 ? 'critical' : 'positive' },
           { label: 'High EPSS', value: sum.highEpssCount, severity: sum.highEpssCount > 0 ? 'high' : 'positive' },
+          { label: 'Potential (unconf.)', value: sum.potentialCount, severity: 'unknown' },
           { label: 'Unknown severity', value: unknownSev, severity: 'unknown' },
           { label: 'Score unavailable', value: noScore, severity: 'unknown' },
           { label: 'Max CVSS', value: sum.maxCvss != null ? sum.maxCvss.toFixed(1) : '—' },
         ]} />
+        {sum.potentialCount > 0 && (
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 4px 0', lineHeight: 1.5 }}>
+            <b style={{ color: '#c98a1b' }}>{sum.potentialCount} version-unconfirmed:</b>{' '}
+            the software was matched from the service banner but the exact version was not
+            fingerprinted, so these are shown conservatively as <i>potential</i> exposures
+            pending version validation — they may or may not apply. Version-matched CVEs
+            (OSV.dev / InternetDB) are shown as confirmed.
+          </p>
+        )}
       </Panel>
 
       <Panel

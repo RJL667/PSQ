@@ -354,6 +354,11 @@ def cat_dns(d, S):
             for cve_id in p["notable_cves"][:5]:
                 desc = CVE_DESCRIPTIONS.get(cve_id, "")
                 rows.append((f"  {cve_id}", desc if desc else "See NVD for details"))
+            if p.get("cve_confidence") in ("software_match", "port_inferred", "potential"):
+                rows.append(("  CVE confidence",
+                             "Potential — the software was matched from the service banner but the exact "
+                             "version was not fingerprinted, so these CVEs may not apply. Version-matched "
+                             "CVEs (if any) are listed under OSV.dev."))
         if p.get("insurance_risk"):
             rows.append(("  Insurance risk", p["insurance_risk"]))
         if p.get("osv_vulns"):
@@ -421,6 +426,10 @@ def cat_hrp(d, S):
             for cve_id in s["notable_cves"][:5]:
                 desc = CVE_DESCRIPTIONS.get(cve_id, "")
                 rows.append((f"  {cve_id}", desc if desc else "See NVD for details"))
+            if s.get("cve_confidence") == "port_inferred":
+                rows.append(("  CVE confidence",
+                             "Potential — the service is inferred from the open port (no banner / version "
+                             "fingerprint), so these CVEs may not apply to this host."))
         if s.get("insurance_risk"):
             rows.append(("  Insurance risk", s["insurance_risk"]))
         if s.get("underwriting_impact"):

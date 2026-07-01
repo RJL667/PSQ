@@ -892,6 +892,9 @@ export interface OpenService {
   insuranceImpact: string | null
   exploits: string | null
   banner: string | null
+  // cve_confidence from the scanner: 'software_match' / 'port_inferred' /
+  // 'potential' (all version-unconfirmed) or null when the port carries no CVEs.
+  confidence: string | null
 }
 
 /** Parse "CVSS 9.8 | EPSS 85% | CISA KEV" → structured metrics. */
@@ -918,6 +921,7 @@ export function getOpenServices(r: Results | null): OpenService[] {
     let severity = normalizeSeverity(p.risk as string)
     if (riskLevel.includes('critical') || exposedSet.has(p.port as number)) severity = 'critical'
     else if (riskLevel.includes('high')) severity = 'high'
+    const cves = (p.notable_cves as string[]) ?? []
     return {
       port: p.port as number,
       service: String(p.service ?? '—'),
@@ -925,11 +929,16 @@ export function getOpenServices(r: Results | null): OpenService[] {
       severity,
       cvss: m.cvss,
       epss: m.epss,
-      kev: m.kev,
-      cves: (p.notable_cves as string[]) ?? [],
+      // KEV comes from the port-class vuln_metrics string; only assert it when a
+      // CVE actually survived the scanner's software-gating, else a suppressed
+      // port (e.g. a Pure-FTPd host whose ProFTPD CVEs were dropped) would show a
+      // "CISA KEV" badge with zero CVEs.
+      kev: m.kev && cves.length > 0,
+      cves,
       insuranceImpact: (p.insurance_risk as string) ?? null,
       exploits: (p.typical_exploits as string) ?? null,
       banner: (p.banner as string) ?? null,
+      confidence: (p.cve_confidence as string) ?? null,
     }
   }).sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || (b.cvss ?? 0) - (a.cvss ?? 0))
 }
@@ -948,6 +957,10 @@ export interface VulnSummary {
   maxCvss: number | null
   maxEpss: number | null
   ipsWithVulns: number | null
+  // How many of `total` are port-template CVEs that are version-unconfirmed
+  // (software-gated on the banner but not version-matched) — surfaced as a
+  // disclaimer so the KEV/CVE headline is not read as fully confirmed.
+  potentialCount: number
 }
 
 export function getVulnerabilitySummary(r: Results | null): VulnSummary {
@@ -979,6 +992,7 @@ export function getVulnerabilitySummary(r: Results | null): VulnSummary {
     maxCvss: maxCvss > 0 ? maxCvss : null,
     maxEpss: maxEpss > 0 ? maxEpss : null,
     ipsWithVulns: ext?.ips_with_vulns ?? null,
+    potentialCount: cnt((v) => v.versionConfirmed === false),
   }
 }
 
@@ -1012,6 +1026,11 @@ export interface VulnRecord {
   easilyExploitable?: boolean
   widelyExploited?: boolean
   zeroDay?: boolean
+  // false = a port-template CVE that was software-gated on the banner but NOT
+  // version-matched (potential — version unconfirmed). Absent on OSV/Shodan
+  // records, which ARE version-matched, so `versionConfirmed !== false` = confirmed.
+  versionConfirmed?: boolean
+  confidence?: string | null
 }
 
 export function getVulnerabilityList(r: Results | null): VulnRecord[] {
@@ -1091,6 +1110,9 @@ export function getVulnerabilityList(r: Results | null): VulnRecord[] {
         published: null,
         source: `port ${svc.port}`,
         description: svc.exploits ?? null,
+        // Port-template CVEs are software-gated but never version-matched here.
+        versionConfirmed: false,
+        confidence: svc.confidence,
       })
     }
   }
