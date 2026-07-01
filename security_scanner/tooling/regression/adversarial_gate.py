@@ -26,6 +26,7 @@ SEC = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, SEC)
 
 import checkers_network as cn
+import checkers_threats as ct
 import ip_classification as ipc
 
 
@@ -179,10 +180,48 @@ def _check_cve_gating(failures):
         print(f"  [{'PASS' if gone else 'FAIL'}] cve_gate:{label:<28} {bad} removed")
 
 
+# ---- TechStack EOL: header-authoritative, no body-substring FP (2026-07-01) ----
+# EOL server-component version tokens (PHP/nginx/Apache/IIS/Tomcat/Node/Python/
+# OpenSSL) must be matched against the response HEADERS only. The page BODY was
+# previously included, so any incidental mention of an old version — a hosting
+# page listing supported PHP versions, a `docs.python.org/2.7` link, an embedded
+# code sample — invented a phantom EOL finding (up to a -40 CRITICAL) for software
+# the target never runs. Drives the REAL TechStackChecker.check() with a mocked
+# HTTP response.
+class _FakeResp:
+    def __init__(self, headers, body, status=200):
+        self.headers = headers
+        self.text = body
+        self.status_code = status
+
+
+TECHSTACK_EOL_SCENARIOS = [
+    # label, response headers, response body, expected eol `software` set
+    ("eol_in_server_header", {"Server": "nginx/1.14"}, "<html>clean</html>", {"nginx/1.14"}),
+    ("eol_in_xpoweredby", {"X-Powered-By": "PHP/7.2"}, "<html>clean</html>", {"PHP/7.2"}),
+    ("eol_only_in_body_ignored", {"Server": "cloudflare"},
+     "<html>We support php/7.2, php/7.4 and php/8.1 - see docs.python.org/2.7</html>", set()),
+    ("supported_version_not_flagged", {"Server": "nginx/1.27"}, "<html>clean</html>", set()),
+]
+
+
+def _check_techstack_eol(failures):
+    for label, headers, body, expect in TECHSTACK_EOL_SCENARIOS:
+        resp = _FakeResp(headers, body)
+        with mock.patch.object(ct.HTTP, "get", lambda *a, **k: resp):
+            r = ct.TechStackChecker().check("target.example")
+        got = {e["software"] for e in r.get("eol_detected", [])}
+        ok = (got == expect)
+        if not ok:
+            failures.append(f"techstack_eol[{label}]: {sorted(got)} != expected {sorted(expect)}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] techstack_eol:{label:<28} eol={sorted(got)}")
+
+
 def main():
     failures = []
     _check_classification(failures)
     _check_cve_gating(failures)
+    _check_techstack_eol(failures)
     for name, sc in SCENARIOS.items():
         scan, hrp = _run(sc)
         scan_ports = {e["port"] for e in scan}
@@ -208,7 +247,8 @@ def main():
             print("  -", f)
         sys.exit(1)
     print(f"ADVERSARIAL GATE PASS — {len(SCENARIOS)} socket + {len(CLASSIFY_SCENARIOS)} "
-          f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating ground-truth scenarios")
+          f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating + "
+          f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol ground-truth scenarios")
 
 
 if __name__ == "__main__":

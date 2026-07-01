@@ -124,14 +124,24 @@ class TechStackChecker:
                 )
                 result["score"] -= 5
 
-            # Check for EOL versions.
+            # Check for EOL versions — match ONLY against the response HEADERS
+            # (Server / X-Powered-By / X-AspNet-Version / X-Runtime / ...), the
+            # authoritative version-disclosure surface. The page BODY was
+            # previously included, but substring-matching server-component version
+            # tokens against 100KB of arbitrary HTML false-positives on any
+            # incidental mention — a hosting page listing "PHP 7.2, 7.4, 8.1", a
+            # `docs.python.org/2.7` link, an embedded code sample — inventing a
+            # phantom EOL finding (up to a -40 CRITICAL) for software the target
+            # never actually runs. Real body-based version disclosure (CMS
+            # generator meta, JS libraries) is handled by the dedicated regexes
+            # below, not this generic server-component table.
             # Anchor the version on a component boundary so a token like
             # `php/7.1` does NOT match the newer `php/7.10` / `php/7.12` branch
             # (a raw substring match did — falsely flagging a supported release
             # as EOL). The matched token must be followed by a non-digit (end of
             # string, whitespace, a patch dot like `7.1.33`, etc.), never by
             # another digit that would extend it to a different minor version.
-            combined = (all_headers_str + body).lower()
+            combined = all_headers_str.lower()
             for sig, info in self.EOL_SIGNATURES.items():
                 sig_l = sig.lower()
                 # \D-or-end lookahead anchors the trailing version component.
