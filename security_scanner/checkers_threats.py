@@ -1233,6 +1233,19 @@ class DehashedChecker:
                 return name
         return "unknown"
 
+    @staticmethod
+    def _email_at_domain(email: str, domain: str) -> bool:
+        """True when the email's mailbox domain IS `domain` or a subdomain of it.
+        A proper boundary match — the old `domain in email` substring counted
+        lookalike / adjacent domains (evil-takealot.com, takealot.company.co.za,
+        which both contain 'takealot.com') as the insured's OWN staff, inflating
+        the corporate / staff-account attribution shown to the broker."""
+        if not email or "@" not in email:
+            return False
+        edom = email.rsplit("@", 1)[1].strip().lower().rstrip(".")
+        d = (domain or "").strip().lower().rstrip(".")
+        return bool(d) and (edom == d or edom.endswith("." + d))
+
     def check(self, domain: str, email: str = None, api_key: str = None) -> dict:
         result = {
             "status": "completed",
@@ -1337,11 +1350,14 @@ class DehashedChecker:
                     hash_type = self._classify_hash(str(hpw))
                     hash_types[hash_type] = hash_types.get(hash_type, 0) + 1
 
-                # Corporate vs personal email classification
-                email_str_raw = ", ".join(em) if isinstance(em, list) else (em or "")
-                if domain.lower() in email_str_raw.lower():
+                # Corporate vs personal email classification. Boundary-match the
+                # mailbox domain (not a loose `domain in email` substring, which
+                # counted lookalike / adjacent domains as own-staff).
+                _entry_emails = [str(e).strip().lower()
+                                 for e in (em if isinstance(em, list) else [em]) if e]
+                if any(self._email_at_domain(e, domain) for e in _entry_emails):
                     corporate_count += 1
-                elif email_str_raw:
+                elif _entry_emails:
                     personal_count += 1
 
                 db_name = entry.get("database_name", "Unknown source")
@@ -1371,7 +1387,7 @@ class DehashedChecker:
             # Partial reveal so the org recognises its own accounts but an
             # outsider cannot reconstruct them. NO passwords stored (those are
             # only ever in the on-demand encrypted export).
-            corporate_emails = sorted(e for e in emails_seen if domain.lower() in e.lower())
+            corporate_emails = sorted(e for e in emails_seen if self._email_at_domain(e, domain))
             result["staff_accounts_total"] = len(corporate_emails)
             result["staff_accounts_masked"] = [_mask_identifier(e) for e in corporate_emails[:60]]
             result["breach_sources"] = list(breach_sources)

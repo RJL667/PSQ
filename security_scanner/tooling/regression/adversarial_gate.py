@@ -249,12 +249,51 @@ def _check_vpn_rdp_tarpit(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] vpn_rdp:{label:<28} rdp_exposed={got}")
 
 
+# ---- Dehashed corporate/staff attribution: boundary-match not substring (2026-07-02) ----
+# DehashedChecker classifies corporate-vs-personal and builds the masked staff list
+# by mailbox domain. The old `domain in email` substring counted lookalike / adjacent
+# domains (evil-takealot.com, takealot.company.co.za -- both CONTAIN "takealot.com")
+# as the insured's OWN staff, inflating the staff-account attribution shown to the
+# broker (reporting-only; the score uses Dehashed's server-side `total`). Drives the
+# REAL check() with a mocked Dehashed v2 API response.
+class _FakeDehashedResp:
+    def __init__(self, entries):
+        self.status_code = 200
+        self._entries = entries
+
+    def json(self):
+        return {"entries": self._entries, "total": len(self._entries)}
+
+
+DEHASHED_ATTR_ENTRIES = [
+    {"email": ["ceo@takealot.com"]},            # on-domain       -> staff
+    {"email": ["it@mail.takealot.com"]},         # subdomain       -> staff
+    {"email": ["victim@evil-takealot.com"]},     # lookalike       -> NOT staff
+    {"email": ["user@takealot.company.co.za"]},  # adjacent domain -> NOT staff
+    {"email": ["someone@gmail.com"]},            # personal        -> NOT staff
+]
+
+
+def _check_dehashed_attribution(failures):
+    resp = _FakeDehashedResp(DEHASHED_ATTR_ENTRIES)
+    with mock.patch.object(ct.DEHASHED, "post", lambda *a, **k: resp):
+        r = ct.DehashedChecker().check("takealot.com", api_key="gate-test-key")
+    staff = int(r.get("staff_accounts_total", -1))
+    corp = int((r.get("credential_breakdown") or {}).get("corporate_count", -1))
+    ok = (staff == 2 and corp == 2)
+    if not ok:
+        failures.append(f"dehashed_attr: staff={staff} corporate={corp} != 2/2 "
+                        "(lookalike/adjacent domains must not count as own-staff)")
+    print(f"  [{'PASS' if ok else 'FAIL'}] dehashed_attr: staff={staff} corporate={corp} (expect 2/2)")
+
+
 def main():
     failures = []
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
     _check_vpn_rdp_tarpit(failures)
+    _check_dehashed_attribution(failures)
     for name, sc in SCENARIOS.items():
         scan, hrp = _run(sc)
         scan_ports = {e["port"] for e in scan}
@@ -282,7 +321,7 @@ def main():
     print(f"ADVERSARIAL GATE PASS — {len(SCENARIOS)} socket + {len(CLASSIFY_SCENARIOS)} "
           f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating + "
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
-          f"vpn-rdp ground-truth scenarios")
+          f"vpn-rdp + 1 dehashed-attr ground-truth scenarios")
 
 
 if __name__ == "__main__":
