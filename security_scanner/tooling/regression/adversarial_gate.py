@@ -28,6 +28,7 @@ sys.path.insert(0, SEC)
 import checkers_network as cn
 import checkers_threats as ct
 import ip_classification as ipc
+import scanner as sc
 
 
 class _FakeSocket:
@@ -287,6 +288,39 @@ def _check_dehashed_attribution(failures):
     print(f"  [{'PASS' if ok else 'FAIL'}] dehashed_attr: staff={staff} corporate={corp} (expect 2/2)")
 
 
+# ---- Credential-risk tier: staff vs customer-only infostealer (Sarel calib 2026-07-02) ----
+# hudson_rock "users" (customer-device infections) must NOT reach the same CRITICAL
+# credential tier as "employees" (staff = the insured's own corporate-credential
+# compromise). Staff-fresh: CRITICAL (breached) / HIGH (alone). Customer-ONLY-fresh:
+# capped one tier lower -- HIGH (breached) / MEDIUM (alone). Drives the REAL
+# build_credential_correlation() (a pure function -- synthetic cat_results, no mocks).
+def _cc_fixture(emp, usr, days, de_total):
+    return {
+        "hudson_rock": {"status": "completed", "compromised_employees": emp,
+                        "compromised_users": usr, "days_since_compromise": days},
+        "dehashed": {"total_entries": de_total},
+    }
+
+
+CRED_CALIB_SCENARIOS = [
+    # label, employees, users, days_since, dehashed_total, expected severity
+    ("staff_fresh_breached", 2, 0, 10, 100, "critical"),
+    ("staff_fresh_alone", 2, 0, 10, 0, "high"),
+    ("customer_only_fresh_breached", 0, 5000, 10, 100, "high"),   # was CRITICAL pre-calib
+    ("customer_only_fresh_alone", 0, 5000, 10, 0, "medium"),      # was HIGH pre-calib
+]
+
+
+def _check_cred_calibration(failures):
+    for label, emp, usr, days, det, expect in CRED_CALIB_SCENARIOS:
+        out = sc.build_credential_correlation(_cc_fixture(emp, usr, days, det))
+        got = out.get("severity")
+        ok = (got == expect)
+        if not ok:
+            failures.append(f"cred_calib[{label}]: severity={got} != expected {expect}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_calib:{label:<30} severity={got}")
+
+
 def main():
     failures = []
     _check_classification(failures)
@@ -294,6 +328,7 @@ def main():
     _check_techstack_eol(failures)
     _check_vpn_rdp_tarpit(failures)
     _check_dehashed_attribution(failures)
+    _check_cred_calibration(failures)
     for name, sc in SCENARIOS.items():
         scan, hrp = _run(sc)
         scan_ports = {e["port"] for e in scan}
@@ -321,7 +356,8 @@ def main():
     print(f"ADVERSARIAL GATE PASS — {len(SCENARIOS)} socket + {len(CLASSIFY_SCENARIOS)} "
           f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating + "
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
-          f"vpn-rdp + 1 dehashed-attr ground-truth scenarios")
+          f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib "
+          f"ground-truth scenarios")
 
 
 if __name__ == "__main__":

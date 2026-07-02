@@ -155,6 +155,17 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
     active_theft = (hr.get("status") == "completed") and (hr_emp > 0 or hr_usr > 0)
     # A recent infection date proves the theft is LIVE, not historical/recycled.
     active_theft_fresh = active_theft and (hr_days is not None and hr_days <= 90)
+    # Down-weight CUSTOMER-only infections (Sarel calibration, 2026-07-02): a
+    # customer's infostealer-infected personal device reflects that customer's
+    # device hygiene, not the insured's controllable security posture, so a
+    # customer-ONLY infection must not reach the same CRITICAL credential tier as
+    # a STAFF (employee) infection — which IS the insured's own corporate-
+    # credential compromise. Staff infections keep full weight; customer-only
+    # infections cap one tier lower in the verdict below (fresh+breached: HIGH not
+    # CRITICAL; fresh alone: MEDIUM not HIGH). Customers still surface in the
+    # report + narrative (account-takeover / POPIA-notification liability is real).
+    staff_theft_fresh = active_theft_fresh and hr_emp > 0
+    user_only_fresh = active_theft_fresh and hr_emp == 0 and hr_usr > 0
 
     # Signal 4 — active CIRCULATION (IntelX or replacement). Provider-agnostic:
     # any configured dark-web/forum source populates these counts. Lower
@@ -189,11 +200,16 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
                             "dark-web/forum mentions detected for this domain.")
         return out
 
-    # Verdict — driven by DATE-PROVEN active theft, not re-circulation
-    if breached and active_theft_fresh:
+    # Verdict — driven by DATE-PROVEN active theft, not re-circulation. STAFF
+    # infections can reach CRITICAL; customer-ONLY infections cap one tier lower.
+    if breached and staff_theft_fresh:
         sev = "critical"
-    elif active_theft_fresh:
+    elif staff_theft_fresh:
         sev = "high"
+    elif breached and user_only_fresh:
+        sev = "high"     # customer-only fresh theft + breach: capped below staff-CRITICAL
+    elif user_only_fresh:
+        sev = "medium"   # customer-only fresh theft, no breach: capped below staff-HIGH
     elif breached and (active_theft or recent_genuine):
         sev = "high"
     elif breached and circulating:
