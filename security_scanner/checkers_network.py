@@ -397,12 +397,27 @@ class VPNRemoteAccessChecker:
         if not REQUESTS_AVAILABLE:
             result["status"] = "error"; return result
 
-        # Check RDP
+        # Check RDP. Gate on the closed-port canary: a tarpit / IPS / load-
+        # balancer that SYN-ACKs EVERY port makes connect_ex(3389) succeed and
+        # would fabricate an "RDP exposed" — the single largest RSI signal
+        # (+0.20) plus a 40-pt vpn_risk hit and a remediation line. The port
+        # scanner (_scan_ports) and HighRiskProtocolChecker already gate on
+        # is_saturated_host, and scanner.py's per-IP RDP reconciliation runs off
+        # that gated scan — but THIS apex probe was ungated (a saturated apex
+        # host slipped a phantom RDP through). Only confirm the exposure when the
+        # host is not saturated; a real RDP host (canaries closed) still fires.
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(3)
             rdp_open = s.connect_ex((domain, 3389)) == 0
             s.close()
+            if rdp_open:
+                try:
+                    apex_ip = socket.gethostbyname(domain)
+                except Exception:
+                    apex_ip = None
+                if apex_ip and is_saturated_host(apex_ip):
+                    rdp_open = False  # tarpit — 3389 "open" is a lie, not a service
             result["rdp_exposed"] = rdp_open
             if rdp_open:
                 result["issues"].append("RDP (port 3389) is exposed — directly accessible from internet")

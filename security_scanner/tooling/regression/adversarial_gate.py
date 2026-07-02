@@ -217,11 +217,44 @@ def _check_techstack_eol(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] techstack_eol:{label:<28} eol={sorted(got)}")
 
 
+# ---- VPN apex RDP probe: tarpit-gated (2026-07-02) ----
+# VPNRemoteAccessChecker probes 3389 on the apex with a raw socket. A saturated
+# host (tarpit / IPS / LB that SYN-ACKs every port) makes that connect() succeed
+# and would fabricate "RDP exposed" -- the single largest RSI signal (+0.20) plus
+# a 40-pt vpn_risk hit. The probe must gate on is_saturated_host like the port
+# scanner does. Drives the REAL VPNRemoteAccessChecker.check() with a mocked
+# socket (fake connect_ex) + resolver + HTTP so no packet leaves the box.
+VPN_RDP_SCENARIOS = [
+    # label, open ports (or "ALL"), expected rdp_exposed
+    ("tarpit_apex_suppressed", "ALL", False),  # 3389 + canaries answer -> tarpit -> suppressed
+    ("real_rdp_flagged", {3389}, True),         # 3389 open, canaries closed -> real exposure kept
+    ("no_rdp", {443}, False),                    # 3389 closed -> not exposed
+]
+
+
+def _check_vpn_rdp_tarpit(failures):
+    for label, openset, expect in VPN_RDP_SCENARIOS:
+        cn._saturated_host_cache.clear()
+        scenario = {"open": openset, "banners": {}, "ip": "10.9.9.9"}
+        sock_factory = lambda *a, **k: _FakeSocket(scenario)
+        with mock.patch.object(cn.socket, "socket", sock_factory), \
+             mock.patch.object(cn.socket, "gethostbyname", lambda *a, **k: scenario["ip"]), \
+             mock.patch.object(cn.HTTP, "get", lambda *a, **k: None), \
+             mock.patch.object(cn.HTTP, "stop_probing", lambda *a, **k: False):
+            r = cn.VPNRemoteAccessChecker().check("target.example")
+        got = bool(r.get("rdp_exposed"))
+        ok = (got == expect)
+        if not ok:
+            failures.append(f"vpn_rdp[{label}]: rdp_exposed={got} != expected {expect}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] vpn_rdp:{label:<28} rdp_exposed={got}")
+
+
 def main():
     failures = []
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
+    _check_vpn_rdp_tarpit(failures)
     for name, sc in SCENARIOS.items():
         scan, hrp = _run(sc)
         scan_ports = {e["port"] for e in scan}
@@ -248,7 +281,8 @@ def main():
         sys.exit(1)
     print(f"ADVERSARIAL GATE PASS — {len(SCENARIOS)} socket + {len(CLASSIFY_SCENARIOS)} "
           f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating + "
-          f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol ground-truth scenarios")
+          f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
+          f"vpn-rdp ground-truth scenarios")
 
 
 if __name__ == "__main__":
