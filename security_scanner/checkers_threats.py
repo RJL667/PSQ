@@ -1831,7 +1831,12 @@ class HIBPBreachMetadata:
             match = breaches_db.get(source_lower)
             if not match:
                 for key, val in breaches_db.items():
-                    if source_lower in key or key in source_lower:
+                    # Substring fallback, but require the matched (shorter/needle)
+                    # token to be >=5 chars. A bare `source in key or key in source`
+                    # let a short breach key coincidentally match an unrelated
+                    # source and mis-attribute its date/records (loose-substring).
+                    if (len(source_lower) >= 5 and source_lower in key) or \
+                       (len(key) >= 5 and key in source_lower):
                         match = val
                         break
             if match:

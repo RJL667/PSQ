@@ -29,10 +29,23 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEC = os.path.dirname(HERE)
 SCANNER = os.path.join(SEC, "scanner.py")
+# The checker modules ALSO run as_completed(timeout=) loops. scanner.scan()'s
+# own loops crash the whole scan on 3.10; a checker's loop is caught by the
+# per-checker seam, but a bare `except TimeoutError` there STILL defeats its own
+# purpose on 3.10 — the checker errors and loses the partial results it collected
+# instead of returning them (found 2026-07-02: RelatedDomains / DependencyManifest
+# / CMSPluginSBOM). So the guard now covers the checker modules too.
+CHECKER_MODULES = [os.path.join(SEC, f) for f in (
+    "checkers_core.py", "checkers_network.py",
+    "checkers_threats.py", "checkers_supply_chain.py")]
 
-# The exception name(s) that correctly catch concurrent.futures.TimeoutError.
+# Handler names that correctly catch concurrent.futures.TimeoutError.
 # FuturesTimeoutError is `from concurrent.futures import TimeoutError as ...`.
-SAFE_NAMES = {"FuturesTimeoutError"}
+# `Exception` / `BaseException` are ALSO safe — the futures TimeoutError subclasses
+# Exception, so a broad `except Exception` catches it. The bug this guards is the
+# NARROW-but-wrong `except TimeoutError` (builtin), which does NOT catch the futures
+# class on Python <3.11 — that name is deliberately absent here.
+SAFE_NAMES = {"FuturesTimeoutError", "Exception", "BaseException"}
 
 
 def _as_completed_timeout_calls(node: ast.AST) -> bool:
@@ -53,20 +66,15 @@ def _handler_names(handler: ast.ExceptHandler) -> set:
     return {e.id for e in elts if isinstance(e, ast.Name)}
 
 
-def main() -> None:
-    # Optional path arg lets the gate be pointed at a synthetic copy for its own
-    # fails-without/passes-with self-test; defaults to the real scanner.py.
-    target = sys.argv[1] if len(sys.argv) > 1 else SCANNER
-    src = open(target, encoding="utf-8").read()
-    tree = ast.parse(src, filename=target)
-
-    checked = 0
-    violations = []
+def _audit(path: str):
+    """(checked, violations) for one file. violations = [(lineno, sorted_caught)].
+    Only `try` blocks whose body iterates as_completed(timeout=) are inspected —
+    those are the ones that can raise the futures TimeoutError."""
+    tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+    checked, violations = 0, []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Try):
             continue
-        # Only the try blocks that actually iterate as_completed with a timeout
-        # can raise the futures TimeoutError, so only those need the guard.
         if not any(_as_completed_timeout_calls(stmt) for stmt in node.body):
             continue
         checked += 1
@@ -75,21 +83,38 @@ def main() -> None:
             caught |= _handler_names(h)
         if not (caught & SAFE_NAMES):
             violations.append((node.lineno, sorted(caught)))
+    return checked, violations
 
-    print(f"scan() as_completed(timeout=) loops inspected: {checked}")
-    if checked == 0:
-        print("FAIL: expected at least one as_completed(timeout=) loop in scanner.py "
-              "— guard may be looking at the wrong file or the structure changed.")
+
+def main() -> None:
+    # Optional path arg lets the gate be pointed at a synthetic copy for its own
+    # fails-without/passes-with self-test; defaults to scanner.py + every checker
+    # module (a try/as_completed loop in ANY of them must catch the futures class).
+    targets = [sys.argv[1]] if len(sys.argv) > 1 else [SCANNER] + CHECKER_MODULES
+
+    total = 0
+    violations = []  # (filename, lineno, caught)
+    for path in targets:
+        checked, viols = _audit(path)
+        total += checked
+        for lineno, caught in viols:
+            violations.append((os.path.basename(path), lineno, caught))
+
+    print(f"try/as_completed(timeout=) loops inspected: {total} across {len(targets)} file(s)")
+    if total == 0:
+        print("FAIL: expected at least one try/as_completed(timeout=) loop — the guard "
+              "may be looking at the wrong file(s) or the structure changed.")
         sys.exit(1)
     if violations:
         print(f"TIMEOUT-HANDLING GUARD FAILED ({len(violations)}):")
-        for lineno, caught in violations:
-            print(f"  - scanner.py:{lineno}: try/as_completed guarded by {caught}, "
-                  f"none of which catch concurrent.futures.TimeoutError. Use "
-                  f"`except FuturesTimeoutError`.")
+        for fname, lineno, caught in violations:
+            print(f"  - {fname}:{lineno}: try/as_completed guarded by {caught}, none of "
+                  f"which catch concurrent.futures.TimeoutError. On Python 3.10 (the VM) "
+                  f"that class is DISTINCT from builtin TimeoutError — use "
+                  f"`except (TimeoutError, FuturesTimeoutError)`.")
         sys.exit(1)
-    print(f"TIMEOUT-HANDLING GUARD PASS — all {checked} as_completed(timeout=) loops "
-          f"catch FuturesTimeoutError")
+    print(f"TIMEOUT-HANDLING GUARD PASS — all {total} try/as_completed(timeout=) loops "
+          f"across {len(targets)} file(s) catch FuturesTimeoutError")
 
 
 if __name__ == "__main__":

@@ -100,7 +100,12 @@ class RelatedDomainsChecker:
                             fut.result(timeout=self.LITE_TIMEOUT_PER_DOMAIN))
                     except Exception:
                         pass
-            except TimeoutError:
+            except (TimeoutError, FuturesTimeoutError):
+                # as_completed(timeout=) raises concurrent.futures.TimeoutError
+                # (FuturesTimeoutError) — a DISTINCT class from builtin TimeoutError
+                # on Python <3.11 (the VM runs 3.10). A bare `except TimeoutError`
+                # never caught it there, so a slow related-domains scan lost the
+                # partial dependants it had collected and errored the whole checker.
                 pass
 
         result["scanned_count"] = len(result["dependants"])
@@ -454,7 +459,9 @@ class DependencyManifestChecker:
                         continue
                     if out:
                         result["exposed_manifests"].append(out)
-        except TimeoutError:
+        except (TimeoutError, FuturesTimeoutError):
+            # FuturesTimeoutError (concurrent.futures) != builtin TimeoutError on
+            # Python 3.10 (VM) — keep the partial manifests instead of erroring.
             pass
 
         if result["exposed_manifests"]:
@@ -1001,7 +1008,9 @@ class CMSPluginSBOMChecker:
                         continue
                     if out:
                         result["plugins_detected"].append(out)
-            except TimeoutError:
+            except (TimeoutError, FuturesTimeoutError):
+                # FuturesTimeoutError (concurrent.futures) != builtin TimeoutError on
+                # Python 3.10 (VM) — keep the partial plugins instead of erroring.
                 pass
 
         result["plugin_count"] = len(result["plugins_detected"])
