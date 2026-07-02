@@ -109,7 +109,12 @@ LEAKCHECK = _ws0("leakcheck")
 WHITEINTEL = _ws0("whiteintel")
 
 # --- free / unauthenticated providers ------------------------------------
-CRTSH = _ws0("crtsh", default_timeout=30.0)   # crt.sh (CT logs)
+CRTSH = _ws0("crtsh", default_timeout=30.0)   # crt.sh (CT logs — primary, but flaky)
+CERTSPOTTER = _ws0("certspotter", default_timeout=30.0)  # api.certspotter.com CT logs
+                                              # (keyless free tier) — secondary CT
+                                              # source so subdomain enumeration
+                                              # doesn't collapse to brute-only when
+                                              # crt.sh flakes (the #7 non-determinism)
 OSV = _ws0("osv")                       # api.osv.dev
 NVD = _ws0("nvd")                       # services.nvd.nist.gov
 EPSS = _ws0("epss")                     # api.first.org/data/v1/epss

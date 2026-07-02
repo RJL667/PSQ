@@ -321,6 +321,39 @@ def _check_cred_calibration(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] cred_calib:{label:<30} severity={got}")
 
 
+# ---- Subdomain CT union: crt.sh + certspotter fallback + low-coverage flag (#7, 2026-07-02) ----
+# crt.sh is flaky; a single failure used to drop enumeration to brute-only (~16 vs
+# ~90 subdomains -- the #7 non-determinism that made scan-to-scan deltas meaningless).
+# Now crt.sh + certspotter are queried in parallel and UNIONed; `low_coverage` flags
+# the scan ONLY when BOTH CT sources fail. Drives the REAL SubdomainChecker.check()
+# with the two CT helpers + the DNS-dependent methods mocked (no packet leaves the box).
+SUBDOMAIN_CT_SCENARIOS = [
+    # label, crtsh names, certspotter names, (ct_count, ct_source_ok, low_coverage, sources)
+    ("both_ct_sources", {"a.x.com", "b.x.com"}, {"b.x.com", "c.x.com"}, 3, True, False, ["certspotter", "crtsh"]),
+    ("crtsh_flaked", set(), {"b.x.com", "c.x.com"}, 2, True, False, ["certspotter"]),
+    ("certspotter_flaked", {"a.x.com"}, set(), 1, True, False, ["crtsh"]),
+    ("both_ct_failed", set(), set(), 0, False, True, []),
+]
+
+
+def _check_subdomain_ct(failures):
+    for label, crt, cs, exp_ct, exp_ok, exp_low, exp_src in SUBDOMAIN_CT_SCENARIOS:
+        with mock.patch.object(cn.SubdomainChecker, "_ct_crtsh", staticmethod(lambda d, _r=frozenset(crt): set(_r))), \
+             mock.patch.object(cn.SubdomainChecker, "_ct_certspotter", staticmethod(lambda d, _r=frozenset(cs): set(_r))), \
+             mock.patch.object(cn.SubdomainChecker, "_wildcard_ips", lambda self, d: set()), \
+             mock.patch.object(cn.SubdomainChecker, "_resolves", lambda self, h: None), \
+             mock.patch.object(cn.SubdomainChecker, "_check_cname_takeover", lambda self, s: None):
+            r = cn.SubdomainChecker().check("x.com")
+        got = (r.get("ct_count"), r.get("ct_source_ok"), r.get("low_coverage"),
+               sorted(r.get("ct_sources") or []))
+        want = (exp_ct, exp_ok, exp_low, sorted(exp_src))
+        ok = got == want
+        if not ok:
+            failures.append(f"subdomain_ct[{label}]: {got} != {want}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] subdomain_ct:{label:<22} "
+              f"ct={got[0]} ok={got[1]} low={got[2]} src={got[3]}")
+
+
 def main():
     failures = []
     _check_classification(failures)
@@ -329,6 +362,7 @@ def main():
     _check_vpn_rdp_tarpit(failures)
     _check_dehashed_attribution(failures)
     _check_cred_calibration(failures)
+    _check_subdomain_ct(failures)
     for name, sc in SCENARIOS.items():
         scan, hrp = _run(sc)
         scan_ports = {e["port"] for e in scan}
@@ -356,8 +390,8 @@ def main():
     print(f"ADVERSARIAL GATE PASS — {len(SCENARIOS)} socket + {len(CLASSIFY_SCENARIOS)} "
           f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating + "
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
-          f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib "
-          f"ground-truth scenarios")
+          f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib + "
+          f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct ground-truth scenarios")
 
 
 if __name__ == "__main__":

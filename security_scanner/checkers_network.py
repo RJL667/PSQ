@@ -4,11 +4,14 @@ Network and infrastructure security checkers: Subdomains, VPN, DNS, Ports, Secur
 
 from scanner_utils import *
 
-# WS0: route target probes through the egress seam (HTTP) and crt.sh through its
-# per-provider client (CRTSH). Both return None on a failed request instead of
-# raising; CRTSH adds no retry so the hand-rolled crt.sh loop is preserved.
+# WS0: route target probes through the egress seam (HTTP) and the CT logs through
+# their per-provider clients (CRTSH + CERTSPOTTER). All return None on a failed
+# request instead of raising. crt.sh is flaky (times out / 502s under load), so a
+# second CT source (certspotter, keyless) is queried in parallel and unioned —
+# without it, subdomain enumeration collapsed to brute-only whenever crt.sh failed
+# (the #7 90-vs-16 non-determinism).
 from http_client import HTTP
-from providers import CRTSH
+from providers import CRTSH, CERTSPOTTER
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +141,49 @@ class SubdomainChecker:
                     return None  # CNAME matches pattern but target is live
         return None  # CNAME doesn't match any known-vulnerable patterns
 
+    @staticmethod
+    def _ct_crtsh(domain: str) -> set:
+        """Subdomains from crt.sh CT logs (retry once). Empty set on failure.
+        The richest CT source but flaky (slow / 502 under load)."""
+        for _ in range(2):
+            try:
+                r = CRTSH.get(f"https://crt.sh/?q=%25.{domain}&output=json",
+                              timeout=20, headers={"User-Agent": USER_AGENT})
+                if r is not None and r.status_code == 200 and r.text.strip():
+                    out = set()
+                    for entry in r.json():
+                        for name in entry.get("name_value", "").split("\n"):
+                            name = name.strip().lower().lstrip("*.")
+                            if name and name != domain and domain in name:
+                                out.add(name)
+                    return out
+            except Exception:
+                pass  # retry once
+        return set()
+
+    @staticmethod
+    def _ct_certspotter(domain: str) -> set:
+        """Subdomains from certspotter CT logs (keyless free tier). Empty set on
+        failure. Reliable secondary source for when crt.sh flakes (the free tier
+        returns an unpaginated page, so it is narrower than a healthy crt.sh but
+        far richer than brute-force-only)."""
+        try:
+            r = CERTSPOTTER.get(
+                f"https://api.certspotter.com/v1/issuances?domain={domain}"
+                "&include_subdomains=true&expand=dns_names",
+                timeout=20, headers={"User-Agent": USER_AGENT})
+            if r is not None and r.status_code == 200:
+                out = set()
+                for iss in (r.json() or []):
+                    for name in iss.get("dns_names", []):
+                        name = (name or "").strip().lower().lstrip("*.")
+                        if name and name != domain and domain in name:
+                            out.add(name)
+                return out
+        except Exception:
+            pass
+        return set()
+
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed",
@@ -148,6 +194,8 @@ class SubdomainChecker:
             "ct_count": 0,
             "brute_count": 0,
             "ct_source_ok": False,
+            "ct_sources": [],
+            "low_coverage": False,
             "wildcard_dns": False,
             "issues": [],
             "score": 100,
@@ -158,35 +206,40 @@ class SubdomainChecker:
         seen = set()
         subdomains = []
 
-        # --- Source 1 (PRIMARY): Certificate Transparency via crt.sh ---
-        # crt.sh is the authoritative, non-intrusive source. The previous
-        # %-prefix query (%.{domain}) and a single attempt meant a slow/empty
-        # crt.sh silently fell through to brute-force while the PDF still
-        # narrated "discovered via Certificate Transparency". Use %25 (URL-
-        # encoded wildcard) and retry once before giving up, and record
-        # ct_source_ok so downstream narration is honest.
-        ct_count = 0
-        for attempt in range(2):
+        # --- Source 1 (PRIMARY): Certificate Transparency (crt.sh + certspotter) ---
+        # crt.sh is the richest CT source but flaky (slow / 502 under load); a
+        # single failed fetch used to drop enumeration to brute-force ONLY (~16 vs
+        # ~90 subdomains — the #7 non-determinism that also made scan-to-scan
+        # deltas meaningless: a re-scan looked like the org had shed subdomains
+        # when really crt.sh had just timed out). Query crt.sh AND certspotter
+        # (keyless) IN PARALLEL and UNION the results — certspotter is fast so
+        # wall-time ~= crt.sh alone, and if either source flakes the other still
+        # yields real CT coverage. ct_source_ok is True if ANY CT source answered.
+        ct_names = set()
+        ct_ok = []
+        with ThreadPoolExecutor(max_workers=2) as _ctex:
+            _ct_futs = {
+                _ctex.submit(self._ct_crtsh, domain): "crtsh",
+                _ctex.submit(self._ct_certspotter, domain): "certspotter",
+            }
             try:
-                r = CRTSH.get(
-                    f"https://crt.sh/?q=%25.{domain}&output=json",
-                    timeout=20, headers={"User-Agent": USER_AGENT}
-                )
-                if r is not None and r.status_code == 200 and r.text.strip():
-                    entries = r.json()
-                    for entry in entries:
-                        names = entry.get("name_value", "").split("\n")
-                        for name in names:
-                            name = name.strip().lower().lstrip("*.")
-                            if name and name != domain and domain in name and name not in seen:
-                                seen.add(name)
-                                subdomains.append(name)
-                                ct_count += 1
-                    result["ct_source_ok"] = True
-                    break
-            except Exception:
-                pass  # retry once, then fall through to brute-force
-        result["ct_count"] = ct_count
+                for _f in as_completed(_ct_futs, timeout=50):
+                    try:
+                        _got = _f.result(timeout=5)
+                    except Exception:
+                        _got = set()
+                    if _got:
+                        ct_ok.append(_ct_futs[_f])
+                        ct_names |= _got
+            except FuturesTimeoutError:
+                pass
+        for name in sorted(ct_names):
+            if name not in seen:
+                seen.add(name)
+                subdomains.append(name)
+        result["ct_count"] = len(ct_names)
+        result["ct_source_ok"] = bool(ct_ok)
+        result["ct_sources"] = sorted(ct_ok)
 
         # --- Wildcard-DNS guard ---
         # Before trusting any brute-forced result, resolve random non-existent
@@ -225,6 +278,23 @@ class SubdomainChecker:
                     except Exception:
                         pass
         result["brute_count"] = brute_found
+
+        # Honest coverage flag: if BOTH CT sources were unreachable this scan,
+        # enumeration is brute-force-ONLY (a dozen common prefixes) and the
+        # external attack surface is materially UNDER-reported. Flag it so (a) the
+        # broker sees the scan was degraded, and (b) scan-to-scan delta tooling can
+        # exclude it — a drop from ~90 to ~16 subdomains here is data loss, not
+        # the org shedding attack surface.
+        result["low_coverage"] = not result["ct_source_ok"]
+        if result["low_coverage"]:
+            result["issues"].append(
+                "Subdomain enumeration DEGRADED — both Certificate Transparency "
+                "sources (crt.sh, certspotter) were unreachable this scan; only "
+                f"{brute_found} common-prefix subdomain(s) were found via DNS. The "
+                "external attack surface is likely under-reported — treat any "
+                "decrease vs a prior scan as possible data loss, not remediation, "
+                "and re-scan for full coverage."
+            )
 
         # Cap and store. ct_count is recomputed against the cap so it can
         # never exceed total_count.
