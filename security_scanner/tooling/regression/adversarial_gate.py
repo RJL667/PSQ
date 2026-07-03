@@ -288,12 +288,14 @@ def _check_dehashed_attribution(failures):
     print(f"  [{'PASS' if ok else 'FAIL'}] dehashed_attr: staff={staff} corporate={corp} (expect 2/2)")
 
 
-# ---- Credential-risk tier: staff vs customer-only infostealer (Sarel calib 2026-07-02) ----
-# hudson_rock "users" (customer-device infections) must NOT reach the same CRITICAL
-# credential tier as "employees" (staff = the insured's own corporate-credential
-# compromise). Staff-fresh: CRITICAL (breached) / HIGH (alone). Customer-ONLY-fresh:
-# capped one tier lower -- HIGH (breached) / MEDIUM (alone). Drives the REAL
-# build_credential_correlation() (a pure function -- synthetic cat_results, no mocks).
+# ---- credential_correlation REPORTING card: staff vs customer-only tier (2026-07-02) ----
+# LABEL NOTE: this tests build_credential_correlation, the REPORTING-ONLY cross-
+# correlation join (no scoring weight). It does NOT test the RSI. The RSI-driving
+# credential tier (CredentialRiskClassifier.classify) separately + already floors
+# customer-only (hr_users) to HIGH and staff (hr_employees) to CRITICAL. This gate
+# just locks the reporting card to the SAME staff-vs-customer distinction: staff-fresh
+# CRITICAL (breached) / HIGH (alone); customer-ONLY-fresh capped one tier lower, HIGH
+# (breached) / MEDIUM (alone). Pure function -- synthetic cat_results, no mocks.
 def _cc_fixture(emp, usr, days, de_total):
     return {
         "hudson_rock": {"status": "completed", "compromised_employees": emp,

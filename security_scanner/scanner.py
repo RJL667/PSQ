@@ -155,15 +155,20 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
     active_theft = (hr.get("status") == "completed") and (hr_emp > 0 or hr_usr > 0)
     # A recent infection date proves the theft is LIVE, not historical/recycled.
     active_theft_fresh = active_theft and (hr_days is not None and hr_days <= 90)
-    # Down-weight CUSTOMER-only infections (Sarel calibration, 2026-07-02): a
-    # customer's infostealer-infected personal device reflects that customer's
-    # device hygiene, not the insured's controllable security posture, so a
-    # customer-ONLY infection must not reach the same CRITICAL credential tier as
-    # a STAFF (employee) infection — which IS the insured's own corporate-
-    # credential compromise. Staff infections keep full weight; customer-only
-    # infections cap one tier lower in the verdict below (fresh+breached: HIGH not
+    # Distinguish STAFF from CUSTOMER-only infostealer infections in the severity
+    # of THIS card. NOTE (label correction 2026-07-02): build_credential_correlation
+    # is the REPORTING-ONLY cross-correlation join (it carries NO scoring weight —
+    # see the module docstring). It does NOT drive the RSI. The RSI-driving
+    # credential tier is set separately by CredentialRiskClassifier.classify
+    # (checkers_threats.py), which ALREADY floors a customer-only (hr_users, no
+    # employees) infection to HIGH and a staff (hr_employees) infection to CRITICAL
+    # (fresh) / HIGH (>180d stale). This block simply aligns the reporting card's
+    # severity with that same staff-vs-customer distinction so the two are
+    # consistent: a customer's infected personal device reflects that customer's
+    # device hygiene, not the insured's controllable posture, so a customer-ONLY
+    # infection caps one tier below staff here too (fresh+breached: HIGH not
     # CRITICAL; fresh alone: MEDIUM not HIGH). Customers still surface in the
-    # report + narrative (account-takeover / POPIA-notification liability is real).
+    # narrative (account-takeover / POPIA-notification liability is real).
     staff_theft_fresh = active_theft_fresh and hr_emp > 0
     user_only_fresh = active_theft_fresh and hr_emp == 0 and hr_usr > 0
 
