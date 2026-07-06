@@ -1,111 +1,319 @@
 import { jsPDF } from 'jspdf';
-import { formatR } from '../rating-engine.js';
-import { COVER_LIMITS, getAvailableFPOptions } from '../rating-data.js';
+import { formatR, calculatePremium, getItooBenchmark } from '../rating-engine.js';
+import {
+  INDUSTRIES, REVENUE_BANDS, COVER_LIMITS, MARKET_CONDITION_LABEL,
+} from '../rating-data.js';
+import { parseCurrency } from './format.js';
 
-// Build a client quote PDF for the selected cover. Returns { doc, filename }.
-// Clean, self-contained layout (the legacy jsPDF coordinate layout can be
-// ported verbatim later if the exact branding is required — this carries the
-// same content: client, cover, premiums, audit trail, UW outcome, conditions).
+// Client quote PDF — layout ported VERBATIM from the legacy vanilla
+// `generatePDF` (sme-rating.js). Coordinates, colours, fonts, boxes, and text
+// are byte-for-byte the same; only the data source is adapted (the legacy global
+// `state` -> this app's state + engine-derived values) and the loop is scoped to
+// the single selected cover. Returns { doc, filename }.
 export function buildQuotePdf({ state, derived, quoteRef }) {
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
-  const M = 48;
-  let y = 0;
+  const doc = new jsPDF('p', 'mm', 'a4');
+  const pageW = 210;
+  const margin = 18;
+  const contentW = pageW - margin * 2;
+  let y = 15;
+  const lineH = 5;
 
-  const calc = derived.selectedCalc;
-  const cover = COVER_LIMITS[state.selectedCoverIndex];
-  const fpIdx = state.fpSelections[state.selectedCoverIndex] ?? 0;
-  const fpOpt = getAvailableFPOptions(cover.key)[fpIdx];
+  // Adapted data handles (legacy read these off the global `state`).
+  const actualTurnover = derived.actualTurnover;
+  const revenueBandIndex = derived.revenueBandIndex;
+  const uw = derived.uw;
 
-  const line = (txt, { size = 10, style = 'normal', color = [40, 40, 40], x = M, gap = 16 } = {}) => {
-    if (y > H - M) { doc.addPage(); y = M; }
-    doc.setFont('helvetica', style);
-    doc.setFontSize(size);
-    doc.setTextColor(color[0], color[1], color[2]);
-    doc.text(String(txt), x, y);
-    y += gap;
-  };
-  const rule = () => { doc.setDrawColor(210); doc.line(M, y, W - M, y); y += 14; };
-  const kv = (k, v) => {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(110);
-    doc.text(k, M, y);
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(30);
-    doc.text(String(v), M + 190, y);
-    y += 16;
-  };
-
-  // Header band
-  doc.setFillColor(11, 18, 32);
-  doc.rect(0, 0, W, 78, 'F');
-  doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(20);
-  doc.text('Phishield', M, 42);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(0, 180, 216);
-  doc.text('Cyber Protect Business Policy — Quote', M, 60);
-  doc.setTextColor(200); doc.setFontSize(9);
-  doc.text(quoteRef || '', W - M, 42, { align: 'right' });
-  y = 108;
-
-  line('Quote Summary', { size: 14, style: 'bold', color: [11, 18, 32], gap: 22 });
-  kv('Company', state.companyName || '—');
-  kv('Quote Type', state.quoteType);
-  kv('Actual Turnover', formatR(derived.actualTurnover));
-  kv('Revenue Band', derived.revenueBandIndex >= 0 ? derived.bandLabel : '—');
-  kv('Cover Limit', cover ? cover.label : '—');
-  kv('Funds Protect', fpOpt ? `${fpOpt.label} (${formatR(fpOpt.cost)}/yr)` : '—');
-  y += 6; rule();
-
-  if (calc) {
-    line('Premium', { size: 12, style: 'bold', color: [11, 18, 32], gap: 20 });
-    kv('Annual (incl. Funds Protect)', formatR(calc.annual));
-    kv('Annual (excl. Funds Protect)', formatR(calc.annualExFP));
-    kv('Monthly', formatR(calc.monthly));
-    if (calc.isMicro) kv('Rating', 'Micro SME rates applied');
-    y += 6; rule();
-
-    line('Audit Trail', { size: 12, style: 'bold', color: [11, 18, 32], gap: 20 });
-    calc.breakdown.forEach((b) => {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-      doc.text(`${b.step}.`, M, y);
-      doc.text(String(b.desc), M + 18, y);
-      doc.setFont('helvetica', 'bold'); doc.setTextColor(30);
-      doc.text(formatR(b.value), W - M, y, { align: 'right' });
-      y += 15;
-      if (y > H - M) { doc.addPage(); y = M; }
-    });
-    y += 6; rule();
+  function checkPage(needed) {
+    if (y + (needed || 10) > 280) { doc.addPage(); y = 15; }
   }
-
-  // Underwriting
-  line('Underwriting', { size: 12, style: 'bold', color: [11, 18, 32], gap: 20 });
-  kv('Outcome', (derived.uw.outcome || '—').toUpperCase());
-  if (derived.uw.loadingPct > 0) kv('Loading', `${Math.round(derived.uw.loadingPct * 100)}%`);
-  const conds = derived.uw.allConditions || [];
-  if (conds.length) {
+  function addText(text, size, style, color, x) {
+    checkPage(size * 0.5);
+    doc.setFontSize(size || 9);
+    doc.setFont('helvetica', style || 'normal');
+    doc.setTextColor(...(color || [51, 51, 51]));
+    const lines = doc.splitTextToSize(String(text), contentW - (x ? x - margin : 0));
+    doc.text(lines, x || margin, y);
+    y += lines.length * lineH + 1;
+  }
+  function addSpacer(h) { y += h || 3; }
+  function addRule() {
+    doc.setDrawColor(200, 210, 220);
+    doc.line(margin, y, pageW - margin, y);
     y += 4;
-    line('Conditions of Cover:', { size: 10, style: 'bold', color: [30, 30, 30], gap: 16 });
-    conds.forEach((c) => {
-      const wrapped = doc.splitTextToSize('• ' + c, W - 2 * M);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(70);
-      wrapped.forEach((w) => { if (y > H - M) { doc.addPage(); y = M; } doc.text(w, M, y); y += 13; });
-    });
   }
-  if (state.endorsements && state.endorsements.trim()) {
-    y += 6; rule();
-    line('Endorsements / Notes', { size: 12, style: 'bold', color: [11, 18, 32], gap: 18 });
-    doc.splitTextToSize(state.endorsements.trim(), W - 2 * M).forEach((w) => {
-      if (y > H - M) { doc.addPage(); y = M; }
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(70);
-      doc.text(w, M, y); y += 13;
-    });
+  function addSection(title) {
+    addSpacer(2);
+    doc.setFillColor(0, 40, 80);
+    doc.rect(margin, y - 1, contentW, 7, 'F');
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, margin + 3, y + 4);
+    y += 10;
+  }
+  function addField(label, value, labelW) {
+    checkPage(8);
+    const lw = labelW || 42;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(120, 120, 120);
+    doc.text(label, margin + 2, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text(String(value), margin + lw, y);
+    y += lineH + 1;
   }
 
-  // Footer
-  doc.setFontSize(8); doc.setTextColor(150);
-  doc.text('Internal use only. Premiums are indicative and subject to final underwriting approval. Administrator: Phishield UMA (Pty) Ltd. Insurer: Bryte Insurance Company Limited.', M, H - 28, { maxWidth: W - 2 * M });
+  // Benchmark for a cover (renewal -> existing policy; else IToo industry).
+  function getBenchmark(coverIndex) {
+    if (state.quoteType === 'renewal' && parseCurrency(state.renewalPremium) > 0) {
+      return { premium: parseCurrency(state.renewalPremium), label: 'Existing Policy', deductible: 0 };
+    }
+    const itoo = getItooBenchmark(actualTurnover, coverIndex);
+    if (itoo) return { premium: itoo.premium, label: 'Industry Benchmark', deductible: itoo.deductible };
+    return null;
+  }
 
-  const safeCompany = (state.companyName || 'quote').replace(/[^\w -]/g, '_');
-  const filename = `${quoteRef || 'quote'}_${cover ? cover.label : ''}_${safeCompany}.pdf`.replace(/\s+/g, '_');
+  // ── Header Bar ──
+  doc.setFillColor(0, 25, 50);
+  doc.rect(0, 0, pageW, 20, 'F');
+  doc.setFillColor(0, 180, 216);
+  doc.rect(0, 20, pageW, 0.8, 'F');
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 180, 216);
+  doc.text('Phishield', margin, 12);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(160, 175, 190);
+  doc.text('SME Rating Engine — Quote Output', margin + 40, 12);
+  doc.text(new Date().toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' }), pageW - margin, 12, { align: 'right' });
+  y = 26;
+
+  // ── Quote Reference ──
+  const pdfQuoteRef = quoteRef;
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text('Quote Ref: ' + pdfQuoteRef, margin, y);
+  y += 8;
+  addRule();
+
+  // ── Client Details ──
+  addSection('CLIENT DETAILS');
+  addField('Company:', state.companyName);
+  if (state.industryIndex >= 0) {
+    addField('Industry:', INDUSTRIES[state.industryIndex].main + ' — ' + INDUSTRIES[state.industryIndex].sub);
+  }
+  addField('Actual Turnover:', formatR(actualTurnover));
+  addField('Revenue Bracket:', revenueBandIndex >= 0 ? REVENUE_BANDS[revenueBandIndex].label : '--');
+  if (state.websiteAddress) addField('Website:', state.websiteAddress);
+  const qtLabels = { new: 'New Business', renewal: 'Renewal', competing: 'Competing Quote' };
+  addField('Quote Type:', qtLabels[state.quoteType] || '--');
+  if (state.quoteType === 'renewal') {
+    addField('Market Condition:', MARKET_CONDITION_LABEL);
+  }
+  if (state.competitorName) {
+    addField('Competitor:', state.competitorName);
+  }
+  addSpacer(2);
+
+  // ── Underwriting ──
+  addSection('UNDERWRITING');
+  const outcomeLabels = { standard: 'Standard Rates', caution: 'Proceed with Caution', loading: Math.round(uw.loadingPct * 100) + '% Loading', decline: 'Declined', refer: 'Refer to Senior UW' };
+  addField('Outcome:', outcomeLabels[uw.outcome] || '--');
+  addField('Loading:', uw.loadingPct > 0 ? Math.round(uw.loadingPct * 100) + '%' : 'None');
+  if (state.uwEndpointVendor) addField('Endpoint Security:', state.uwEndpointVendor);
+  if (state.uwAnswers && state.uwAnswers['q8'] === true && (state.uwPriorInsurer || state.uwPriorInceptionDate)) {
+    if (state.uwPriorInsurer)        addField('Prior Insurer:', state.uwPriorInsurer);
+    if (state.uwPriorInceptionDate)  addField('Prior Inception:', state.uwPriorInceptionDate);
+  }
+  const pdfAllConds = [].concat(uw.q1Conditions || [], uw.fpConditions || []);
+  if (pdfAllConds.length > 0) {
+    addField('Conditions of Cover:', '');
+    pdfAllConds.forEach((c, idx) => {
+      checkPage(20);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(180, 130, 0);
+      const bulletText = (idx + 1) + '. ' + c;
+      const wrappedLines = doc.splitTextToSize(bulletText, contentW - 10);
+      doc.text(wrappedLines, margin + 4, y);
+      y += wrappedLines.length * (lineH - 0.5) + 3;
+    });
+  } else {
+    addField('Conditions of Cover:', 'None');
+  }
+  if (state.priorClaim) {
+    addSpacer(2);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(200, 50, 50);
+    doc.text('! Prior claim flagged — additional underwriting required', margin + 2, y);
+    y += lineH + 2;
+  }
+  // Renewal caveats — the premium-drop-protection ladder is not yet ported to the
+  // React app, so these flags are absent (false) and the caveats stay inert; the
+  // existing-FP line still prints.
+  if (state.quoteType === 'renewal') {
+    const renewalFPLimit = parseCurrency(state.renewalFPLimit);
+    if (renewalFPLimit > 0) {
+      addField('Existing FP Sub-limit:', formatR(renewalFPLimit));
+    }
+    if (uw.loadingPct > 0) {
+      addSpacer(1);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(90, 90, 90);
+      const pct = Math.round(uw.loadingPct * 100);
+      const msg = 'Comparison caveat: new premium includes ' + pct + '% UW loading (Q2.1–Q5). Prior posture not on record — year-on-year comparison not strictly like-for-like.';
+      const wrapped = doc.splitTextToSize(msg, contentW - 6);
+      doc.text(wrapped, margin + 2, y);
+      y += wrapped.length * (lineH - 0.5) + 3;
+    }
+  }
+  addSpacer(2);
+
+  // ── Endorsements ──
+  if (state.endorsements) {
+    addSection('ENDORSEMENTS / NOTES');
+    const endorseLines = doc.splitTextToSize(state.endorsements, contentW - 6);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(80, 80, 80);
+    endorseLines.forEach(line => {
+      checkPage(6);
+      doc.text(line, margin + 3, y);
+      y += lineH;
+    });
+    addSpacer(3);
+  }
+
+  // ── Per Cover Limit Breakdowns (single selected cover) ──
+  const pdfCovers = state.selectedCoverIndex >= 0
+    ? [{ coverIndex: state.selectedCoverIndex, opt: null }]
+    : [];
+
+  pdfCovers.forEach(({ coverIndex: ci }) => {
+    const calc = calculatePremium(ci, derived.engineState, {});
+    if (!calc) return;
+
+    checkPage(60);
+    const sectionLabel = COVER_LIMITS[ci].label;
+    addSection('COVER LIMIT: ' + sectionLabel + (calc.isMicro ? '  (Micro SME)' : ''));
+
+    // Audit trail as table
+    const colX = [margin + 2, margin + 14, margin + contentW - 25];
+    const rowH = 8;
+    doc.setFillColor(235, 240, 248);
+    doc.rect(margin, y, contentW, rowH, 'F');
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(80, 80, 80);
+    const headerTextY = y + rowH * 0.6;
+    doc.text('STEP', colX[0], headerTextY);
+    doc.text('DESCRIPTION', colX[1], headerTextY);
+    doc.text('VALUE', colX[2] + 20, headerTextY, { align: 'right' });
+    y += rowH + 1;
+
+    calc.breakdown.forEach((b, idx) => {
+      checkPage(rowH + 2);
+      if (idx % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, y, contentW, rowH, 'F');
+      }
+      const textY = y + rowH * 0.55;
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0, 100, 160);
+      doc.text(String(b.step), colX[0], textY);
+      doc.setTextColor(50, 50, 50);
+      doc.text(b.desc, colX[1], textY);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 30, 30);
+      doc.text(formatR(b.value), colX[2] + 20, textY, { align: 'right' });
+      y += rowH;
+    });
+    addSpacer(4);
+
+    // Final premiums box
+    checkPage(22);
+    doc.setFillColor(235, 245, 255);
+    doc.rect(margin, y, contentW, 16, 'F');
+    doc.setDrawColor(0, 150, 200);
+    doc.rect(margin, y, contentW, 16, 'S');
+    const thirdW = contentW / 3;
+    const boxY = y + 5;
+    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
+    doc.text('ANNUAL (WITH FP)', margin + thirdW * 0.5, boxY, { align: 'center' });
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 100, 170);
+    doc.text(formatR(calc.annual), margin + thirdW * 0.5, boxY + 7, { align: 'center' });
+    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
+    doc.text('ANNUAL (EXCL FP)', margin + thirdW * 1.5, boxY, { align: 'center' });
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(50, 50, 50);
+    doc.text(formatR(calc.annualExFP), margin + thirdW * 1.5, boxY + 7, { align: 'center' });
+    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
+    doc.text('MONTHLY', margin + thirdW * 2.5, boxY, { align: 'center' });
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 100, 170);
+    doc.text(formatR(calc.monthly), margin + thirdW * 2.5, boxY + 7, { align: 'center' });
+    y += 20;
+
+    // Total Premium without RM Fee (internal back-office figure — admin platform adds 6%)
+    var rmAnnual = calc.annual / 1.06;
+    var rmMonthly = Math.ceil(rmAnnual / 12);
+    var rmBoxH = 17;
+    checkPage(rmBoxH + 9);
+    doc.setFillColor(245, 250, 255);
+    doc.rect(margin, y, contentW, rmBoxH, 'F');
+    doc.setDrawColor(0, 150, 200);
+    doc.rect(margin, y, contentW, rmBoxH, 'S');
+    var rmCx = margin + contentW / 2;
+    doc.setFontSize(10.2); doc.setFont('helvetica', 'bold'); doc.setTextColor(60, 60, 60);
+    doc.text('Total Premium without RM Fee', rmCx, y + 6.5, { align: 'center' });
+    doc.setFontSize(13); doc.setTextColor(0, 100, 170);
+    doc.text(formatR(rmAnnual) + ' /yr        ' + formatR(rmMonthly) + ' /mo', rmCx, y + 13.5, { align: 'center' });
+    y += rmBoxH + 3;
+    doc.setFontSize(6.5); doc.setFont('helvetica', 'italic'); doc.setTextColor(120, 120, 120);
+    doc.text('Capture this figure on the administration platform, which adds a 6% fee to the input premium.', margin + 3, y);
+    y += 6;
+
+    // Comparison row
+    const pdfBenchmark = getBenchmark(ci);
+    const compPrem = parseCurrency(state.competitorPremium);
+    const compRow = (compPrem > 0 && ci === state.selectedCoverIndex) ? { competitorPremium: compPrem } : null;
+    if (pdfBenchmark || (compRow && compRow.competitorPremium > 0)) {
+      checkPage(10);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
+      let compText = '';
+      if (pdfBenchmark) compText += pdfBenchmark.label + ': ' + formatR(pdfBenchmark.premium);
+      if (compRow && compRow.competitorPremium > 0) compText += '    |    Competitor: ' + formatR(compRow.competitorPremium);
+      if (pdfBenchmark) {
+        const pdfCompareAmt = state.competitorHasFP ? calc.annual : calc.annualExFP;
+        const d = pdfCompareAmt - pdfBenchmark.premium;
+        const pct = Math.round(d / pdfBenchmark.premium * 100);
+        compText += '    |    Delta (' + (state.competitorHasFP ? 'with FP' : 'ex-FP') + '): ' + (d <= 0 ? '' : '+') + formatR(Math.abs(d)) + ' (' + (d <= 0 ? '' : '+') + pct + '%)';
+      }
+      doc.text(compText, margin + 2, y);
+      y += 6;
+    }
+
+    addSpacer(4);
+    addRule();
+  });
+
+  // ── Footer ──
+  addSpacer(6);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(150, 150, 150);
+  doc.text('Internal use only. Premiums are indicative and subject to final underwriting approval.', margin, y);
+  y += 4;
+  doc.text('Phishield SME Rating Engine © 2026. Not for distribution.', margin, y);
+
+  // Filename (legacy: companySlug_coverLabels.pdf)
+  const companySlug = (state.companyName || 'quote').replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');
+  const coverLabels = pdfCovers.map(({ coverIndex: ci2 }) => COVER_LIMITS[ci2].label).join('_');
+  const filename = companySlug + '_' + coverLabels + '.pdf';
   return { doc, filename };
 }
 
