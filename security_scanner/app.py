@@ -523,7 +523,10 @@ def dehashed_balance():
         elif r.status_code == 401:
             return jsonify({"status": "inactive", "balance": None,
                             "error": r.json().get("error", "Auth failed")})
-        return jsonify({"status": "error", "balance": None})
+        # Any other status (403 "Issue with API Key", 5xx, etc.): the key is
+        # present but the credit check did not succeed. Surface the http code
+        # so the UI can say "rejected" (403) vs "unavailable" (transient).
+        return jsonify({"status": "error", "balance": None, "http": r.status_code})
     except Exception as e:
         return jsonify({"status": "error", "balance": None, "error": str(e)})
 

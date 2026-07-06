@@ -411,25 +411,37 @@ function apiHeaders(base) {
   return h;
 }
 
+// Shared handler for the Dehashed / IntelX credit toggles. On an ACTIVE key it
+// shows the remaining balance and leaves the toggle on. On ANY non-active
+// status (no_api_key / inactive / error incl. a rejected 403 key) it says why
+// and switches the toggle OFF + disables it, so a broker never tick-and-scans
+// against a key that cannot run. This closes the gap where a present-but-
+// rejected key (status 'error') silently left the toggle on with a blank note.
+function setCreditState(checkId, el, d) {
+  const cb = document.getElementById(checkId);
+  if (d.status === 'active' && d.balance !== null) {
+    const max = d.max_credits;
+    el.textContent = max ? `(${d.balance} of ${max} credits remaining)` : `(${d.balance} credits remaining)`;
+    const warn = max ? max * 0.5 : 50;   // amber threshold
+    const crit = max ? max * 0.2 : 0;    // red threshold
+    el.style.color = d.balance <= crit ? '#ef4444' : (d.balance < warn ? '#f59e0b' : '#60a5fa');
+    return;
+  }
+  el.textContent = d.status === 'no_api_key' ? '(no API key configured)'
+                 : d.status === 'inactive'   ? '(subscription inactive)'
+                 : d.http === 403            ? '(API key rejected)'
+                 : '(credit check unavailable)';
+  el.style.color = '#ef4444';
+  if (cb) { cb.checked = false; cb.disabled = true; }
+}
+
 // Fetch Dehashed credit balance on page load
 (async () => {
   try {
     const r = await fetch('{{ request.script_root }}/api/dehashed/balance', { headers: apiHeaders() });
     const d = await r.json();
     const el = document.getElementById('dehashed-balance');
-    if (d.status === 'active' && d.balance !== null) {
-      el.textContent = `(${d.balance} credits remaining)`;
-      el.style.color = d.balance < 50 ? '#f59e0b' : '#60a5fa';
-    } else if (d.status === 'inactive') {
-      el.textContent = '(subscription inactive)';
-      el.style.color = '#ef4444';
-      document.getElementById('dehashed-check').checked = false;
-    } else if (d.status === 'no_api_key') {
-      el.textContent = '(no API key configured)';
-      el.style.color = '#94a3b8';
-      document.getElementById('dehashed-check').checked = false;
-      document.getElementById('dehashed-check').disabled = true;
-    }
+    setCreditState('dehashed-check', el, d);
   } catch (e) {}
 })();
 
@@ -439,15 +451,7 @@ function apiHeaders(base) {
     const r = await fetch('{{ request.script_root }}/api/intelx/balance', { headers: apiHeaders() });
     const d = await r.json();
     const el = document.getElementById('intelx-balance');
-    if (d.status === 'active' && d.balance !== null) {
-      el.textContent = `(${d.balance} of ${d.max_credits || '?'} credits remaining)`;
-      el.style.color = d.balance < 10 ? '#ef4444' : (d.balance < 25 ? '#f59e0b' : '#60a5fa');
-    } else if (d.status === 'no_api_key') {
-      el.textContent = '(no API key configured)';
-      el.style.color = '#94a3b8';
-      document.getElementById('intelx-check').checked = false;
-      document.getElementById('intelx-check').disabled = true;
-    }
+    setCreditState('intelx-check', el, d);
   } catch (e) {}
 })();
 
