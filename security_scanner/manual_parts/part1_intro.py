@@ -141,8 +141,8 @@ def _build_cover(doc):
     # Metadata block
     meta_lines = [
         "Administrator: Phishield UMA (Pty) Ltd",
-        "Version 1.0",
-        "April 2026",
+        "Version 2.0",
+        "July 2026",
         "Confidential",
     ]
     for line in meta_lines:

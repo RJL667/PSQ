@@ -1530,7 +1530,27 @@ def build(doc):
     # ------------------------------------------------------------------ #
     add_h1(doc, "11. Version History")
 
-    add_bold_body(doc, "v1.0: April 2026", "Initial Release")
+    add_bold_body(doc, "v2.0: July 2026", " Major revision.")
+    add_body(
+        doc,
+        "This release brings the manual current with the scanner development "
+        "delivered since the v1.0 initial release. The changes are listed below "
+        "with the date each landed.",
+    )
+    add_bullet(doc, "2026-07-03: Reconciled the manual against current scanner behaviour: dual-source Certificate Transparency subdomain enumeration (crt.sh and certspotter, with a low-coverage flag), CVE version-gating disclosure (CVEs shown as 'potential, unconfirmed' where the exact software version is not fingerprinted), and the production endpoint moved to the Google Cloud VM at veilguard.phishield.com/scanner. Includes a document-wide readability and punctuation pass.")
+    add_bullet(doc, "2026-06-08: Catastrophe-model mid-market calibration: a revenue-band taper and a POPIA/ECTA-scoped regulatory fine floor, with cyber-band, SPF/DMARC and availability frequency and severity refinements.")
+    add_bullet(doc, "2026-06-05: Catastrophe-model redesign and FAIR reporting-card pass, with email-security accuracy improvements.")
+    add_bullet(doc, "2026-06-02: Credential-exposure correlation now counts password-bearing records specifically; the encrypted export gained recency clustering and leak-reference confidence; the manual was brought current with the Waves 1 to 6 behavioural changes.")
+    add_bullet(doc, "2026-06-01: Added the sensitive-credential disclosure tiers and the encrypted credential export (Section 6.4).")
+    add_bullet(doc, "2026-05-29: Documented RDP and origin-discovery handling, the B2C and PCI regulatory flags, and the P50 headline correction.")
+    add_bullet(doc, "2026-05-28: Added the Hudson Rock, S-4 and S-5 cross-correlation, scoped as reporting-only so it does not double-count in scoring.")
+    add_bullet(doc, "2026-05-27: Added the supply-chain checker layer (related domains, third-party JavaScript, exposed dependency manifests, email-vendor surface, vendor-breach correlation, and CMS plugin surface); removed the earlier catastrophe-tail double-count; folded in the Q&A audit fixes.")
+    add_bullet(doc, "2026-05-18: Documented the WAF partial-coverage adjustment.")
+    add_bullet(doc, "2026-05-15: FAIR financial-impact overhaul: 1-in-50, 1-in-100 and 1-in-150 return-period worst-case views, the sector regulatory catastrophe stack, and FAIS-safe 'Loss Exposure Scenarios' disclosure. Added the records-based Cat Modelling Validity Notice, peer benchmarking with a 1.0 to 10.0 peer rating, the WAF-friendly HTTP architecture, and the auto-detect to broker to cat-stack input flow.")
+    add_bullet(doc, "2026-04-20: Regenerated for the hybrid financial-impact model, sub-industry selection, and GDPR and PCI inputs.")
+    add_bullet(doc, "2026-04-16: Hybrid financial-impact model engine rewrite.")
+
+    add_bold_body(doc, "v1.0: April 2026", " Initial Release")
     add_body(
         doc,
         "First public release of the Phishield Cyber Risk Scanner User "
