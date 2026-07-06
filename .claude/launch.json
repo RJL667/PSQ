@@ -8,6 +8,13 @@
       "port": 8000
     },
     {
+      "name": "scanner-sarel",
+      "runtimeExecutable": "C:/Users/sarel/AppData/Local/Programs/Python/Python312/python.exe",
+      "runtimeArgs": ["app.py"],
+      "cwd": "security_scanner",
+      "port": 5001
+    },
+    {
       "name": "security-scanner",
       "runtimeExecutable": "C:/Program Files/Python312/python.exe",
       "runtimeArgs": ["-c", "import os, runpy; os.chdir(r'C:/Users/rudol/.gemini/antigravity/PSQ/security_scanner'); runpy.run_path('app.py', run_name='__main__')"],
