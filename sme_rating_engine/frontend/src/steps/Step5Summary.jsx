@@ -42,7 +42,13 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
     doc.save(filename);
   }
   function downloadAll() {
-    options.forEach((o, i) => setTimeout(() => downloadPdf(o), i * 400));
+    // Browsers collapse/block multiple downloads fired together. Trigger the
+    // first inside the click gesture (always allowed), then stagger the rest ~1s
+    // apart (matches the legacy generateAllPDFs) so each is processed separately.
+    options.forEach((o, i) => {
+      if (i === 0) downloadPdf(o);
+      else setTimeout(() => downloadPdf(o), i * 1000);
+    });
   }
 
   function buildPayload() {
