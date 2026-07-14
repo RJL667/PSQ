@@ -2538,18 +2538,18 @@ def cat_financial_impact(d, S):
                 ("  Std. Deviation",      f"{cur}&nbsp;{mc_t.get('std_dev', 0):,.0f}"),
                 ("",                      ""),
             ])
-            # Per-scenario MC breakdown — one compact line per scenario
-            # (median + catastrophe tail). The headline aggregate scenarios
-            # are in the dedicated Loss Exposure Scenarios table that renders
-            # immediately after this card; per-scenario point losses appear
-            # in the cost rows below. This avoids triple-disclosing the same
-            # figures.
+            # Per-scenario MC breakdown: one compact median (P50) line per
+            # scenario. The per-scenario 1-in-250 was intentionally dropped. It
+            # was the prob-weighted ANNUAL tail, which collided with the
+            # severity-PML "1-in-250" cover figure (Loss Exposure Scenarios /
+            # cover ladder), the only surface that should carry a 1-in-250.
+            # Headline aggregate scenarios are in that table; per-scenario point
+            # losses appear in the cost rows below.
             for sname, slabel in [("data_breach", "Data Breach"), ("ransomware", "Ransomware"), ("business_interruption", "Bus. Interruption")]:
                 smc = sc.get(sname, {}).get("monte_carlo", {})
                 if smc:
                     rows.append((f"  {slabel} (MC)",
-                                 f"P50 {cur}&nbsp;{smc.get('p50', 0):,.0f}"
-                                 f"  ·  1-in-250 {cur}&nbsp;{smc.get('p99_6', 0):,.0f}"))
+                                 f"P50 (median) {cur}&nbsp;{smc.get('p50', 0):,.0f}"))
             rows.append(("", ""))
 
         rows.extend([

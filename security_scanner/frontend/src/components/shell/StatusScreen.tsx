@@ -1,4 +1,4 @@
-import { ShieldHalf, Loader2, AlertTriangle } from 'lucide-react'
+import { Shield, Loader2, AlertTriangle } from 'lucide-react'
 import styles from './StatusScreen.module.css'
 
 /**
@@ -12,7 +12,7 @@ export default function StatusScreen({
   return (
     <div className={styles.wrap}>
       <div className={styles.card}>
-        <span className={styles.logo}><ShieldHalf size={26} /></span>
+        <span className={styles.logo}><Shield size={26} /></span>
         {kind === 'pending' ? (
           <>
             <Loader2 className={styles.spin} size={22} />

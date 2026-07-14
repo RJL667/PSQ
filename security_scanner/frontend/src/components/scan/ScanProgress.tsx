@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ShieldHalf, Server, Globe, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react'
+import { Shield, Server, Globe, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react'
 import styles from './ScanProgress.module.css'
 import { withBase } from '../../base'
 
@@ -96,7 +96,7 @@ export default function ScanProgress({ scanId, domain }: { scanId: string; domai
     <div className={styles.wrap}>
       <div className={styles.panel}>
         <header className={styles.head}>
-          <span className={styles.logo}><ShieldHalf size={22} /></span>
+          <span className={styles.logo}><Shield size={22} /></span>
           <div className={styles.headText}>
             <span className={styles.brand}>PHISHIELD CyberRisk Assessment</span>
             <span className={styles.dom}><Globe size={12} /> {domain}</span>

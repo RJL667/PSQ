@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { ShieldHalf, ChevronDown } from 'lucide-react'
+import { Shield, ChevronDown } from 'lucide-react'
 import { NAV, type NavItem } from './nav'
 import { getScanMeta } from '../../data/results'
 import styles from './Sidebar.module.css'
@@ -48,7 +48,7 @@ export default function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
-        <span className={styles.logo}><ShieldHalf size={20} strokeWidth={2} /></span>
+        <span className={styles.logo}><Shield size={20} strokeWidth={2} /></span>
         <div className={styles.brandText}>
           <span className={styles.brandName}>PHISHIELD</span>
           <span className={styles.brandSub}>CYBER PROTECT</span>

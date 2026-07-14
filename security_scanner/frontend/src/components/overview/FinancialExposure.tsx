@@ -9,14 +9,18 @@ import styles from './FinancialExposure.module.css'
 const COMP_COLORS = ['var(--critical)', 'var(--high)', 'var(--warning)', 'var(--info)', 'var(--accent)']
 
 /**
- * Monte Carlo probability-interval visual: the coloured band shows where the
- * modelled annual loss is likely to fall. Inner (darker) band = central 50% of
- * outcomes, outer band = central 90%; the full track spans P5 → the 1-in-250
- * tail (P99.6). The median marker sits on the most-likely outcome.
+ * Monte Carlo probability-interval visual for the EXPECTED annual-loss range.
+ * The coloured band shows where the modelled annual loss is likely to fall:
+ * inner (darker) band = central 50% of outcomes, outer band = central 90%; the
+ * full track spans P5 (low) → P95 (severe). The median marker sits on the
+ * most-likely outcome. The catastrophe / 1-in-250 view is deliberately NOT on
+ * this annual-aggregate band — it is a different (posture-independent, single-
+ * event severity-PML) distribution and lives in the FAIR "Loss Exposure & Cover
+ * Sizing" panel, so the two never share the "1-in-250" label.
  */
 function McDistribution({ mc }: { mc: MonteCarloSummary }) {
   const lo = mc.p5 ?? 0
-  const hi = mc.p99_6 ?? mc.p95 ?? lo + 1
+  const hi = mc.p95 ?? lo + 1
   const span = Math.max(hi - lo, 1)
   const at = (v: number | null) => `${Math.max(0, Math.min(100, (((v ?? lo) - lo) / span) * 100))}%`
   const band = (a: number | null, b: number | null) => ({ left: at(a), right: `calc(100% - ${at(b)})` })
@@ -37,8 +41,7 @@ function McDistribution({ mc }: { mc: MonteCarloSummary }) {
       <div className={styles.mcScale}>
         <span><b>{fmtZar(mc.p5)}</b><i>P5 · low</i></span>
         <span className={styles.mcScaleMid}><b>{fmtZar(mc.p50)}</b><i>Median</i></span>
-        <span className={styles.mcScaleMid}><b>{fmtZar(mc.p95)}</b><i>P95 · severe</i></span>
-        <span className={styles.mcScaleEnd}><b>{fmtZar(mc.p99_6)}</b><i>1-in-250</i></span>
+        <span className={styles.mcScaleEnd}><b>{fmtZar(mc.p95)}</b><i>P95 · severe</i></span>
       </div>
       <div className={styles.mcLegend}>
         <span><i className={styles.lg50} />Central 50%</span>
