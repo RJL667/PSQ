@@ -32,7 +32,8 @@ export const initialState = {
   // Step 3 — competitor comparison
   competitorName: '',
   competitorHasFP: false,
-  competitorRows: [],   // [{ coverIndex, competitorPremium }] per requested cover
+  hasExistingQuotes: false,
+  competitorRows: [],   // [{ requestedCoverIndex, competitorLimit, competitorPremium }] per option
 
   // Step 4 — adjustments
   applyDiscountsToAll: false,

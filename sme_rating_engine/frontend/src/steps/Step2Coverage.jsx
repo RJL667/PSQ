@@ -17,7 +17,6 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
     }
   };
 
-  // Auto-select recommended/current/target covers on entry (empty) — legacy behaviour.
   useEffect(() => {
     if (derived.revenueBandIndex < 0 || options.length > 0) return;
     const picks = reco.cardSpecs.filter((s) => AUTO_ROLES.includes(s.role));
@@ -31,7 +30,6 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [derived.revenueBandIndex, state.quoteType, state.renewalCoverIndex, derived.renewalPremiumNum, derived.renewalFPNum]);
 
-  // FP index to display on a recommendation card.
   const cardFp = (ci) => {
     const forCover = options.filter((o) => o.coverIndex === ci);
     if (forCover.length) {
@@ -87,7 +85,7 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
       <div className="glass-card">
         <div className="step-header">
           <h2>Coverage Recommendations &amp; Selection</h2>
-          <p>Review recommended cover options or select custom limits. Add up to 4 to compare.</p>
+          <p>Review recommended cover options or select a custom limit. Add up to 4 to compare.</p>
         </div>
 
         {anyMicro && (
@@ -104,9 +102,9 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
 
         {isRenewalWithData && <RenewalBanner reco={reco} state={state} derived={derived} />}
 
-        {/* Recommendation cards */}
+        {/* Recommended */}
         <div className="coverage-section">
-          <label className="field-label">{isRenewalWithData ? 'Renewal Recommendations' : 'Recommended Cover Options'}</label>
+          <label className="field-label">Recommended Cover Options</label>
           <div className="cover-recommendations" aria-label="Recommended cover options">
             {reco.cardSpecs.length === 0 && <p className="field-hint">Complete Step 1 to see recommendations.</p>}
             {reco.cardSpecs.map((spec) => {
@@ -170,7 +168,21 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
           </div>
         )}
 
-        {/* FP selector — option tabs when 2+ */}
+        {/* Funds Protect Cover (active option's FP tiers) */}
+        <div className="coverage-section">
+          <label className="field-label">Funds Protect Cover</label>
+          <div className="card-selector" id="fp-selector">
+            {activeOpt && activeFpOptions.map((fp, idx) => (
+              <button key={idx} type="button" className={'sel-card fp-card' + (activeOpt.fpIndex === idx ? ' active' : '')} onClick={() => selectFp(idx)}>
+                <span className="sc-value">{fp.label}</span>{' '}
+                <span className="sc-sub">{formatR(fp.cost)}/yr</span>
+              </button>
+            ))}
+          </div>
+          <p className="field-hint">Base FP included. Upgrade options shown above.</p>
+        </div>
+
+        {/* FP option tabs (multi-cover: one tab per option) */}
         {options.length >= 2 && (
           <div className="option-tabs" aria-label="FP selection tabs">
             {options.map((o, idx) => {
@@ -178,52 +190,53 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
                 ? ' (' + (options.filter((x, i) => x.coverIndex === o.coverIndex && i <= idx).length) + ')' : '';
               return (
                 <button key={o.id} type="button" className={'option-tab' + (o.id === state.activeOptionTab ? ' active' : '')}
-                  onClick={() => patch({ activeOptionTab: o.id })}>
-                  {COVER_LIMITS[o.coverIndex].label}{inst}
-                  <span className="option-tab-remove" title="Remove" onClick={(e) => { e.stopPropagation(); setOptions(options.filter((x) => x.id !== o.id)); }}> ×</span>
+                  onClick={() => patch({ activeOptionTab: o.id })}>{COVER_LIMITS[o.coverIndex].label}{inst}
+                  <span className="option-tab-remove" role="button" aria-label="Remove this quote option"
+                    title="Remove this quote option"
+                    style={{ marginLeft: 8, opacity: 0.6, cursor: 'pointer', fontWeight: 700 }}
+                    onClick={(e) => { e.stopPropagation(); setOptions(options.filter((x) => x.id !== o.id)); }}>×</span>
                 </button>
               );
             })}
           </div>
         )}
 
-        {activeOpt && (
-          <div className="coverage-section">
-            <label className="field-label">Funds Protect Cover{options.length >= 2 ? ` — ${optionLabel(activeOpt.coverIndex, activeOpt.fpIndex)}` : ''}</label>
-            <div className="card-selector" id="fp-selector">
-              {activeFpOptions.map((fp, idx) => (
-                <button key={idx} type="button" className={'sel-card fp-card' + (activeOpt.fpIndex === idx ? ' active' : '')} onClick={() => selectFp(idx)}>
-                  <span className="sc-value">{fp.label}</span>
-                  <span className="sc-sub">{formatR(fp.cost)}/yr</span>
-                </button>
-              ))}
-            </div>
-            <p className="field-hint">Base FP included. Upgrade options shown above.</p>
-          </div>
-        )}
-
         {/* Pricing */}
-        {options.length === 1 && optionCalcs[options[0].id] && (
-          <SinglePricing calc={optionCalcs[options[0].id]} />
-        )}
-        {options.length >= 2 && (
-          <div className="pricing-display">
-            <div className="pd-header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="pd-icon"><circle cx="12" cy="12" r="10" /><path d="M12 6v12M8 10h8M8 14h8" /></svg>
-              <span>Estimated Premiums ({options.length} options)</span>
-            </div>
-            <table className="multi-pricing-table">
-              <thead><tr><th>Option</th><th>Annual</th><th>Monthly</th></tr></thead>
-              <tbody>
-                {options.map((o) => {
-                  const calc = optionCalcs[o.id];
-                  if (!calc) return null;
-                  return <tr key={o.id}><td>{optionLabel(o.coverIndex, o.fpIndex)}</td><td>{formatR(calc.annual)}</td><td>{formatR(calc.monthly)}</td></tr>;
-                })}
-              </tbody>
-            </table>
+        <div className="pricing-display">
+          <div className="pd-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="pd-icon"><circle cx="12" cy="12" r="10" /><path d="M12 6v12M8 10h8M8 14h8" /></svg>
+            <span>Estimated Premium</span>
           </div>
-        )}
+          {options.length < 2 && (
+            <div className="pd-amounts">
+              <div className="pd-amount-item">
+                <div className="pd-label">Annual</div>
+                <div className="pd-value"><span className="pd-currency">R</span><span className="pd-number">{options[0] && optionCalcs[options[0].id] ? optionCalcs[options[0].id].annual.toLocaleString('en-ZA') : '--'}</span></div>
+                <div className="pd-sub">/year</div>
+              </div>
+              <div className="pd-divider" />
+              <div className="pd-amount-item">
+                <div className="pd-label">Monthly</div>
+                <div className="pd-value"><span className="pd-currency">R</span><span className="pd-number">{options[0] && optionCalcs[options[0].id] ? optionCalcs[options[0].id].monthly.toLocaleString('en-ZA') : '--'}</span></div>
+                <div className="pd-sub">/month</div>
+              </div>
+            </div>
+          )}
+          {options.length >= 2 && (
+            <div>
+              <table className="multi-pricing-table">
+                <thead><tr><th>Option</th><th>Annual</th><th>Monthly</th></tr></thead>
+                <tbody>
+                  {options.map((o) => {
+                    const calc = optionCalcs[o.id];
+                    if (!calc) return null;
+                    return <tr key={o.id}><td>{optionLabel(o.coverIndex, o.fpIndex)}</td><td>{formatR(calc.annual)}</td><td>{formatR(calc.monthly)}</td></tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         <div className="btn-row">
           <button type="button" className="btn btn-ghost" onClick={() => goToStep(1)}>Back</button>
@@ -234,30 +247,6 @@ export default function Step2Coverage({ state, patch, dispatch, derived, goToSte
         </div>
       </div>
     </section>
-  );
-}
-
-function SinglePricing({ calc }) {
-  return (
-    <div className="pricing-display">
-      <div className="pd-header">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="pd-icon"><circle cx="12" cy="12" r="10" /><path d="M12 6v12M8 10h8M8 14h8" /></svg>
-        <span>Estimated Premium</span>
-      </div>
-      <div className="pd-amounts">
-        <div className="pd-amount-item">
-          <div className="pd-label">Annual</div>
-          <div className="pd-value"><span className="pd-currency">R</span><span className="pd-number">{calc.annual.toLocaleString('en-ZA')}</span></div>
-          <div className="pd-sub">/year</div>
-        </div>
-        <div className="pd-divider" />
-        <div className="pd-amount-item">
-          <div className="pd-label">Monthly</div>
-          <div className="pd-value"><span className="pd-currency">R</span><span className="pd-number">{calc.monthly.toLocaleString('en-ZA')}</span></div>
-          <div className="pd-sub">/month</div>
-        </div>
-      </div>
-    </div>
   );
 }
 
