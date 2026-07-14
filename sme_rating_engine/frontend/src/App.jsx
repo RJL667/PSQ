@@ -144,7 +144,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="quote-ticker" id="quoteTicker">
+        <div className={'quote-ticker' + (state.currentStep >= 2 && derived.ticker != null ? ' visible' : '')} id="quoteTicker">
           <div className="ticker-label">Estimated Monthly</div>
           <div className="ticker-amount">
             {derived.ticker != null ? 'R' + derived.ticker.toLocaleString('en-ZA') : '--'}

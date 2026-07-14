@@ -151,7 +151,7 @@ export default function Step1Client({ state, patch, dispatch, derived, onNext })
 
           {state.fpOver250k && (
             <>
-              <div className="uw-question uw-fp-dependent">
+              <div className="uw-question uw-fp-dependent visible">
                 <div className="uw-question-text">6. Do you have documented procedures in place for the following:</div>
                 {[
                   ['q6-1', '6.1 Vetting of new vendors/customers/payees?'],
@@ -164,7 +164,7 @@ export default function Step1Client({ state, patch, dispatch, derived, onNext })
                   </div>
                 ))}
               </div>
-              <div className="uw-question uw-fp-dependent">
+              <div className="uw-question uw-fp-dependent visible">
                 <div className="uw-question-text">7. Does your business utilise account verification services offered by your bank or third-party provider?</div>
                 <YesNo answer={a['q7']} onAnswer={(v) => setAns('q7', v)} ariaPrefix="q7" />
               </div>
