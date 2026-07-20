@@ -75,6 +75,7 @@ export default function FinancialExposure({ r }: { r: Results }) {
 
   return (
     <Panel title="Financial Exposure" action={<span className={styles.cur}>{fin.currency}</span>}>
+      <div className={styles.gridWrap}>
       <div className={styles.grid}>
         {/* Left — summary column */}
         <div className={styles.summary}>
@@ -143,6 +144,7 @@ export default function FinancialExposure({ r }: { r: Results }) {
             </>
           ) : <EmptyState compact title="No scenario breakdown available" />}
         </div>
+      </div>
       </div>
     </Panel>
   )

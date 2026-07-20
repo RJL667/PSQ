@@ -1,7 +1,15 @@
 .cur { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+/* container context so the 3→2→1 column collapse keys off the PANEL's own width,
+   not the viewport (the viewport breakpoint mis-fires once the sidebar + the
+   1.45fr row split eat into the width, leaving the 3-col grid wider than the
+   panel and clipping the loss-scenario values at the border). */
+.gridWrap { container-type: inline-size; }
 .grid {
   display: grid;
-  grid-template-columns: 240px minmax(280px, 1.6fr) minmax(220px, 1fr);
+  /* minmax(0,…) lets the middle + right tracks shrink below their content so the
+     grid can never exceed the panel; the container query collapses to 2 cols
+     before they get cramped. */
+  grid-template-columns: 240px minmax(0, 1.6fr) minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -56,10 +64,13 @@
 
 .right { display: flex; flex-direction: column; border-left: 1px solid var(--border); padding-left: 18px; }
 .ladder { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
-.ladder li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+/* label absorbs any tightness via ellipsis; the value is pinned to the right
+   edge (nowrap + no shrink), mirroring the summary column's dt/dd, so a narrow
+   column can never clip the rand figure. */
+.ladder li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .ladder li:last-child { border-bottom: none; }
-.ladderLabel { font-size: 11.5px; color: var(--text-secondary); }
-.ladderVal { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ladderLabel { font-size: 11.5px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ladderVal { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
 
 .compBar { display: flex; height: 9px; border-radius: 5px; overflow: hidden; background: var(--border); }
 .compBar span { height: 100%; }
@@ -67,11 +78,14 @@
 .compLegend span { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-secondary); }
 .compLegend i { width: 8px; height: 8px; border-radius: 2px; }
 
-@media (max-width: 1100px) {
+/* Collapse on the PANEL's width (container query), not the viewport: at ~800c
+   the loss-scenario column drops full-width below summary + distribution; at
+   ~500c the summary stacks too. */
+@container (max-width: 800px) {
   .grid { grid-template-columns: 1fr 1fr; }
   .right { grid-column: 1 / -1; border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 14px; }
 }
-@media (max-width: 680px) {
+@container (max-width: 500px) {
   .grid { grid-template-columns: 1fr; }
   .summary { border-right: none; padding-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
 }

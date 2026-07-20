@@ -18,8 +18,14 @@
   gap: var(--panel-gap);
   align-items: stretch;
 }
+/* financialRow stacks earlier than complianceRow: the Remediation table needs
+   ~460px, which the 1fr side-by-side track only clears above ~1400px once the
+   sidebar is subtracted. Below that, both financial panels go full-width. */
+@media (max-width: 1399px) {
+  .financialRow { grid-template-columns: 1fr; }
+}
 @media (max-width: 1279px) {
-  .financialRow, .complianceRow { grid-template-columns: 1fr; }
+  .complianceRow { grid-template-columns: 1fr; }
 }
 
 /* Laptop: 2 columns, alerts/actions drop under */
