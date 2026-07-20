@@ -54,12 +54,13 @@ function McDistribution({ mc }: { mc: MonteCarloSummary }) {
 
 export default function FinancialExposure({ r }: { r: Results }) {
   const fin = getFinancialSummary(r)
-  const rem = r.insurance?.remediation
+  // Remediation figures are pre-computed by the backend (financial_impact.risk_mitigations,
+  // the same block the PDF renders) and read via the selector. The dashboard renders them
+  // verbatim — no savings/reduction math here.
   const current = fin.expectedAnnualLoss
-  const mitigated = rem?.simulated_financial_impact?.most_likely ?? null
-  const saving = rem?.total_potential_savings
-    ?? (current != null && mitigated != null ? current - mitigated : null)
-  const reduction = current && mitigated != null ? ((current - mitigated) / current) * 100 : null
+  const mitigated = fin.mitigatedAnnualLoss
+  const saving = fin.potentialSaving
+  const reduction = fin.reductionPct
 
   if (!fin.available) {
     return (

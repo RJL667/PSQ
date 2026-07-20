@@ -25,7 +25,6 @@ export default function RemediationQueue({ r }: { r: Results }) {
               <th>Priority</th>
               <th>Action</th>
               <th className={styles.num}>RSI ↓</th>
-              <th className={styles.num}>Est. saving</th>
               <th>Effort</th>
               <th>Status</th>
             </tr>
@@ -45,7 +44,6 @@ export default function RemediationQueue({ r }: { r: Results }) {
                   {a.title}
                 </td>
                 <td className={styles.num}>{a.rsiReduction != null ? `−${fmtRatioPct(a.rsiReduction, 1)}` : '—'}</td>
-                <td className={styles.num}>{a.estSaving != null ? fmtZar(a.estSaving) : '—'}</td>
                 <td><span className={styles.effort}>{a.effort}</span></td>
                 <td><span className={styles.status}>{a.status}</span></td>
               </tr>
@@ -56,7 +54,7 @@ export default function RemediationQueue({ r }: { r: Results }) {
       {showProjection && (
         <div className={styles.projection}>
           <div><span>Projected RSI</span><strong>{projection.simulatedRsi != null ? projection.simulatedRsi.toFixed(3) : '—'}</strong></div>
-          <div><span>Projected annual loss</span><strong>{fmtZar(r.insurance?.remediation?.simulated_financial_impact?.most_likely)}</strong></div>
+          <div><span>Projected annual loss</span><strong>{fmtZar(projection.projectedLoss)}</strong></div>
           <div><span>Total reduction</span><strong style={{ color: 'var(--positive)' }}>{fmtZar(projection.totalSavings)}</strong></div>
         </div>
       )}

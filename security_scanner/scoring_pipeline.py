@@ -31,11 +31,86 @@ value from the fixture, or None) so this module never touches the network.
 """
 from __future__ import annotations
 
+import re
+
 from scoring_analytics import (
     RiskScorer, RansomwareIndex, DataBreachIndex,
     FinancialImpactCalculator, RemediationSimulator,
 )
 from peer_benchmarking import resolve_effective_revenue_zar
+
+
+# --- Remediation priority queue (backend-owned classification) --------------
+# Ported VERBATIM from the dashboard's former client-side getRemediationActions()
+# so the ordering / severity / effort is computed ONCE, server-side, and every
+# API consumer (the React dashboard, a future redaction-VM UI, a broker export,
+# ...) renders the SAME list without re-deriving it. Rand savings are
+# deliberately NOT re-quoted here: the single Rand-savings view is
+# financial_impact.risk_mitigations (the money card); this queue is the
+# RSI-prioritisation "what to fix first" view (mirrors the PDF's two-card split).
+_PQ_RULES = [
+    # (rank, severity, effort, pattern) — lower rank = sooner; critical DB first.
+    (1, "critical", "Medium", r"database|postgres|mysql|mongo|redis|5432|3306|exposed.*(port|service)|firewall.*(port|database)"),
+    (2, "high", "Medium", r"ftp|exposed (ftp|service)|patch.*(service|protocol)"),
+    (3, "high", "Medium", r"\bwaf\b|web application firewall"),
+    (4, "high", "Low", r"https|redirect.*http|http.*redirect|tls (enforce|redirect)"),
+    (5, "medium", "Low", r"hsts|strict-transport"),
+    (6, "medium", "Low", r"mta-?sts"),
+    (7, "medium", "Low", r"tls-?rpt"),
+    (8, "medium", "High", r"vpn|ztna|zero.?trust|remote access"),
+    (9, "medium", "Low", r"privacy policy|popia|privacy"),
+    (10, "low", "Low", r"security\.txt|vdp|disclosure policy"),
+    (11, "medium", "Low", r"dmarc|dkim|spf"),
+]
+_PQ_SCAN_QUALITY = re.compile(
+    r"failed|re-?scan|rescan|re-?run|third[_-]?party.?js|checker (failed|error)", re.I)
+
+
+def _pq_classify(title: str):
+    """(rank, severity, effort, kind) for a remediation title. A failed/blocked
+    checker is a scan-quality action, never an ordinary vulnerability."""
+    if _PQ_SCAN_QUALITY.search(title):
+        return 90, "medium", "Low", "scan_quality"
+    for rank, sev, effort, pat in _PQ_RULES:
+        if re.search(pat, title, re.I):
+            return rank, sev, effort, "remediation"
+    return 50, "medium", "Medium", "remediation"
+
+
+def _pq_key(title: str) -> str:
+    return re.sub(r"[^a-z]", "", (title or "").lower())[:28]
+
+
+def build_remediation_priority_queue(steps, recommendations):
+    """Merge the engine's remediation steps + free-text recommendations into one
+    de-duplicated, classified, priority-ordered list the UI renders verbatim."""
+    seen: set = set()
+    raws = []  # (title, rsi_reduction, indicative_saving, source)
+    for s in steps or []:
+        title = s.get("action", "")
+        k = _pq_key(title)
+        if not title or k in seen:
+            continue
+        seen.add(k)
+        raws.append((title, s.get("rsi_reduction"), s.get("annual_savings_estimate") or 0, "engine"))
+    for rec in recommendations or []:
+        title = str(rec)
+        k = _pq_key(title)
+        if not title or k in seen:
+            continue
+        seen.add(k)
+        raws.append((title, None, 0, "recommendation"))
+
+    classified = []
+    for title, rsi_red, est, source in raws:
+        rank, sev, effort, kind = _pq_classify(title)
+        classified.append((rank, est, {
+            "title": title, "severity": sev, "effort": effort,
+            "rsi_reduction": rsi_red, "kind": kind, "source": source,
+        }))
+    # rank asc, then higher indicative saving first (stable — mirrors old UI sort)
+    classified.sort(key=lambda t: (t[0], -t[1]))
+    return [dict(rank=i, **item) for i, (_, _, item) in enumerate(classified, 1)]
 
 
 def apply_risk_score(results: dict, *, waf_apex_status: dict | None = None):
@@ -108,7 +183,13 @@ def apply_insurance_analytics(results: dict, *, industry: str,
     insurance["dbi"] = dbi_calc.calculate(cat_results)
 
     sim = RemediationSimulator()
-    insurance["remediation"] = sim.calculate(
+    remediation = sim.calculate(
         cat_results, rsi_result, fin_result, _zar, industry)
+    # Backend-owned, ready-to-render remediation priority queue: rank / severity
+    # / effort classification + free-text-recommendation merge + ordering happen
+    # HERE, once, so the dashboard (and any other consumer) only renders it.
+    remediation["priority_queue"] = build_remediation_priority_queue(
+        remediation.get("steps", []), results.get("recommendations", []))
+    insurance["remediation"] = remediation
 
     return insurance

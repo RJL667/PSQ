@@ -5,7 +5,7 @@
 // branches and reports availability instead of inventing data (spec §10/§33).
 // ---------------------------------------------------------------------------
 import type {
-  Results, CategoryBase, Severity, ContributingFactor, RemediationStep,
+  Results, CategoryBase, Severity, ContributingFactor,
 } from '../types/results'
 import {
   riskBandFromLabel, riskBandFromScore, type RiskBand,
@@ -190,6 +190,12 @@ export interface FinancialSummary {
   available: boolean
   currency: string
   expectedAnnualLoss: number | null
+  // Remediation headline figures, read verbatim from the backend's authoritative,
+  // self-consistent financial_impact.risk_mitigations block (the SAME source the PDF
+  // renders). Never recomputed in the UI — the dashboard only renders.
+  mitigatedAnnualLoss: number | null
+  potentialSaving: number | null
+  reductionPct: number | null
   loss: { min: number | null; likely: number | null; max: number | null }
   premiumTier: string | null
   catastropheExposure: number | null
@@ -257,10 +263,20 @@ export function getFinancialSummary(r: Results | null): FinancialSummary {
   const cl = fiAny?.cover_ladder as Record<string, { loss_zar?: number }> | undefined
   const rp = fiAny?.return_periods as Record<string, { loss_zar?: number }> | undefined
   const catastrophe = cl?.catastrophic?.loss_zar ?? rp?.['1_in_250']?.loss_zar ?? null
+  // Remediation headline figures — read verbatim from the backend's authoritative,
+  // self-consistent risk_mitigations block (the SAME source the PDF renders:
+  // mitigated_annual_loss = current - savings; exposure_reduction_pct =
+  // 100*savings/current). The UI never recomputes savings/reduction.
+  const rmit = fiAny?.risk_mitigations as Record<string, unknown> | undefined
+  const rmSummary = rmit?.remediation_summary as Record<string, unknown> | undefined
+  const numOr = (v: unknown): number | null => (typeof v === 'number' ? v : null)
   return {
     available: likely != null,
     currency: fi?.currency ?? 'ZAR',
     expectedAnnualLoss: likely,
+    mitigatedAnnualLoss: numOr(rmit?.mitigated_annual_loss),
+    potentialSaving: numOr(rmit?.total_potential_savings),
+    reductionPct: numOr(rmSummary?.exposure_reduction_pct),
     loss: {
       min: total.min ?? eal?.minimum ?? null,
       likely,
@@ -719,89 +735,45 @@ export interface RemediationAction {
   title: string
   severity: Severity
   rsiReduction: number | null
-  estSaving: number | null
   effort: string
   status: string
   kind: 'remediation' | 'scan_quality'
   source: string
 }
 
-// keyword -> priority rank (lower = sooner). Critical DB exposure first.
-const PRIORITY_RULES: Array<{ rank: number; sev: Severity; test: RegExp; effort: string }> = [
-  { rank: 1, sev: 'critical', test: /database|postgres|mysql|mongo|redis|5432|3306|exposed.*(port|service)|firewall.*(port|database)/i, effort: 'Medium' },
-  { rank: 2, sev: 'high', test: /ftp|exposed (ftp|service)|patch.*(service|protocol)/i, effort: 'Medium' },
-  { rank: 3, sev: 'high', test: /\bwaf\b|web application firewall/i, effort: 'Medium' },
-  { rank: 4, sev: 'high', test: /https|redirect.*http|http.*redirect|tls (enforce|redirect)/i, effort: 'Low' },
-  { rank: 5, sev: 'medium', test: /hsts|strict-transport/i, effort: 'Low' },
-  { rank: 6, sev: 'medium', test: /mta-?sts/i, effort: 'Low' },
-  { rank: 7, sev: 'medium', test: /tls-?rpt/i, effort: 'Low' },
-  { rank: 8, sev: 'medium', test: /vpn|ztna|zero.?trust|remote access/i, effort: 'High' },
-  { rank: 9, sev: 'medium', test: /privacy policy|popia|privacy/i, effort: 'Low' },
-  { rank: 10, sev: 'low', test: /security\.txt|vdp|disclosure policy/i, effort: 'Low' },
-  { rank: 11, sev: 'medium', test: /dmarc|dkim|spf/i, effort: 'Low' },
-]
-
 export function getRemediationActions(r: Results | null): {
   actions: RemediationAction[]
-  projection: { currentRsi: number | null; simulatedRsi: number | null; totalSavings: number | null }
+  projection: { currentRsi: number | null; simulatedRsi: number | null; projectedLoss: number | null; totalSavings: number | null }
 } {
-  if (!r) return { actions: [], projection: { currentRsi: null, simulatedRsi: null, totalSavings: null } }
-  const steps: RemediationStep[] = r.insurance?.remediation?.steps ?? []
-  const recs: string[] = r.recommendations ?? []
-
-  type Raw = { title: string; rsiReduction: number | null; estSaving: number | null; source: string }
-  const raws: Raw[] = []
-  const seen = new Set<string>()
-  const keyOf = (t: string) => t.toLowerCase().replace(/[^a-z]/g, '').slice(0, 28)
-
-  for (const s of steps) {
-    const k = keyOf(s.action)
-    if (seen.has(k)) continue
-    seen.add(k)
-    raws.push({ title: s.action, rsiReduction: s.rsi_reduction ?? null, estSaving: s.annual_savings_estimate ?? null, source: 'engine' })
+  const projectionEmpty = { currentRsi: null, simulatedRsi: null, projectedLoss: null, totalSavings: null }
+  if (!r) return { actions: [], projection: projectionEmpty }
+  const num = (v: unknown): number | null => (typeof v === 'number' ? v : null)
+  const rem = r.insurance?.remediation as Record<string, unknown> | undefined
+  // No classification or math here. The ordered, classified, de-duplicated queue
+  // is built once by the backend (scoring_pipeline.build_remediation_priority_queue)
+  // and rendered verbatim. Rand comes ONLY from the authoritative money block
+  // (financial_impact.risk_mitigations — the same source the PDF + Financial
+  // Exposure card use); the RSI projection comes from the RSI engine.
+  const rmit = (r.insurance?.financial_impact as Record<string, unknown> | undefined)
+    ?.risk_mitigations as Record<string, unknown> | undefined
+  const projection = {
+    currentRsi: num(rem?.current_rsi),
+    simulatedRsi: num(rem?.simulated_rsi),
+    projectedLoss: num(rmit?.mitigated_annual_loss),
+    totalSavings: num(rmit?.total_potential_savings),
   }
-  for (const rec of recs) {
-    const k = keyOf(rec)
-    if (seen.has(k)) continue
-    seen.add(k)
-    raws.push({ title: rec, rsiReduction: null, estSaving: null, source: 'recommendation' })
-  }
-
-  const classify = (title: string) => {
-    // scan-quality: failed/blocked checker rescans
-    if (/failed|re-?scan|rescan|re-?run|third[_-]?party.?js|checker (failed|error)/i.test(title)) {
-      return { rank: 90, sev: 'medium' as Severity, effort: 'Low', kind: 'scan_quality' as const }
-    }
-    for (const rule of PRIORITY_RULES) {
-      if (rule.test.test(title)) return { rank: rule.rank, sev: rule.sev, effort: rule.effort, kind: 'remediation' as const }
-    }
-    return { rank: 50, sev: 'medium' as Severity, effort: 'Medium', kind: 'remediation' as const }
-  }
-
-  const actions = raws
-    .map((raw) => ({ raw, c: classify(raw.title) }))
-    .sort((a, b) => a.c.rank - b.c.rank || (b.raw.estSaving ?? 0) - (a.raw.estSaving ?? 0))
-    .map(({ raw, c }, i): RemediationAction => ({
-      rank: i + 1,
-      title: raw.title,
-      severity: c.sev,
-      rsiReduction: raw.rsiReduction,
-      estSaving: raw.estSaving,
-      effort: c.effort,
-      status: 'Open',
-      kind: c.kind,
-      source: raw.source,
-    }))
-
-  const rem = r.insurance?.remediation
-  return {
-    actions,
-    projection: {
-      currentRsi: rem?.current_rsi ?? null,
-      simulatedRsi: rem?.simulated_rsi ?? null,
-      totalSavings: rem?.total_potential_savings ?? null,
-    },
-  }
+  const queue = (rem?.priority_queue as Array<Record<string, unknown>> | undefined) ?? []
+  const actions: RemediationAction[] = queue.map((q, i) => ({
+    rank: typeof q.rank === 'number' ? q.rank : i + 1,
+    title: String(q.title ?? ''),
+    severity: normalizeSeverity(q.severity as string | undefined),
+    rsiReduction: num(q.rsi_reduction),
+    effort: String(q.effort ?? 'Medium'),
+    status: 'Open',
+    kind: q.kind === 'scan_quality' ? 'scan_quality' : 'remediation',
+    source: String(q.source ?? 'engine'),
+  }))
+  return { actions, projection }
 }
 
 // === Compliance (§24) =======================================================

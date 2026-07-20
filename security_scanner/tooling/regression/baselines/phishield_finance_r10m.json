@@ -705,6 +705,215 @@
         "most_likely": 447252
       },
       "current_rsi": 0.519,
+      "priority_queue": [
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 1,
+          "rsi_reduction": 0.15,
+          "severity": "critical",
+          "source": "engine",
+          "title": "Firewall exposed database ports (MongoDB, Redis, PostgreSQL, MySQL, etc.) \u2014 restrict to VPN/private network only."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 2,
+          "rsi_reduction": null,
+          "severity": "critical",
+          "source": "recommendation",
+          "title": "Immediately investigate and remediate the critically exposed service."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 3,
+          "rsi_reduction": 0.02,
+          "severity": "high",
+          "source": "engine",
+          "title": "Configure web server to redirect all HTTP traffic to HTTPS (301 redirect) \u2014 prevents credential interception."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 4,
+          "rsi_reduction": null,
+          "severity": "high",
+          "source": "recommendation",
+          "title": "Configure your web server to redirect all HTTP traffic to HTTPS (301 redirect)."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 5,
+          "rsi_reduction": 0.03,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Implement security headers: HSTS, Content-Security-Policy, X-Frame-Options, Permissions-Policy \u2014 prevents XSS, clickjacking, and data leakage."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 6,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 7,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 8,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures."
+        },
+        {
+          "effort": "High",
+          "kind": "remediation",
+          "rank": 9,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Implement a VPN or Zero Trust Network Access (ZTNA) solution for remote workers."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 10,
+          "rsi_reduction": 0.01,
+          "severity": "low",
+          "source": "engine",
+          "title": "Create a security.txt file at /.well-known/security.txt \u2014 establishes a vulnerability disclosure policy for responsible reporting."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 11,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to enforce email authentication."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 12,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Configure DKIM signing for outbound email and publish the public key in DNS."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 13,
+          "rsi_reduction": 0.1,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Patch critical vulnerabilities detected via version analysis (OSV.dev) \u2014 update affected software packages to latest stable versions."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 14,
+          "rsi_reduction": 0.05,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Patch high-EPSS CVEs (>50% exploitation probability within 30 days) \u2014 prioritise by EPSS score for maximum risk reduction."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 15,
+          "rsi_reduction": 0.05,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Upgrade SSL/TLS configuration \u2014 enable TLS 1.2+, disable weak ciphers. sslyze analysis shows vulnerable protocols or cipher suites."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 16,
+          "rsi_reduction": 0.05,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Investigate and resolve IP/domain blacklisting \u2014 indicates prior compromise, spam, or malware distribution."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 17,
+          "rsi_reduction": 0.02,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Deploy a CDN for DDoS resilience and improved availability \u2014 single-origin hosting is vulnerable to volumetric attacks."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 18,
+          "rsi_reduction": 0.02,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Audit risky-named subdomains (dev / staging / admin) for restricted access; reclaim or remove any dangling DNS records that point to unclaimed cloud services (subdomain takeover risk)."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 19,
+          "rsi_reduction": 0.01,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Enable DNSSEC to protect against DNS spoofing and cache poisoning attacks."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 20,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Implement a Content Security Policy to mitigate XSS attacks."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 21,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 22,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Investigate blacklist listings \u2014 likely indicates past spam, malware distribution, or compromise."
+        },
+        {
+          "effort": "Low",
+          "kind": "scan_quality",
+          "rank": 23,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on 90% of available data. A re-scan is recommended for a complete assessment."
+        }
+      ],
       "rsi_improvement": 0.441,
       "simulated_financial_impact": {
         "max": 200156,

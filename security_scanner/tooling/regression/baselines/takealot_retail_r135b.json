@@ -684,6 +684,152 @@
         "most_likely": 67728866
       },
       "current_rsi": 0.275,
+      "priority_queue": [
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 1,
+          "rsi_reduction": null,
+          "severity": "critical",
+          "source": "recommendation",
+          "title": "Immediately investigate and remediate the critically exposed service."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 2,
+          "rsi_reduction": 0.01,
+          "severity": "high",
+          "source": "engine",
+          "title": "High Tranco rank attracts more automated attacks \u2014 strengthen WAF + DDoS protection and prioritise prompt patching of public-facing vulnerabilities."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 3,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 4,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures."
+        },
+        {
+          "effort": "High",
+          "kind": "remediation",
+          "rank": 5,
+          "rsi_reduction": 0.02,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Restrict admin panel access \u2014 implement IP whitelist, VPN-only access, or move to non-standard paths."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 6,
+          "rsi_reduction": 0.01,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Update privacy policy to cover all POPIA/GDPR required sections \u2014 failure to comply risks regulatory fines up to 2% of annual turnover."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 7,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Update your privacy policy to include all required sections for POPIA/GDPR compliance."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 8,
+          "rsi_reduction": 0.05,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Force password resets for all leaked credentials and enable MFA. Breached credentials enable credential stuffing and account takeover attacks."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 9,
+          "rsi_reduction": 0.05,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Investigate and resolve IP/domain blacklisting \u2014 indicates prior compromise, spam, or malware distribution."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 10,
+          "rsi_reduction": 0.02,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Deploy a CDN for DDoS resilience and improved availability \u2014 single-origin hosting is vulnerable to volumetric attacks."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 11,
+          "rsi_reduction": 0.02,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Audit risky-named subdomains (dev / staging / admin) for restricted access; reclaim or remove any dangling DNS records that point to unclaimed cloud services (subdomain takeover risk)."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 12,
+          "rsi_reduction": 0.01,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Enable DNSSEC to protect against DNS spoofing and cache poisoning attacks."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 13,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 14,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Immediately restrict access to sensitive files. Audit your web server configuration and .htaccess rules."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 15,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Notify affected users and enforce mandatory password reset for all leaked accounts."
+        },
+        {
+          "effort": "Medium",
+          "kind": "remediation",
+          "rank": 16,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "Investigate blacklist listings \u2014 likely indicates past spam, malware distribution, or compromise."
+        }
+      ],
       "rsi_improvement": 0.19,
       "simulated_financial_impact": {
         "max": 46200793,
