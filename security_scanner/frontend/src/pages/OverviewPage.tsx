@@ -27,7 +27,7 @@ export default function OverviewPage() {
   return (
     <>
       <CategoryTabs />
-      <ExecutiveStrip r={r} />
+      <ExecutiveStrip r={r} onOpenCritical={() => setDrawer({ kind: 'critical' })} />
       <CoverageBanner r={r} onReview={openCat} />
 
       <div className={styles.mainGrid}>
@@ -56,7 +56,7 @@ export default function OverviewPage() {
       </div>
 
       <Footer />
-      <EvidenceDrawer target={drawer} onClose={() => setDrawer(null)} />
+      <EvidenceDrawer target={drawer} onClose={() => setDrawer(null)} onNavigate={setDrawer} />
     </>
   )
 }

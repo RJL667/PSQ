@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { getResults, fmtDateTime, fmtDate } from '../../data/results'
-import { cat, CATEGORY_LABELS, getCoverageSummary } from '../../data/selectors'
+import { cat, CATEGORY_LABELS, getCoverageSummary, getCriticalFindings } from '../../data/selectors'
 import type { VulnRecord } from '../../data/selectors'
 import { normalizeState, isConclusive, inconclusiveLabel } from '../../data/checkerState'
-import { StatusBadge, SeverityBadge } from '../primitives/Status'
+import { StatusBadge, SeverityBadge, SeverityDot } from '../primitives/Status'
 import styles from './EvidenceDrawer.module.css'
 
 export type DrawerTarget =
   | { kind: 'category' | 'coverage'; id: string }
   | { kind: 'cve'; cve: VulnRecord }
+  | { kind: 'critical' }
 type Tab = 'overview' | 'evidence' | 'technical'
 
 const MATURITY_LABEL: Record<string, string> = {
@@ -150,7 +151,45 @@ function CveBody({ v, tab }: { v: VulnRecord; tab: Tab }) {
   )
 }
 
-export default function EvidenceDrawer({ target, onClose }: { target: DrawerTarget | null; onClose: () => void }) {
+// Breakdown of the hero-strip "N critical findings" badge, for the underwriter:
+// each CRITICAL-severity source, its count, what it means, and a drill-through to
+// the checker's own evidence. Deliberately reminds the reader this tally is
+// independent of the posture score.
+function CriticalFindingsBody({ tab, onNavigate }: { tab: Tab; onNavigate?: (t: DrawerTarget) => void }) {
+  const summary = getCriticalFindings(getResults())
+  if (tab === 'technical') {
+    return <pre className={styles.raw}>{JSON.stringify(getResults()?.insurance?.critical_findings, null, 2)}</pre>
+  }
+  return (
+    <div className={styles.section}>
+      <p className={styles.lead}>
+        These are the {summary.total} individual CRITICAL-severity exposures counted across every checker.
+        This tally is independent of the posture-based Overall Risk Score — a well-defended perimeter can
+        still carry a large number of leaked credentials or dark-web exposures, which is exactly what this
+        surfaces for the underwriter.
+      </p>
+      <ul className={styles.critList}>
+        {summary.items.map((it) => (
+          <li key={it.key} className={styles.critItem}>
+            <span className={styles.critCount}><SeverityDot severity="critical" />{it.count}</span>
+            <div className={styles.critMeta}>
+              <div className={styles.critLabel}>{it.label}</div>
+              {it.description && <div className={styles.critDesc}>{it.description}</div>}
+              {it.category && onNavigate && (
+                <button className={styles.critLink} onClick={() => onNavigate({ kind: 'category', id: it.category! })}>
+                  View evidence in {CATEGORY_LABELS[it.category] ?? it.category} &rarr;
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+        {summary.items.length === 0 && <p className={styles.lead}>No critical-severity findings were recorded for this scan.</p>}
+      </ul>
+    </div>
+  )
+}
+
+export default function EvidenceDrawer({ target, onClose, onNavigate }: { target: DrawerTarget | null; onClose: () => void; onNavigate?: (t: DrawerTarget) => void }) {
   const [tab, setTab] = useState<Tab>('overview')
   useEffect(() => { setTab('overview') }, [target])
   useEffect(() => {
@@ -164,13 +203,15 @@ export default function EvidenceDrawer({ target, onClose }: { target: DrawerTarg
   const r = getResults()
   const cveRec = target.kind === 'cve' ? target.cve : null
   const isCoverage = target.kind === 'coverage'
+  const isCritical = target.kind === 'critical'
   const c = target.kind === 'category' ? cat(r, target.id) : undefined
   const title = target.kind === 'cve' ? (target.cve.cve ?? target.cve.id)
     : target.kind === 'coverage' ? 'WAF / Bot-Manager Intervention'
+    : target.kind === 'critical' ? 'Critical Findings'
     : (CATEGORY_LABELS[target.id] ?? target.id.replace(/_/g, ' '))
   const state = isCoverage ? 'blocked' : normalizeState(c?.status)
   const stateLabel = isCoverage ? 'Blocked' : (c && !isConclusive(c) ? inconclusiveLabel(c.status as string) : undefined)
-  const tabs: Tab[] = cveRec ? ['overview', 'technical'] : ['overview', 'evidence', 'technical']
+  const tabs: Tab[] = (cveRec || isCritical) ? ['overview', 'technical'] : ['overview', 'evidence', 'technical']
 
   return createPortal(
     <div className={styles.overlay} onMouseDown={onClose}>
@@ -182,6 +223,7 @@ export default function EvidenceDrawer({ target, onClose }: { target: DrawerTarg
               ? (cveRec.severity === 'unknown'
                   ? <StatusBadge state="not_assessed" label="Unknown severity" />
                   : <SeverityBadge severity={cveRec.severity} />)
+              : isCritical ? <SeverityBadge severity="critical" />
               : <StatusBadge state={state} label={stateLabel} />}
           </div>
           <button className={styles.close} onClick={onClose} aria-label="Close"><X size={18} /></button>
@@ -197,6 +239,7 @@ export default function EvidenceDrawer({ target, onClose }: { target: DrawerTarg
         <div className={styles.scroll}>
           {cveRec ? <CveBody v={cveRec} tab={tab} />
             : isCoverage ? <CoverageBody tab={tab} />
+            : isCritical ? <CriticalFindingsBody tab={tab} onNavigate={onNavigate} />
             : <CategoryBody id={(target as { id: string }).id} tab={tab} />}
         </div>
         <footer className={styles.foot}>

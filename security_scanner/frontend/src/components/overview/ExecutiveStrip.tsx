@@ -1,4 +1,4 @@
-import { Info, TrendingUp, ShieldCheck, Coins } from 'lucide-react'
+import { Info, TrendingUp, ShieldCheck, Coins, ChevronRight } from 'lucide-react'
 import Panel from '../primitives/Panel'
 import EmptyState from '../primitives/EmptyState'
 import { SeverityDot } from '../primitives/Status'
@@ -15,7 +15,7 @@ function Tip({ text }: { text: string }) {
   return <span className={styles.tip} tabIndex={0} role="note" aria-label={text}><Info size={12} /><span className={styles.tipBody}>{text}</span></span>
 }
 
-export default function ExecutiveStrip({ r }: { r: Results }) {
+export default function ExecutiveStrip({ r, onOpenCritical }: { r: Results; onOpenCritical?: () => void }) {
   const oa = getOverallAssessment(r)!
   const rsi = getRsiSummary(r)
   const dbi = getDbiSummary(r)
@@ -31,10 +31,12 @@ export default function ExecutiveStrip({ r }: { r: Results }) {
         <div className={styles.gaugeBox}>
           <OverallRiskGauge score={oa.score} max={oa.max} color={oa.band.color} level={`${oa.band.label}`} />
           {oa.criticalFindings != null && oa.criticalFindings > 0 && (
-            <div className={styles.critNote}>
+            <button type="button" className={styles.critNote} onClick={onOpenCritical}
+              aria-label={`View breakdown of ${oa.criticalFindings} critical findings`}>
               <SeverityDot severity="critical" />
               {oa.criticalFindings} critical finding{oa.criticalFindings === 1 ? '' : 's'}
-            </div>
+              <ChevronRight size={12} className={styles.critChev} />
+            </button>
           )}
         </div>
       </Panel>

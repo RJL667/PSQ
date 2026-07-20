@@ -50,6 +50,46 @@ export function getOverallAssessment(r: Results | null): OverallAssessment | nul
   }
 }
 
+// === Critical-findings breakdown (hero-strip badge -> drawer) ===============
+export interface CriticalFindingItem {
+  key: string
+  label: string
+  description: string
+  count: number
+  category?: string // drill target (results.categories id) for the evidence drawer
+}
+export interface CriticalFindingsSummary { total: number; items: CriticalFindingItem[] }
+
+// Maps each peer_benchmarking.count_critical_findings() source to a UW-facing
+// label, a one-line meaning, and the checker it drills into. Keep in step with
+// that function's breakdown keys.
+const CRIT_SOURCE_META: Record<string, { label: string; description: string; category?: string }> = {
+  shodan_vulns:          { label: 'Critical / KEV-listed CVEs', description: 'Known-exploited or critical-severity vulnerabilities on internet-facing services.', category: 'shodan_vulns' },
+  exposed_admin:         { label: 'Exposed admin panels', description: 'Reachable admin or sensitive paths — high-value targets for unauthorised access.', category: 'exposed_admin' },
+  high_risk_protocols:   { label: 'High-risk exposed ports', description: 'Internet-facing database, RDP or file-transfer ports give a direct path to business data.', category: 'high_risk_protocols' },
+  info_disclosure:       { label: 'Critical file exposures', description: 'Sensitive files or endpoints reachable on the public internet.', category: 'info_disclosure' },
+  ssl:                   { label: 'SSL — F grade or expired', description: 'Failing or expired TLS: traffic can be intercepted and browser trust is broken.', category: 'ssl' },
+  dehashed_plaintext:    { label: 'Leaked plaintext passwords', description: 'Credentials exposed in the clear in breach dumps — enable credential-stuffing and account takeover.', category: 'dehashed' },
+  hudson_rock:           { label: 'Infostealer-compromised devices', description: 'Employee or user devices with active infostealer malware — live credential and session theft.', category: 'hudson_rock' },
+  external_ips_max_risk: { label: 'Maximum-risk hosts', description: 'External hosts scored at maximum risk on the attack surface.', category: 'external_ips' },
+}
+
+// Shapes insurance.critical_findings.breakdown into a sorted, labelled list.
+// Purely a renderer helper — the counts are computed by the backend.
+export function getCriticalFindings(r: Results | null): CriticalFindingsSummary {
+  const cf = r?.insurance?.critical_findings
+  if (!cf || typeof cf === 'number') return { total: typeof cf === 'number' ? cf : 0, items: [] }
+  const breakdown = cf.breakdown ?? {}
+  const items = Object.entries(breakdown)
+    .filter(([, n]) => (n as number) > 0)
+    .map(([key, n]) => {
+      const meta = CRIT_SOURCE_META[key] ?? { label: key.replace(/_/g, ' '), description: '' }
+      return { key, label: meta.label, description: meta.description, count: n as number, category: meta.category }
+    })
+    .sort((a, b) => b.count - a.count)
+  return { total: cf.total ?? items.reduce((s, i) => s + i.count, 0), items }
+}
+
 // === Coverage / WAF intervention (§5, §7) ===================================
 
 export interface CoverageSummary {
@@ -1175,6 +1215,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   fraudulent_domains: 'Lookalike Domains', related_domains: 'Related Domains',
   dependency_manifests: 'Dependency Manifests', cms_plugin_sbom: 'CMS Plugin Surface',
   vendor_breach: 'Vendor Breach', info_disclosure: 'Information Disclosure',
+  hudson_rock: 'Infostealer Intelligence', external_ips: 'External IPs',
   tech_stack: 'Technology Stack', domain_intel: 'Domain Intelligence',
   securitytrails: 'SecurityTrails DNS', security_policy: 'Security Policy & VDP',
   payment_security: 'Payment Security', privacy_compliance: 'Privacy Compliance',
