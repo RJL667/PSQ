@@ -568,11 +568,15 @@ def credential_export():
     domain = str(data.get("domain", "")).strip().lower()
     domain = domain.removeprefix("https://").removeprefix("http://").split("/")[0]
     consent = bool(data.get("consent"))
+    authorised_by = str(data.get("authorised_by", "")).strip()
+    consent_ref = str(data.get("consent_ref", "")).strip()
     age_pub = (data.get("age_public_key") or "").strip() or None
     passphrase = (data.get("passphrase") or "").strip() or None
-    if not domain or not consent:
+    if not domain or not consent or not authorised_by:
         return jsonify({"status": "error",
-                        "error": "domain and explicit consent:true are required"}), 400
+                        "error": "domain, explicit consent:true, and authorised_by "
+                                 "(the authorising broker/user, for the FAIS/POPIA "
+                                 "audit trail) are required"}), 400
     if not DEHASHED_API_KEY:
         return jsonify({"status": "error", "error": "DeHashed not configured"}), 503
     if not (age_pub or passphrase):
@@ -603,11 +607,68 @@ def credential_export():
             source_meta=source_meta, leak_references=leak_references)
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)[:200]}), 500
+    # Deliver via a ONE-TIME, expiring link (Manual 6.4 step 4). The encrypted blob
+    # is held briefly in object storage under an unguessable random token — it is
+    # already encrypted to the client's key, so the scanner cannot read it — and is
+    # deleted on first download or once expired. Write the authorisation audit row.
+    import secrets
+    from datetime import timedelta
+    from object_store import make_object_store
+    token = secrets.token_urlsafe(24)
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+    store = make_object_store()
+    store.put(f"cred_exports/{token}.bin", blob, "application/octet-stream")
+    store.put(f"cred_exports/{token}.meta",
+              json.dumps({"filename": fname, "method": method,
+                          "record_count": n, "expires_at": expires_at}).encode("utf-8"),
+              "application/json")
+    try:
+        scanner_db.record_credential_export(
+            secrets.token_hex(8), domain, authorised_by, consent, consent_ref,
+            method, n, token, expires_at, request.remote_addr or "")
+    except Exception:
+        pass  # audit is best-effort; never blocks a consented export
+    return jsonify({
+        "status": "ready",
+        "download_url": f"{request.script_root}/api/credential-export/download/{token}",
+        "filename": fname, "method": method, "record_count": n,
+        "expires_at": expires_at, "expires_in_minutes": 15,
+    })
+
+
+@app.route("/api/credential-export/download/<token>", methods=["GET"])
+def credential_export_download(token: str):
+    """One-time, expiring retrieval of an encrypted credential export (Manual 6.4
+    step 4). The token IS the bearer credential (unguessable, single-use); the blob
+    is deleted on first download or once expired, so it can never be fetched twice."""
+    from object_store import make_object_store
     from flask import Response
+    store = make_object_store()
+    meta_raw = store.get(f"cred_exports/{token}.meta")
+    if not meta_raw:
+        return jsonify({"status": "error", "error": "This link is invalid, has "
+                        "already been used, or has expired."}), 404
+    try:
+        meta = json.loads(meta_raw)
+        expired = datetime.now(timezone.utc) >= datetime.fromisoformat(meta["expires_at"])
+    except Exception:
+        meta, expired = {}, True
+    # Single-use: delete BOTH objects up front so the link cannot be reused even on
+    # a concurrent request.
+    store.delete(f"cred_exports/{token}.meta")
+    blob = None if expired else store.get(f"cred_exports/{token}.bin")
+    store.delete(f"cred_exports/{token}.bin")
+    if expired:
+        return jsonify({"status": "error", "error": "This download link has expired."}), 410
+    if blob is None:
+        return jsonify({"status": "error", "error": "This link has already been used."}), 404
+    try:
+        scanner_db.mark_export_downloaded(token)
+    except Exception:
+        pass
     return Response(blob, mimetype="application/octet-stream", headers={
-        "Content-Disposition": f"attachment; filename={fname}",
-        "X-Export-Method": method, "X-Record-Count": str(n),
-        "Cache-Control": "no-store"})
+        "Content-Disposition": f"attachment; filename={meta.get('filename', 'credentials.age')}",
+        "X-Export-Method": meta.get("method", ""), "Cache-Control": "no-store"})
 
 
 @app.route("/api/age-check")

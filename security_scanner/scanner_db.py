@@ -180,6 +180,27 @@ MIGRATIONS = [
             PRIMARY KEY (provider, day)
         )""",
     ]),
+    ("0004_credential_export_audit", [
+        # Manual 6.4 authorisation gate / FAIS-POPIA audit trail: one row per
+        # encrypted-credential-export request. No credential data is stored here —
+        # only who authorised it, when, for which domain, and whether the one-time
+        # link was collected.
+        """CREATE TABLE IF NOT EXISTS credential_export_audit (
+            id            TEXT PRIMARY KEY,
+            domain        TEXT NOT NULL,
+            authorised_by TEXT,
+            consent       INTEGER DEFAULT 0,
+            consent_ref   TEXT,
+            method        TEXT,
+            record_count  INTEGER DEFAULT 0,
+            token         TEXT,
+            created_at    TEXT NOT NULL,
+            expires_at    TEXT,
+            downloaded_at TEXT,
+            client_ip     TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_credexport_domain ON credential_export_audit(domain)",
+    ]),
 ]
 
 
@@ -332,6 +353,24 @@ def fetch_scan(scan_id: str) -> "dict | None":
 def latest_completed_for_domain(domain: str) -> "dict | None":
     return _run("SELECT * FROM scans WHERE domain=? AND status='completed' "
                 "ORDER BY created_at DESC LIMIT 1", (domain,), fetch="one")
+
+
+def record_credential_export(audit_id: str, domain: str, authorised_by: str,
+                             consent: bool, consent_ref: str, method: str,
+                             record_count: int, token: str, expires_at: str,
+                             client_ip: str) -> None:
+    """Manual 6.4 authorisation-gate audit row. Records ONLY the authorisation
+    trail (who / when / which domain / one-time token) — never credential data."""
+    _run("INSERT INTO credential_export_audit (id, domain, authorised_by, consent, "
+         "consent_ref, method, record_count, token, created_at, expires_at, client_ip) "
+         "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+         (audit_id, domain, authorised_by, 1 if consent else 0, consent_ref, method,
+          int(record_count or 0), token, _now(), expires_at, client_ip))
+
+
+def mark_export_downloaded(token: str) -> None:
+    _run("UPDATE credential_export_audit SET downloaded_at=? WHERE token=?",
+         (_now(), token))
 
 
 def scan_history(domain: str, limit: int = 10) -> list:

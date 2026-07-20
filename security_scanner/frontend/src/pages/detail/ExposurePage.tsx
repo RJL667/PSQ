@@ -2,6 +2,7 @@ import Panel from '../../components/primitives/Panel'
 import { PageTitle, CheckerHeader, KV, IssueList, DetailGrid } from '../../components/detail/parts'
 import { getResults } from '../../data/results'
 import { cat, CATEGORY_LABELS } from '../../data/selectors'
+import CredentialExportPortal from '../../components/overview/CredentialExportPortal'
 import type { Results, CategoryBase } from '../../types/results'
 import type { KVRow } from '../../components/detail/parts'
 import styles from './detail.module.css'
@@ -38,6 +39,7 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
             { label: 'Passwords present', value: (dehashed?.has_passwords as boolean) ? 'Yes' : 'No' },
           ]} />
           <IssueList issues={dehashed?.issues as string[]} />
+          {((dehashed?.total_entries as number) ?? 0) > 0 && <CredentialExportPortal />}
         </Panel>
 
         <Panel title="VirusTotal Reputation" action={<CheckerHeader category={vt} />}>
