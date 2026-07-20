@@ -37,8 +37,11 @@ def pdf_url(scan_id: str, tier: str, expires: int = 3600) -> Optional[str]:
 def render_and_store(scan_id: str, tier: str, results: dict) -> bytes:
     """Render one tier and persist it to object storage. Returns the bytes."""
     from pdf_report import generate_pdf
+    from credential_redaction import redact_credentials
     tier = tier if tier in TIERS else "full"
-    data = dict(results)
+    # Reports show only masked breached-credential accounts (Manual 6.4); the
+    # unmasked list is delivered exclusively via the encrypted export.
+    data = redact_credentials(results)
     data["scan_id"] = scan_id
     pdf_bytes = generate_pdf(data, report_type=tier)
     try:

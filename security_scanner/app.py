@@ -789,7 +789,11 @@ def get_scan(scan_id: str):
         error_data = json.loads(row["results"] or "{}")
         return jsonify({"scan_id": scan_id, "status": "failed", "error": error_data.get("error")}), 500
 
-    results = json.loads(row["results"])
+    # Mask breached-credential identifiers before the results leave the server
+    # (Manual 6.4 — dashboard/export show masked accounts; unmasked detail is
+    # delivered only via the encrypted credential export).
+    from credential_redaction import redact_credentials
+    results = redact_credentials(json.loads(row["results"]))
     results["scan_id"] = scan_id
     return jsonify(results)
 
@@ -904,9 +908,12 @@ def view_results(scan_id: str):
     row = fetch_scan(scan_id)
     if not row:
         abort(404)
+    # Mask breached-credential identifiers before injection into window.RESULTS
+    # (so the dashboard page source never carries raw emails). See Manual 6.4.
+    from credential_redaction import redact_credentials
     results = None
     if row["status"] == "completed" and row["results"]:
-        results = json.loads(row["results"])
+        results = redact_credentials(json.loads(row["results"]))
     return render_template(
         "results.html",
         scan_id=scan_id,
