@@ -154,6 +154,41 @@ def build(doc):
         "password resets for all accounts and enable MFA organisation-wide."
     )
 
+    add_bold_body(
+        doc,
+        "Web-corroborated breach discovery (beyond HIBP): ",
+        "HIBP's breaches-by-domain catalogue only fires when a company is itself "
+        "a named, catalogued victim, so it returns zero for the great majority of "
+        "South African companies even when they have been breached (for example a "
+        "3.6-million-record retail-pharmacy breach that made national headlines "
+        "but was never added to HIBP). To close that gap the scanner corroborates "
+        "breach history from dated open-source intelligence: reputable news "
+        "coverage (via Google News) and public ransomware leak-site listings. A "
+        "deterministic gate keeps this precise, an item counts only when the "
+        "company name AND a breach term both appear in the headline, so namesakes "
+        "and generic security news are dropped."
+    )
+    add_body(
+        doc,
+        "The retrieved candidates are then judged by a large language model "
+        "(Claude Sonnet 5), which confirms which describe a real breach of THIS "
+        "specific company, clusters coverage of the same event into a single "
+        "incident, extracts the date the breach actually occurred (not merely the "
+        "article date), and grades each incident's confidence. The result is a "
+        "dated breach timeline that HIBP alone cannot produce, this matters "
+        "because a recent, confirmed breach materially changes cyber posture, "
+        "whereas a decade-old one is largely historical."
+    )
+    add_note(
+        doc,
+        "Conservative by design, like the credential confidence column. A "
+        "confirmed breach requires a ransomware leak-site listing or two or more "
+        "independent reputable outlets; a single ambiguous mention is graded "
+        "low-confidence and is surfaced as a monitoring signal, not asserted as a "
+        "breach. If the language-model layer is unavailable, the check degrades "
+        "gracefully to the deterministic verdict rather than failing."
+    )
+
     # ══════════════════════════════════════════════════════════════════════
     # 4.6.2  IP/Domain Reputation (DNSBL)
     # ══════════════════════════════════════════════════════════════════════
