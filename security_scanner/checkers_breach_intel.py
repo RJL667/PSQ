@@ -49,9 +49,14 @@ UA = "Mozilla/5.0 (compatible; PhishieldBreachScan/1.0; +https://veilguard.phish
 # Breach history barely changes; re-researching every rescan just burns credits.
 CACHE_TTL_S = float(os.environ.get("BREACH_INTEL_CACHE_TTL_S", 14 * 24 * 3600))
 CACHE_DIR = _HERE / "scans" / "_cache" / "breach_intel"
-# "quick" (1 round) is the live-scan default: it still grounds, reads pages and
-# synthesizes, but fits comfortably inside the scanner's 180s phase budget.
-DEPTH = os.environ.get("BREACH_INTEL_DEPTH", "quick")
+# Depth is read by the discovery layer from this same env var. MEASURED on the VM
+# (2026-07-27, dischem.co.za): quick = 3 Gemini calls, 36s, $0.0160; deep = 5
+# calls, 47s, $0.0168. Grounding is billed PER QUERY and is called once either
+# way, so it is ~87% of the cost and deep buys a second search-reason-search round
+# plus more page reads for about 5% more money and 11s — comfortably inside the
+# 130s checker budget. Hence deep is the default; set BREACH_INTEL_DEPTH=quick to
+# trade research depth for latency.
+DEPTH = os.environ.get("BREACH_INTEL_DEPTH", "deep")
 TIMEOUT_S = float(os.environ.get("BREACH_INTEL_TIMEOUT_S", "110"))
 
 # Boilerplate that clutters <title> tags; stripped when deriving a company name.
@@ -240,6 +245,10 @@ class BreachIntelChecker:
             "sources": (found.get("engine_sources") or [])[:10],
             "leak_site_hits": len(found.get("ransomware_hits") or []),
             "sources_checked": found.get("sources_checked") or [],
+            # Measured, not estimated: real token counts from each Gemini response
+            # plus the per-query grounding fee. Lets a book-wide sweep be costed
+            # from actual scans instead of a guess.
+            "cost": found.get("cost") or {},
         })
 
         for inc in incidents:

@@ -224,6 +224,49 @@ def _incident_dates(incidents: list) -> list:
 
 
 
+# ── cost accounting ──────────────────────────────────────────────────────────
+# Published Gemini pricing (USD per 1M tokens) + the per-query grounding fee.
+# Update alongside GEMINI_EXTRACT_MODEL. Grounding is billed PER SEARCH QUERY,
+# which dominates: the token spend on a breach lookup is a rounding error next to
+# it, so the honest cost driver is "how many grounded searches did we run".
+_PRICE_USD_PER_1M = {"gemini-2.5-flash": (0.30, 2.50),        # (input, output)
+                     "gemini-3.1-flash-lite": (0.10, 0.40),
+                     "gemini-flash-latest": (0.30, 2.50)}
+GROUNDING_USD_PER_QUERY = float(os.environ.get("GEMINI_GROUNDING_USD", "0.014"))
+_USAGE: list[dict] = []
+
+
+def _record_usage(stage: str, model: str, um: dict) -> None:
+    """Accumulate token usage so a scan can report what it actually cost."""
+    if not um:
+        return
+    _USAGE.append({"stage": stage, "model": model,
+                   "input": int(um.get("promptTokenCount") or 0),
+                   "output": int(um.get("candidatesTokenCount") or 0),
+                   "total": int(um.get("totalTokenCount") or 0)})
+
+
+def cost_report(grounded_queries: int = 0) -> dict:
+    """Measured cost of the Gemini calls recorded so far, in USD and ZAR."""
+    tok_usd = 0.0
+    for u in _USAGE:
+        pin, pout = _PRICE_USD_PER_1M.get(u["model"], (0.30, 2.50))
+        tok_usd += u["input"] / 1e6 * pin + u["output"] / 1e6 * pout
+    ground_usd = grounded_queries * GROUNDING_USD_PER_QUERY
+    usd = tok_usd + ground_usd
+    zar_rate = float(os.environ.get("USD_ZAR", "18.5"))
+    return {
+        "calls": list(_USAGE),
+        "token_input": sum(u["input"] for u in _USAGE),
+        "token_output": sum(u["output"] for u in _USAGE),
+        "token_cost_usd": round(tok_usd, 6),
+        "grounded_queries": grounded_queries,
+        "grounding_cost_usd": round(ground_usd, 6),
+        "total_usd": round(usd, 6),
+        "total_zar": round(usd * zar_rate, 4),
+    }
+
+
 def _gemini_extract(answer: str, sources: list, company: str, domain: str):
     """Turn the engine's cited prose answer into the scanner's incident schema.
 
@@ -293,7 +336,9 @@ def _gemini_extract(answer: str, sources: list, company: str, domain: str):
         if r.status_code != 200:
             print(f"[extract] Gemini HTTP {r.status_code}: {r.text[:180]}", file=sys.stderr)
             return None
-        txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        body = r.json()
+        _record_usage("extract", GEMINI_EXTRACT_MODEL, body.get("usageMetadata") or {})
+        txt = body["candidates"][0]["content"]["parts"][0]["text"]
         return json.loads(txt)
     except Exception as e:
         print(f"[extract] {type(e).__name__}: {e}", file=sys.stderr)
@@ -328,7 +373,9 @@ def judge_with_deepsearch(company: str, domain: str):
         "cause, and whether a regulator took action. If there is no evidence this "
         "specific company was breached, say so plainly."
     )
-    res = deep_search(query, depth="deep")
+    res = deep_search(query, depth=os.environ.get("BREACH_INTEL_DEPTH", "deep"))
+    for c in (res.get("gemini_calls") or []):        # engine-side token spend
+        _USAGE.append(c)
     answer, sources = res.get("answer") or "", res.get("sources") or []
     if res.get("error"):
         print(f"[deepsearch] {res['error']}", file=sys.stderr)
@@ -349,6 +396,11 @@ def judge_with_deepsearch(company: str, domain: str):
                            "provider": s.get("provider") or s.get("providers")}
                           for s in picked[:12]]
     parsed["_providers"] = res.get("providers_used") or []
+    # Grounding is billed per SEARCH QUERY and dominates the token spend, so the
+    # honest unit is "grounded queries run". The engine calls grounding once per
+    # web_answer invocation, and only when the google provider participated.
+    parsed["_cost"] = cost_report(
+        grounded_queries=1 if "google" in (res.get("providers_used") or []) else 0)
     return parsed
 
 
@@ -434,7 +486,7 @@ def discover(company: str, domain: str = "", aliases: list[str] | None = None) -
     # Judgment layer (deep-search answer engine): authoritative when it runs.
     judged = judge_with_deepsearch(company, domain)
     incidents: list = []
-    answer, engine_sources, engine_providers = "", [], []
+    answer, engine_sources, engine_providers, cost = "", [], [], {}
     if judged is not None:
         judgment = "deepsearch"
         verdict = judged.get("verdict") or det_verdict
@@ -442,6 +494,7 @@ def discover(company: str, domain: str = "", aliases: list[str] | None = None) -
         answer = judged.get("_answer") or ""
         engine_sources = judged.get("_sources") or []
         engine_providers = judged.get("_providers") or []
+        cost = judged.get("_cost") or {}
         dated = _incident_dates(incidents) or det_dated
         confidence = {"confirmed": "high", "reported": "medium",
                       "possible": "low", "none": "none"}.get(verdict, det_conf)
@@ -472,6 +525,7 @@ def discover(company: str, domain: str = "", aliases: list[str] | None = None) -
         "incidents": incidents,
         "narrative": answer,
         "engine_sources": engine_sources,
+        "cost": cost,
         "news_hits": [{**h, "date": h["date"].date().isoformat() if h["date"] else None} for h in news_hits],
         "ransomware_hits": [{**v, "date": v["date"].isoformat() if v["date"] else None} for v in rw_hits],
         "reputable_source_count": n_rep,

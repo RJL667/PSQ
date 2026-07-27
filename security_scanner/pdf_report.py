@@ -35,6 +35,7 @@ from pdf_helpers import (
 from pdf_cards import (
     cat_ssl, cat_email, cat_email_hardening, cat_headers, cat_waf, cat_dns,
     cat_hrp, cat_cloud, cat_vpn, origin_discovery_block, cat_breaches,
+    cat_breach_intel,
     cat_dnsbl, cat_admin, cat_subdomains, cat_tech, cat_domain,
     cat_security_policy, cat_glasswing, cat_payment, cat_shodan, cat_dehashed,
     cat_hudson_rock, cat_intelx, cat_credential_risk, cat_virustotal,
@@ -2160,7 +2161,15 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         story += origin_discovery_block(cats, S)
 
         # ── Exposure & Reputation ───────────────────────────────────────────
-        story += section_with_first_card("EXPOSURE & REPUTATION", S, cat_breaches(cats, S))
+        # Researched breach history leads the section: a dated, confirmed prior
+        # breach is the most consequential item in it, and unlike HIBP it is
+        # usually the only place a real corporate incident surfaces at all.
+        _bi_card = cat_breach_intel(cats, S)
+        if _bi_card:
+            story += section_with_first_card("EXPOSURE & REPUTATION", S, _bi_card)
+            story += cat_breaches(cats, S)
+        else:
+            story += section_with_first_card("EXPOSURE & REPUTATION", S, cat_breaches(cats, S))
         story += cat_dnsbl(cats, S)
         story += cat_admin(cats, S)
         story += cat_subdomains(cats, S)

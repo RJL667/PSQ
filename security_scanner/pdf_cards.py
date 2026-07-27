@@ -627,6 +627,99 @@ def origin_discovery_block(d, S, silent_when_absent=False):
     return parts
 
 
+def cat_breach_intel(d, S):
+    """Researched breach history (SCN-040/041).
+
+    Leads with WHEN, because recency is what drives the weighting and it is the
+    first thing an underwriter asks. Critically, an UNASSESSED result (the
+    web-search key was missing, rotated or unfunded) is rendered as amber "not
+    assessed" with an explicit caveat — never as a clean record. An absence of
+    evidence produced by an outage is not evidence of absence, and on a report
+    that distinction is the difference between a defensible file and a wrong one.
+    """
+    bi = d.get("breach_intel") or {}
+    if not bi:
+        return []
+    status = bi.get("status")
+    verdict = str(bi.get("verdict") or "unknown")
+    incidents = bi.get("incidents") or []
+    months = bi.get("months_since_most_recent")
+    assessed = status == "completed"
+
+    if not assessed:
+        col = _tl(False, True)                    # amber: unknown, not clean
+        headline = "Not assessed"
+    elif verdict in ("confirmed", "reported"):
+        col = _tl(False, months is not None and months > 36)
+        headline = f"{verdict.title()} breach"
+    elif verdict == "possible":
+        col = _tl(False, True)
+        headline = "Possible — unconfirmed"
+    else:
+        col = _tl(True, True)
+        headline = "No breach found"
+
+    rows = [
+        ("Scope", "Open-source research: multi-provider search, source pages read and cited"),
+        ("Verdict", headline + (f" ({bi.get('confidence')} confidence)"
+                                if assessed and bi.get("confidence") not in (None, "none") else "")),
+        ("Most recent incident", bi.get("most_recent_breach") or "—"),
+        ("Time since incident", f"{months} months" if months is not None else "—"),
+        ("Distinct incidents", bi.get("incident_count", 0)),
+        ("Researched as", bi.get("company_name") or "—"),
+    ]
+    for inc in incidents[:4]:
+        when = inc.get("incident_date") or inc.get("disclosure_date") or "date unestablished"
+        detail = " · ".join(x for x in [
+            (inc.get("breach_type") or "").replace("_", " ") or None,
+            f"{inc['records_affected']} records" if inc.get("records_affected") else None,
+            inc.get("root_cause")] if x)
+        rows.append((f"Incident {when}", detail or inc.get("title", "—")))
+
+    if not assessed:
+        fb = ("Breach-history research did not run for this scan, so a prior breach can be "
+              "neither confirmed nor ruled out. This is NOT a clean record — treat the "
+              "breach history as unassessed and, if it is material to the risk, re-run the "
+              "scan once the web-search key is restored.")
+    elif verdict in ("confirmed", "reported"):
+        fb = (f"A prior breach was established from open sources and dated. Recency is what "
+              f"matters for pricing: this incident is "
+              f"{('roughly ' + str(round(months)) + ' months old') if months is not None else 'of unestablished date'}"
+              ". Confirm with the insured what was remediated, and whether the root cause is closed.")
+    elif verdict == "possible":
+        fb = ("Ambiguous references were found but nothing rose to a corroborated breach. "
+              "Treat as a monitoring signal, not as evidence of an incident.")
+    else:
+        fb = ("No corroborated breach was found in open sources. Note this is a research "
+              "result, not a guarantee: an undisclosed breach leaves no public trace.")
+
+    parts = build_cat_card("Breach History (Researched)", col, headline,
+                           rows, bi.get("issues", []), S, fallback=fb)
+
+    # build_cat_card only renders `fallback` when the issues list is EMPTY. For the
+    # unassessed state the caveat is the single most important line on the card —
+    # it is what stops a reader treating an outage as a clean record — so it is
+    # emitted unconditionally rather than left to that fallback slot.
+    if not assessed:
+        parts.append(Paragraph(f"<b>Important:</b> {fb}", S["body"]))
+        parts.append(Spacer(1, 2 * mm))
+
+    srcs = [s for s in (bi.get("sources") or []) if s.get("url")][:4]
+    if srcs:
+        parts.append(Paragraph("<b>Sources cited</b>", S["cat_title"]))
+        parts.append(Spacer(1, 1 * mm))
+        for s in srcs:
+            # Escape for reportlab's mini-HTML: a stray & or < in a URL/title
+            # would otherwise abort the paragraph parse.
+            def _e(v):
+                return (str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+            parts.append(Paragraph(
+                f"• {_e(str(s.get('title') or s.get('url'))[:70])} — "
+                f"<font size=7>{_e(str(s.get('url'))[:100])}</font>", S["body"]))
+        parts.append(Spacer(1, 2 * mm))
+    return parts
+
+
 def cat_breaches(d, S):
     br    = d.get("breaches", {})
     count = br.get("breach_count", 0)

@@ -60,6 +60,14 @@ cd "$SC"
 # An INTENTIONAL scoring change must be acknowledged via golden.py --capture.
 "$PY" tooling/regression/golden.py --check || {
   echo "[pre-push] BLOCKED: golden scoring-regression drifted. If intentional, run 'py tooling/regression/golden.py --capture' and commit the baselines."; exit 1; }
+# PDF render-regression. Golden covers the SCORING output; this covers what the
+# broker actually receives. It was not gated before, and quietly rotted: the
+# baseline sat at bd66ade while two deliberate render changes shipped (39a241a
+# version-unconfirmed CVEs, 64a3e51 the 1-in-250 reframe), so the guard had been
+# failing unnoticed for weeks. Gating it keeps an unreviewed render change from
+# reaching a client document.
+"$PY" tooling/pdf_snapshot.py --check || {
+  echo "[pre-push] BLOCKED: PDF render drifted from baseline. If intentional, run 'py tooling/pdf_snapshot.py --save' and commit the baseline."; exit 1; }
 
 if [ "$PUSHING_MASTER" = "1" ]; then
   echo "[pre-push] master push detected -> live smoke test (60-180s, credit-free)..."

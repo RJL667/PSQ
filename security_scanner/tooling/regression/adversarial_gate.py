@@ -24,6 +24,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEC = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, SEC)
+sys.path.insert(0, os.path.join(SEC, "tooling"))   # breach_web_discovery (SCN-040)
 
 import checkers_network as cn
 import checkers_threats as ct
@@ -356,8 +357,117 @@ def _check_subdomain_ct(failures):
               f"ct={got[0]} ok={got[1]} low={got[2]} src={got[3]}")
 
 
+# ---- Breach-intel: company matching + fail-safe + recency ladder (SCN-040/041) ----
+# Three distinct failure modes, all observed live on the 2026-07-27 mip.co.za scan
+# or designed against it:
+#
+#  (a) COMPANY MATCHING. title_is_about() used a substring test, so the 3-letter
+#      token "mip" matched nine unrelated ransomware victims (bMIProjects.de,
+#      ekonoMIPoolen.se, MIPa.com.br, luMIPlan.com, MIPS Technologies, MIPe.com,
+#      euroMIP.fr). That mattered because a leak-site listing FLOORS the verdict at
+#      "confirmed" -- a short company token could have asserted a breach at a
+#      company that was never breached. Same class as the Dehashed attribution bug.
+#  (b) FAIL-SAFE SCORING. The search engine degrades SILENTLY to snippets when its
+#      key is missing/rotated/unfunded. An unresearched scan must therefore never
+#      score as clean: researched_breach_risk() must return None for every
+#      non-conclusive state so the HIBP value is kept rather than a falsely low one.
+#  (c) RECENCY LADDER. Owner calibration: recency drives impact, not count, and the
+#      first year is cut into quarters because the post-breach recovery window is
+#      itself the elevated-risk period.
+BREACH_FP_VICTIMS = [           # live ransomware.live rows for keyword "mip"
+    "bmiprojects.de", "ekonomipoolen.se/Sweden/32/GB", "Ekonomipoolen",
+    "mipa.com.br", "lumiplan.com", "MIPS Technologies", "mipe.com", "euromip.fr",
+]
+BREACH_TRUE_MATCHES = [
+    ("MIP Holdings", "Mip"), ("mip.co.za", "Mip"), ("BELFOR", "BELFOR"),
+    ("Takealot Fulfilment Solutions employee blunder leads to leak", "Takealot"),
+    ("Dis-Chem data breach affects 3.68 million customers", "Dis-Chem"),
+]
+BREACH_TRUE_NEGATIVES = [
+    ("Naspers reports jump in ecommerce profit", "Takealot"),
+    ("Chemical spill at DisChemicals plant", "Dis-Chem"),
+]
+# (months_since, verdict) -> expected category risk, expected RSI impact
+BREACH_LADDER = [
+    (1,    "confirmed", 90.0, 0.16),   # inside the recovery window
+    (4,    "confirmed", 90.0, 0.14),
+    (7,    "confirmed", 90.0, 0.12),
+    (11,   "confirmed", 90.0, 0.10),
+    (18,   "confirmed", 70.0, 0.06),
+    (30,   "confirmed", 45.0, 0.03),
+    (48,   "confirmed", 25.0, 0.00),   # RSI factor has decayed out
+    (80,   "confirmed", 10.0, 0.00),
+    (1,    "reported",  63.0, 0.112),  # single-source -> x0.70 on both channels
+    (None, "confirmed", 50.0, 0.04),   # confirmed but undated
+]
+BREACH_FAILSAFE = [             # every one must contribute NOTHING
+    ("no_api_key", "unknown"), ("error", "unknown"),
+    ("completed", "none"), ("completed", "possible"),
+]
+
+
+def _check_breach_intel(failures):
+    import importlib
+    bwd = importlib.import_module("breach_web_discovery")
+    import scoring_analytics as _sa
+
+    # (a) company matching: word boundary, not substring
+    toks = bwd.company_tokens("Mip")
+    fp = [v for v in BREACH_FP_VICTIMS if bwd.title_is_about(v, toks)]
+    ok = not fp
+    if not ok:
+        failures.append(f"breach_match: '{'mip'}' still matches unrelated victims {fp} "
+                        "(substring match reintroduced; a leak-site hit floors the verdict "
+                        "at confirmed, so this asserts breaches at the wrong company)")
+    print(f"  [{'PASS' if ok else 'FAIL'}] breach_match:false_positives   rejected "
+          f"{len(BREACH_FP_VICTIMS) - len(fp)}/{len(BREACH_FP_VICTIMS)}")
+
+    miss = [t for t, c in BREACH_TRUE_MATCHES if not bwd.title_is_about(t, bwd.company_tokens(c))]
+    ok = not miss
+    if not ok:
+        failures.append(f"breach_match: genuine matches lost {miss}")
+    print(f"  [{'PASS' if ok else 'FAIL'}] breach_match:true_positives    matched "
+          f"{len(BREACH_TRUE_MATCHES) - len(miss)}/{len(BREACH_TRUE_MATCHES)}")
+
+    bad = [t for t, c in BREACH_TRUE_NEGATIVES if bwd.title_is_about(t, bwd.company_tokens(c))]
+    ok = not bad
+    if not ok:
+        failures.append(f"breach_match: unrelated headlines matched {bad}")
+    print(f"  [{'PASS' if ok else 'FAIL'}] breach_match:true_negatives    rejected "
+          f"{len(BREACH_TRUE_NEGATIVES) - len(bad)}/{len(BREACH_TRUE_NEGATIVES)}")
+
+    # (b) fail-safe: an unresearched or clean result must score nothing
+    for status, verdict in BREACH_FAILSAFE:
+        got = _sa.researched_breach_risk({"status": status, "verdict": verdict})
+        ok = got is None
+        if not ok:
+            failures.append(f"breach_failsafe: status={status}/{verdict} returned {got}, "
+                            "must be None — an unresearched scan must never score as clean")
+        print(f"  [{'PASS' if ok else 'FAIL'}] breach_failsafe:{status + '/' + verdict:<22} -> {got}")
+
+    # (c) recency ladder, both channels
+    for months, verdict, want_risk, want_rsi in BREACH_LADDER:
+        bi = {"status": "completed", "verdict": verdict, "incident_count": 1,
+              "months_since_most_recent": months}
+        got = _sa.researched_breach_risk(bi)
+        got_risk = round(got[0], 1) if got else None
+        rsi = _sa.RansomwareIndex().calculate(
+            {"breaches": {"status": "completed", "breach_count": 0, "issues": []},
+             "credential_risk": {"risk_level": "LOW"}, "breach_intel": bi},
+            industry="technology")
+        f = [x for x in rsi.get("contributing_factors", []) if "repeat-victimisation" in x["factor"]]
+        got_rsi = round(f[0]["impact"], 3) if f else 0.0
+        ok = (got_risk == round(want_risk, 1)) and (got_rsi == round(want_rsi, 3))
+        if not ok:
+            failures.append(f"breach_ladder: {months}mo/{verdict} risk={got_risk} "
+                            f"(want {want_risk}) rsi={got_rsi} (want {want_rsi})")
+        print(f"  [{'PASS' if ok else 'FAIL'}] breach_ladder:{str(months) + 'mo/' + verdict:<18} "
+              f"risk={got_risk} rsi_impact={got_rsi}")
+
+
 def main():
     failures = []
+    _check_breach_intel(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -393,7 +503,9 @@ def main():
           f"ip-attribution + {len(CVE_GATE_SCENARIOS)} cve-gating + "
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
           f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib + "
-          f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct ground-truth scenarios")
+          f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct + "
+          f"{3 + len(BREACH_FAILSAFE) + len(BREACH_LADDER)} breach-intel "
+          "ground-truth scenarios")
 
 
 if __name__ == "__main__":

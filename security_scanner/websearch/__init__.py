@@ -156,16 +156,62 @@ def is_configured() -> bool:
                  or os.environ.get("GEMINI_API_KEY", "")).strip())
 
 
+class _UsageSniffer:
+    """Capture Gemini token usage from inside the vendored engine.
+
+    The engine makes its own grounding / gap-analysis / synthesis calls, and we
+    keep its source verbatim for clean re-syncs — so rather than editing it, this
+    temporarily wraps ``httpx.AsyncClient.post`` and reads ``usageMetadata`` off
+    any generativelanguage response. Purely observational; never alters a request.
+    """
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self._orig = None
+
+    def __enter__(self):
+        import httpx
+        self._orig = httpx.AsyncClient.post
+        sniffer = self
+
+        async def _post(client_self, url, *a, **kw):
+            resp = await sniffer._orig(client_self, url, *a, **kw)
+            try:
+                if "generativelanguage" in str(url) and resp.status_code == 200:
+                    um = (resp.json() or {}).get("usageMetadata") or {}
+                    if um:
+                        model = str(url).split("/models/")[-1].split(":")[0]
+                        sniffer.calls.append({
+                            "stage": "engine", "model": model,
+                            "input": int(um.get("promptTokenCount") or 0),
+                            "output": int(um.get("candidatesTokenCount") or 0),
+                            "total": int(um.get("totalTokenCount") or 0)})
+            except Exception:
+                pass          # metering must never break a scan
+            return resp
+
+        httpx.AsyncClient.post = _post
+        return self
+
+    def __exit__(self, *exc):
+        import httpx
+        if self._orig is not None:
+            httpx.AsyncClient.post = self._orig
+        return False
+
+
 async def deep_search_async(query: str, *, depth: str = "deep",
                             api_key: Optional[str] = None, **kwargs) -> dict[str, Any]:
     """Async form. Returns the engine's ``to_dict()`` plus scanner provenance."""
     from web_answer import web_answer
 
     cfg = scanner_search_config(api_key)
-    res = await web_answer(query, depth=depth, config=cfg, **kwargs)
+    with _UsageSniffer() as sniff:
+        res = await web_answer(query, depth=depth, config=cfg, **kwargs)
     out = res.to_dict()
     out["configured"] = bool(cfg.gemini_api_key)
     out["key_source"] = cfg.gemini_key_source
+    out["gemini_calls"] = sniff.calls
     return out
 
 
