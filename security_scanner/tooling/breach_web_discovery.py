@@ -119,9 +119,18 @@ def company_tokens(name: str) -> list[str]:
 
 
 def title_is_about(title: str, tokens: list[str]) -> bool:
-    """All core company tokens present in the headline (order-independent)."""
+    """All core company tokens present in the headline as WHOLE WORDS.
+
+    Word-boundary, not substring: a plain ``in`` test makes short company tokens
+    match anything containing them. Observed live on mip.co.za, where the token
+    "mip" substring-matched nine unrelated ransomware victims — bMIProjects.de,
+    ekonoMIPoolen.se, MIPa.com.br, luMIPlan.com, MIPS Technologies, MIPe.com,
+    euroMIP.fr — none of them the insured. Same failure mode as the Dehashed
+    staff-attribution fix (SCN-036), same remedy.
+    """
     nt = _norm(title)
-    return bool(tokens) and all(t in nt for t in tokens)
+    return bool(tokens) and all(
+        re.search(rf"\b{re.escape(t)}\b", nt) for t in tokens)
 
 
 def extract_records(title: str) -> str | None:
@@ -377,10 +386,19 @@ def discover(company: str, domain: str = "", aliases: list[str] | None = None) -
     # A leak-site listing counts only on a NAME match (company tokens in the
     # victim name) or an EXACT victim-domain match — never a loose description
     # mention, which would false-positive on any dump that name-drops the company.
+    # A leak-site listing FLOORS the verdict at "confirmed", so how it matched
+    # decides whether it may do so. An exact victim-domain match is unambiguous; a
+    # name match is only trustworthy when the company's tokens are distinctive —
+    # a single short token like "mip" identifies nothing on its own.
+    distinctive = any(len(t) >= 5 for tl in token_lists for t in tl) or \
+        max((len(tl) for tl in token_lists), default=0) >= 2
     rw_hits = []
     for kw in {company, stem} - {""}:
         for v in fetch_ransomware_live(kw):
-            if about(v["victim"]) or (stem and _domain_stem(v["victim_domain"]) == stem):
+            exact_domain = bool(stem and _domain_stem(v["victim_domain"]) == stem)
+            if exact_domain or about(v["victim"]):
+                v["match"] = "domain" if exact_domain else "name"
+                v["authoritative"] = exact_domain or distinctive
                 rw_hits.append(v)
         time.sleep(0.4)
     # de-dupe ransomware hits
@@ -420,9 +438,11 @@ def discover(company: str, domain: str = "", aliases: list[str] | None = None) -
         dated = _incident_dates(incidents) or det_dated
         confidence = {"confirmed": "high", "reported": "medium",
                       "possible": "low", "none": "none"}.get(verdict, det_conf)
-        # A ransomware leak-site listing is direct evidence of compromise: never let
-        # the narrative layer grade a confirmed victim below "confirmed".
-        if rw_hits and verdict in ("reported", "possible", "none"):
+        # A ransomware leak-site listing is direct evidence of compromise, so it
+        # never gets graded below "confirmed" — but only an AUTHORITATIVE match
+        # (exact victim domain, or a distinctive company name) may force that.
+        if any(v.get("authoritative") for v in rw_hits) and \
+                verdict in ("reported", "possible", "none"):
             verdict, confidence = "confirmed", "high"
     else:
         judgment, verdict, confidence, dated = "deterministic", det_verdict, det_conf, det_dated
