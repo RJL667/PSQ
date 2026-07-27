@@ -242,6 +242,19 @@ def build(doc):
         "the distinction is visible on both the scan form and the report."
     )
 
+    add_bold_body(
+        doc,
+        "Where it appears in the outputs: ",
+        "The full technical report opens the Exposure and Reputation section with "
+        "a Breach History card carrying the verdict, the date of the most recent "
+        "incident and how long ago it was, each dated incident with the records "
+        "affected and root cause where the sources state them, and the sources "
+        "cited. The interactive dashboard carries the same panel at the top of the "
+        "Exposure page. Where the research could not run, both render the "
+        "unassessed state with an explicit caveat rather than a clean result, so "
+        "the distinction survives into the client-facing document."
+    )
+
     # ══════════════════════════════════════════════════════════════════════
     # 4.6.2  IP/Domain Reputation (DNSBL)
     # ══════════════════════════════════════════════════════════════════════
