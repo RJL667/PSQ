@@ -35,7 +35,7 @@ from pdf_helpers import (
 from pdf_cards import (
     cat_ssl, cat_email, cat_email_hardening, cat_headers, cat_waf, cat_dns,
     cat_hrp, cat_cloud, cat_vpn, origin_discovery_block, cat_breaches,
-    cat_breach_intel,
+    cat_breach_intel, breach_intel_compact, breach_intel_line,
     cat_dnsbl, cat_admin, cat_subdomains, cat_tech, cat_domain,
     cat_security_policy, cat_glasswing, cat_payment, cat_shodan, cat_dehashed,
     cat_hudson_rock, cat_intelx, cat_credential_risk, cat_virustotal,
@@ -235,6 +235,49 @@ def _assessment_top_findings(results: dict) -> list:
     ins  = results.get("insurance", {})
     weight = {"CRITICAL": 100, "HIGH": 80, "MEDIUM": 50, "LOW": 20}
     cands = []  # tuples of (priority, dict)
+
+    # Prior breach (SCN-041). Ranked just under RDP when recent: for a
+    # board-level reader "you were breached three months ago" outranks almost any
+    # configuration finding, and it is the one fact HIBP alone never surfaces.
+    # Tiered disclosure — the exec deck gets the verdict and the timing, not the
+    # incident detail or the sources (those live in the broker/full tiers).
+    _bi = cats.get("breach_intel") or {}
+    if _bi.get("status") == "completed" and _bi.get("verdict") in ("confirmed", "reported"):
+        _m = _bi.get("months_since_most_recent")
+        _recent = bool(_bi.get("recent_material_breach"))
+        _when = ("on a date the sources do not establish" if _m is None
+                 else "within the last month" if _m < 1
+                 else f"about {round(_m)} months ago" if _m < 24
+                 else f"about {_m / 12:.1f} years ago")
+        cands.append((95 if _recent else 60, {
+            "level": "CRITICAL" if _recent else "MEDIUM",
+            "headline": f"This organisation was breached {_when}",
+            "summary": ("Recent breaches materially raise the chance of another one."
+                        if _recent else
+                        "A prior breach is on record, though not a recent one."),
+            "detail": (
+                f"Open-source research {_bi.get('verdict')} a prior security incident "
+                f"{_when}. "
+                + ("Organisations are at their most exposed while still recovering — "
+                   "credentials, access routes and the original weakness are often "
+                   "still live. Confirm what was remediated and whether the root "
+                   "cause is closed. "
+                   if _recent else
+                   "Older incidents matter less to present-day posture, but confirm "
+                   "the root cause was closed. ")
+                + "Note this was not found in breach-notification databases; it was "
+                  "established from published reporting."),
+        }))
+    elif _bi and _bi.get("status") != "completed":
+        # Never let an outage read as a clean history on a board-level document.
+        cands.append((40, {
+            "level": "MEDIUM",
+            "headline": "Breach history could not be checked",
+            "summary": "This is unassessed — it is not a clean bill of health.",
+            "detail": ("The breach-history research could not run for this scan, so a "
+                       "prior breach can be neither confirmed nor ruled out. Re-run "
+                       "the scan before relying on this section."),
+        }))
 
     # RDP exposed — extreme priority
     if cats.get("vpn_remote", {}).get("rdp_exposed"):
@@ -1848,6 +1891,12 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
     story += _build_attackers_view(results, S)
     story += origin_discovery_block(results.get("categories", {}), S,
                                     silent_when_absent=True)
+
+    # Breach history, tiered. The broker tier gets the condensed block (verdict,
+    # when, what, why) because it is priced on this; the full report carries the
+    # complete card further down in Exposure & Reputation.
+    if report_type == "summary":
+        story += breach_intel_compact(results.get("categories", {}), S)
 
     # ── Report type branching ───────────────────────────────────────────────
     if report_type == "summary":

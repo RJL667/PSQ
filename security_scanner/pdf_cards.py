@@ -3583,7 +3583,7 @@ _INSURANCE_CONTEXT = {
     "SSL Grade": "Weak encryption enables man-in-the-middle attacks; increases data breach probability",
     "Email Security Score": "Poor email auth enables phishing/BEC; top initial attack vector for claims",
     "HTTP Security Headers": "Missing headers enable XSS and clickjacking; increases web application breach risk",
-    "Known Data Breaches": "Prior breaches significantly increase probability of repeat incidents and claims",
+    "Known Data Breaches": "Recency drives this: a breach inside the policy year signals live exposure and repeat-incident risk",
     "Exposed Admin Panels": "Direct entry point for attackers; leads to full system compromise and ransomware",
     "DB/Service Exposure": "Exposed databases enable mass data theft; highest severity finding for underwriting",
     "IP/Domain Blacklisted": "Indicates prior compromise or spam; reputation damage affects business interruption",
@@ -3599,6 +3599,126 @@ _INSURANCE_CONTEXT = {
     "Related-Domain Critical": "Critical finding on a broker-declared supplier; civil-liability inflator in financial model",
     "Cross-Correlated Vendor Risk": "Hudson Rock infostealer harvest × S-4 SPF vendor surface × S-5 known breach — three independent signals confirming risk; highest-priority rotate target",
 }
+
+
+def breach_intel_line(cats: dict) -> str:
+    """One-sentence breach-history statement for the EXECUTIVE tier.
+
+    The exec deck carries counts and verdicts, never detail (tiered disclosure,
+    Manual 6.4) — but a confirmed recent breach is the single most material fact
+    a board-level reader can be told, so it gets one line. The unassessed case is
+    stated explicitly rather than omitted: silence would read as "no breach".
+    """
+    bi = cats.get("breach_intel") or {}
+    if not bi:
+        return ""
+    status, verdict = bi.get("status"), bi.get("verdict")
+    if status != "completed":
+        return ("Breach history could not be researched on this scan — it is "
+                "UNASSESSED, not confirmed clean.")
+    if verdict not in ("confirmed", "reported"):
+        return ("No prior breach was found in open-source research (a research "
+                "result, not a guarantee).")
+    months = bi.get("months_since_most_recent")
+    when = ("date unestablished" if months is None
+            else "within the last month" if months < 1
+            else f"{round(months)} months ago" if months < 24
+            else f"{months / 12:.1f} years ago")
+    recent = " This is recent and materially affects the risk." if bi.get(
+        "recent_material_breach") else ""
+    return (f"A prior breach is {verdict} from open-source research, {when}."
+            f"{recent}")
+
+
+def breach_intel_compact(cats: dict, S) -> list:
+    """Condensed breach-history block for the BROKER tier.
+
+    Everything an underwriter needs to price it — verdict, when it happened, what
+    was lost, why — without the full card's narrative or long source list.
+    """
+    bi = cats.get("breach_intel") or {}
+    if not bi:
+        return []
+    status, verdict = bi.get("status"), bi.get("verdict")
+    parts = [Paragraph("<b>Breach History (researched)</b>", S["cat_title"]),
+             Spacer(1, 1 * mm)]
+    if status != "completed":
+        parts.append(Paragraph(
+            "<b>Not assessed.</b> Breach-history research did not run for this "
+            "scan, so a prior breach can be neither confirmed nor ruled out. "
+            "Treat as unassessed, <b>not</b> as a clean record.", S["body"]))
+        parts.append(Spacer(1, 3 * mm))
+        return parts
+    if verdict not in ("confirmed", "reported"):
+        parts.append(Paragraph(
+            "No corroborated prior breach was found in open sources. This is a "
+            "research result, not a guarantee — an undisclosed breach leaves no "
+            "public trace.", S["body"]))
+        parts.append(Spacer(1, 3 * mm))
+        return parts
+
+    months = bi.get("months_since_most_recent")
+    when = ("date unestablished" if months is None
+            else f"{months} months ago" if months < 24
+            else f"{months / 12:.1f} years ago")
+    parts.append(Paragraph(
+        f"<b>{verdict.title()} breach — {when}.</b> "
+        + ("Recency is what drives the weighting: this sits inside the "
+           "post-breach recovery window, when an insured is still rebuilding and "
+           "is at its most exposed. " if bi.get("recent_material_breach") else "")
+        + "Confirm with the insured what was remediated and whether the root "
+          "cause is closed.", S["body"]))
+    for inc in (bi.get("incidents") or [])[:2]:
+        when_i = inc.get("incident_date") or inc.get("disclosure_date") or "date unestablished"
+        bits = " · ".join(x for x in [
+            (inc.get("breach_type") or "").replace("_", " ") or None,
+            f"{inc['records_affected']} records" if inc.get("records_affected") else None,
+            inc.get("root_cause")] if x)
+        parts.append(Paragraph(f"• <b>{when_i}</b> — {bits or inc.get('title', '')}",
+                               S["body"]))
+    srcs = [s for s in (bi.get("sources") or []) if s.get("url")][:2]
+    if srcs:
+        def _e(v):
+            return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts.append(Paragraph(
+            "<font size=7>Sources: " + "; ".join(_e(s["url"])[:78] for s in srcs)
+            + "</font>", S["body"]))
+    parts.append(Spacer(1, 3 * mm))
+    return parts
+
+
+def _breach_summary_row(cats: dict, br_count: int):
+    """Risk-factors row for breach history -> (label, value, colour).
+
+    HIBP's count alone made this row lie: on the mip.co.za scan it printed a green
+    "0 — Prior breaches significantly increase probability of repeat incidents"
+    on the SAME report whose Breach History card said "Confirmed breach, 0.9
+    months ago". The researched verdict therefore governs this row whenever it
+    reached one, and the value states RECENCY (what actually drives the risk)
+    rather than a count. An unassessed result must not read green either — it
+    reads "Not assessed", amber.
+    """
+    bi = cats.get("breach_intel") or {}
+    status, verdict = bi.get("status"), bi.get("verdict")
+    if bi and status != "completed":
+        return ("Known Data Breaches", "Not assessed", _tl(False, True))
+    if bi and status == "completed" and verdict in ("confirmed", "reported"):
+        months = bi.get("months_since_most_recent")
+        if months is None:
+            val = f"{verdict.title()} — date unestablished"
+        elif months < 1:
+            val = f"{verdict.title()} — within the last month"
+        elif months < 24:
+            val = f"{verdict.title()} — {round(months)} months ago"
+        else:
+            val = f"{verdict.title()} — {months / 12:.1f} years ago"
+        # Recent is the material case; an old breach is history, not a live concern.
+        return ("Known Data Breaches", val,
+                _tl(False, months is not None and months > 36))
+    if bi and status == "completed" and verdict == "none":
+        return ("Known Data Breaches", "None found (researched)", _tl(True, True))
+    # No researched result at all -> fall back to the legacy HIBP count.
+    return ("Known Data Breaches", br_count, _tl(br_count == 0, br_count <= 3))
 
 
 def build_summary_table(results: dict, S) -> Table:
@@ -3642,8 +3762,7 @@ def build_summary_table(results: dict, S) -> Table:
             _tl(em_score >= 8, em_score >= 5)),
         row("HTTP Security Headers", f"{hh_score}%",
             _tl(hh_score >= 80, hh_score >= 50)),
-        row("Known Data Breaches",   br_count,
-            _tl(br_count == 0, br_count <= 3)),
+        row(*_breach_summary_row(cats, br_count)),
         row("Exposed Admin Panels",  adm_c + adm_h,
             _tl(adm_c + adm_h == 0, adm_c == 0)),
         row("DB/Service Exposure",   f"{hrp_c} critical service(s)",
