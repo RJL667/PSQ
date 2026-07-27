@@ -195,6 +195,19 @@
           </div>
         </div>
 
+        <div class="field">
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" id="breachintel-check" name="include_breach_intel" checked />
+              <span class="toggle-slider"></span>
+            </label>
+            <div>
+              <div class="toggle-label">Include Breach-History Research</div>
+              <div class="toggle-note">Researches the open web for prior breaches and dates them (HIBP only catalogues named victims). Uses web-search credits. <span id="breachintel-balance" style="color:#60a5fa;font-weight:600;"></span></div>
+            </div>
+          </div>
+        </div>
+
         <div class="sec-label">Regulatory Exposure</div>
         <div id="preflight-banner" style="display:none;font-size:.76rem;color:#60a5fa;background:rgba(96,165,250,0.08);border-left:3px solid #60a5fa;padding:8px 12px;margin-bottom:10px;border-radius:4px;line-height:1.4;"></div>
 
@@ -455,6 +468,37 @@ function setCreditState(checkId, el, d) {
   } catch (e) {}
 })();
 
+// Breach-history research: verify the web-search (Gemini) key is live BEFORE the
+// broker scans. This one has its own handler because the risk is different from a
+// spent credit: the search engine degrades SILENTLY to snippet-only results on a
+// rotated or unfunded key, which would surface as "no prior breach" — a false
+// clean on an underwriting report. So any non-active state switches the toggle
+// OFF + disabled and states the remedy, rather than letting the scan proceed and
+// report an unresearched breach history.
+(async () => {
+  const el = document.getElementById('breachintel-balance');
+  const cb = document.getElementById('breachintel-check');
+  if (!el) return;
+  try {
+    const r = await fetch('{{ request.script_root }}/api/breach-intel/status', { headers: apiHeaders() });
+    const d = await r.json();
+    if (d.status === 'active') {
+      el.textContent = '(web-search key live)';
+      el.style.color = '#22c55e';
+      return;
+    }
+    el.textContent = d.status === 'no_api_key'      ? '(no web-search key configured)'
+                   : d.status === 'quota_exhausted' ? '(web-search credits depleted — top up AI Studio billing)'
+                   : d.status === 'inactive'        ? '(web-search key rejected — rotated or revoked)'
+                   : '(web-search status unavailable)';
+    el.style.color = '#ef4444';
+    if (cb) { cb.checked = false; cb.disabled = true; }
+  } catch (e) {
+    el.textContent = '(web-search status unavailable)';
+    el.style.color = '#ef4444';
+  }
+})();
+
 // Pre-flight auto-detection state. Populated by runPreflight() and
 // included verbatim in the scan submission as auto_detected_flags.
 // Drives the audit panel in the result PDF / HTML so the report can
@@ -627,6 +671,7 @@ form.addEventListener('submit', async (e) => {
   if (document.getElementById('fraud-check').checked) body.include_fraudulent_domains = true;
   if (!document.getElementById('dehashed-check').checked) body.skip_dehashed = true;
   if (!document.getElementById('intelx-check').checked) body.skip_intelx = true;
+  if (!document.getElementById('breachintel-check').checked) body.skip_breach_intel = true;
 
   // Regulatory exposure flags
   const subInd = document.getElementById('sub-industry').value;
