@@ -338,9 +338,16 @@ def judge_with_deepsearch(company: str, domain: str):
     if parsed is None:
         return None
     parsed["_answer"] = answer
+    # Surface only the sources the answer actually CITED. The engine's fused pool
+    # is ranked, not filtered, so keyless providers contribute plausible-looking
+    # noise (a live mip.co.za run returned Wikipedia's "OR-Tools", "Instagram" and
+    # "James Graham (actor)" alongside the three real breach statements). On a
+    # broker-facing report an irrelevant source is worse than a missing one.
+    cited = sorted({int(n) for n in re.findall(r"\[(\d{1,2})\]", answer)})
+    picked = [sources[i - 1] for i in cited if 1 <= i <= len(sources)] or sources[:6]
     parsed["_sources"] = [{"title": s.get("title"), "url": s.get("url"),
                            "provider": s.get("provider") or s.get("providers")}
-                          for s in sources[:12]]
+                          for s in picked[:12]]
     parsed["_providers"] = res.get("providers_used") or []
     return parsed
 
