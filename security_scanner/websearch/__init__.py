@@ -100,16 +100,26 @@ def check_key(timeout_s: float = 10.0, verify_generation: bool = True) -> dict:
                         "key_fingerprint": _fingerprint(key)}
             return {"status": "error", "http": g.status_code,
                     "key_fingerprint": _fingerprint(key)}
-        # 400 API_KEY_INVALID (rotated/typo'd) and 403 SERVICE_BLOCKED (wrong key
-        # type — e.g. a Custom Search key) both mean: present but unusable.
-        if r.status_code in (400, 403):
+        # Present but unusable. Google answers differently depending on the key
+        # FORMAT, which the 2026-07-27 alarm drill surfaced: a bad legacy "AIza…"
+        # key gives 400 API_KEY_INVALID, a bad new-style "AQ.…" key gives 401
+        # ("Expected OAuth 2 access token"), and a wrong key TYPE (e.g. a Custom
+        # Search key) gives 403 SERVICE_BLOCKED. Our production key is the AQ.
+        # format, so 401 is the likeliest real revocation and must not fall
+        # through to the generic branch — that one reports no fingerprint and no
+        # remediation hint, which is the opposite of useful on call.
+        if r.status_code in (400, 401, 403):
             try:
                 msg = r.json().get("error", {}).get("message", "")[:160]
             except Exception:
                 msg = r.text[:160]
             return {"status": "inactive", "http": r.status_code, "error": msg,
                     "key_fingerprint": _fingerprint(key)}
-        return {"status": "error", "http": r.status_code}
+        # Anything else is probably transient (5xx, network). Still report the
+        # fingerprint so the operator can tell WHICH key the probe was using.
+        return {"status": "error", "http": r.status_code,
+                "error": f"unexpected HTTP {r.status_code} from the key check",
+                "key_fingerprint": _fingerprint(key)}
     except Exception as e:
         return {"status": "error", "error": f"{type(e).__name__}: {e}"}
 

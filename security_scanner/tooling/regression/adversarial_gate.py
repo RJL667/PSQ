@@ -416,6 +416,55 @@ BREACH_DEGRADED = [
     ("degraded confirmed",       {"researched": False}, False),
     ("legacy (flag absent)",     {},                    True),
 ]
+# (d) KEY-PROBE STATUS MAPPING. Everything above depends on check_key() correctly
+# calling a dead key dead — it is the trigger for the 503 readiness alarm, the
+# submission-time warning and the UNASSESSED verdict. Google rejects a bad key
+# with a code that depends on the key FORMAT, which the 2026-07-27 alarm drill
+# exposed: our production key is the new "AQ.…" style, whose rejection is 401,
+# and 401 was NOT in the rejected set — so a genuinely revoked production key
+# fell through to the generic "error" branch, which reported no fingerprint and
+# no remediation hint. The alarm still fired, but the on-call operator would have
+# been told "error" instead of "key rejected — rotated or revoked", and could not
+# see WHICH key was failing. Mapping is asserted here per HTTP code, offline.
+#   (label, listing_code, generation_code, expected_status, expect_fingerprint)
+KEY_PROBE_SCENARIOS = [
+    ("revoked AQ.-style",    401, None, "inactive",         True),
+    ("revoked AIza-style",   400, None, "inactive",         True),
+    ("wrong key type",       403, None, "inactive",         True),
+    ("valid but unfunded",   200,  429, "quota_exhausted",  True),
+    ("healthy",              200,  200, "active",           True),
+    ("transient upstream",   503, None, "error",            True),
+]
+
+
+class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
+    def __init__(self, code):
+        self.status_code = code
+        self.text = '{"error":{"message":"synthetic"}}'
+
+    def json(self):
+        return {"error": {"message": "synthetic"}}
+
+
+def _check_key_probe(failures):
+    import importlib
+    ws = importlib.import_module("websearch")
+    for label, listing, gen, want, want_fp in KEY_PROBE_SCENARIOS:
+        with mock.patch.dict(os.environ, {"GOOGLE_API_KEY": "AQ.synthetic-probe-key"}), \
+             mock.patch("httpx.get", return_value=_FakeKeyResp(listing)), \
+             mock.patch("httpx.post", return_value=_FakeKeyResp(gen or 200)):
+            r = ws.check_key(timeout_s=1.0)
+        got, fp = r.get("status"), bool(r.get("key_fingerprint"))
+        ok = (got == want) and (fp == want_fp)
+        if not ok:
+            failures.append(
+                f"key_probe[{label}]: HTTP {listing}/{gen} -> status={got!r} "
+                f"(want {want!r}), fingerprint_present={fp} (want {want_fp}) — a "
+                "rejected key must be reported as 'inactive' WITH its fingerprint, "
+                "otherwise the operator gets no remediation hint and cannot tell "
+                "which key is failing")
+        print(f"  [{'PASS' if ok else 'FAIL'}] key_probe:{label:<21} "
+              f"{listing}/{gen or '-'} -> {got} fp={fp}")
 
 
 def _check_breach_intel(failures):
@@ -514,6 +563,7 @@ def _check_breach_intel(failures):
 def main():
     failures = []
     _check_breach_intel(failures)
+    _check_key_probe(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -550,7 +600,8 @@ def main():
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
           f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib + "
           f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct + "
-          f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel "
+          f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel + "
+          f"{len(KEY_PROBE_SCENARIOS)} key-probe "
           "ground-truth scenarios")
 
 
