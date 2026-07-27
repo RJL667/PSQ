@@ -3,6 +3,7 @@ import { PageTitle, CheckerHeader, KV, IssueList, DetailGrid } from '../../compo
 import { getResults } from '../../data/results'
 import { cat, CATEGORY_LABELS } from '../../data/selectors'
 import CredentialExportPortal from '../../components/overview/CredentialExportPortal'
+import BreachIntelPanel from '../../components/detail/BreachIntelPanel'
 import type { Results, CategoryBase } from '../../types/results'
 import type { KVRow } from '../../components/detail/parts'
 import styles from './detail.module.css'
@@ -22,8 +23,13 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
     <div className={styles.page}>
       <PageTitle title="Exposure & Reputation" subtitle="Breach history, credential exposure, reputation intelligence and exposed assets. States distinguish clean results from unavailable data sources." />
 
+      {/* Researched breach history leads the page: a dated, confirmed prior breach
+          is the single most consequential thing on it, and (unlike HIBP) it is
+          usually the only place a real incident shows up at all. */}
+      <BreachIntelPanel bi={get('breach_intel')} />
+
       <DetailGrid cols={3}>
-        <Panel title="Known Breaches" action={<CheckerHeader category={breaches} />}>
+        <Panel title="Known Breaches (HIBP)" action={<CheckerHeader category={breaches} />}>
           <KV rows={[
             { label: 'Breach count', value: String((breaches?.breach_count as number) ?? 0), severity: (breaches?.breach_count as number) > 0 ? 'high' : 'positive' },
             { label: 'Most recent', value: (breaches?.most_recent_breach as string) ?? 'None' },
@@ -78,7 +84,7 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
         </Panel>
       </DetailGrid>
 
-      <MoreCheckers r={r} ids={['breach_intel', 'credential_risk', 'credential_correlation', 'vendor_breach', 'hudson_rock', 'intelx', 'related_domains', 'info_disclosure']} />
+      <MoreCheckers r={r} ids={['credential_risk', 'credential_correlation', 'vendor_breach', 'hudson_rock', 'intelx', 'related_domains', 'info_disclosure']} />
     </div>
   )
 }

@@ -73,6 +73,63 @@ DB_SEVERITY_FLOOR_ENABLED = _os.environ.get("DB_SEVERITY_FLOOR_ENABLED", "1").st
 DB_FLOOR_R_START_ZAR = _cat_env_float("DB_FLOOR_R_START_ZAR", 200_000_000.0, 1e7, 1e12)
 DB_FLOOR_R_FULL_ZAR  = _cat_env_float("DB_FLOOR_R_FULL_ZAR", 5_000_000_000.0, 1e7, 1e12)
 
+# ── Researched breach history (SCN-041, OWNER 2026-07-27, GATED) ──────────────
+# HIBP's breaches-by-domain catalogue only fires when a company is itself a NAMED
+# catalogued victim; for the SA book it is almost always 0 and, when it does fire,
+# it describes exposed email addresses rather than a corporate incident. The
+# breach_intel checker researches the open web instead and DATES the incident.
+#
+# Two deliberate departures from the legacy HIBP treatment:
+#   1. RECENCY drives the risk, not the COUNT. Being breached twice a decade ago
+#      says far less about today's posture than one breach last quarter; the old
+#      `breach_count * 15` said the opposite.
+#   2. It SUPERSEDES rather than adds — the researched risk replaces the HIBP
+#      count in the SAME `breaches` category slot (weight unchanged), so no new
+#      channel and no double-count. HIBP remains a floor so its signal is never
+#      lost.
+# Set BREACH_INTEL_SCORING_ENABLED=0 to fall back to pure-HIBP behaviour.
+BREACH_INTEL_SCORING_ENABLED = _os.environ.get(
+    "BREACH_INTEL_SCORING_ENABLED", "1").strip().lower() not in ("0", "", "false", "no", "off")
+
+# months-since-incident -> category risk (0-100). Anchored on the underwriting
+# view that a breach inside the current policy year is a live concern, while one
+# beyond ~5 years is history: remediation, staff and infrastructure have turned over.
+_BREACH_RECENCY_BANDS = (
+    (12,  90),   # within the last year
+    (24,  70),
+    (36,  45),
+    (60,  25),
+    (999, 10),   # older than 5 years
+)
+_BREACH_UNDATED_RISK = 50   # confirmed but the sources never state a date
+
+
+def researched_breach_risk(breach_intel: dict) -> "tuple[float, str] | None":
+    """Recency-weighted breach risk from researched intel -> (risk_0_100, reason).
+
+    Returns None when the checker did not reach a conclusive verdict, so an
+    unresearched scan NEVER scores as clean — the caller keeps the HIBP value
+    rather than substituting a falsely low one.
+    """
+    if not isinstance(breach_intel, dict):
+        return None
+    if breach_intel.get("status") != "completed":
+        return None                     # no_api_key / error -> unassessed
+    verdict = breach_intel.get("verdict")
+    if verdict not in ("confirmed", "reported"):
+        return None                     # none / possible / unknown -> no uplift
+    months = breach_intel.get("months_since_most_recent")
+    if months is None:
+        risk, when = float(_BREACH_UNDATED_RISK), "date unestablished"
+    else:
+        risk = float(next(r for lim, r in _BREACH_RECENCY_BANDS if months <= lim))
+        when = f"{months:.0f} months ago"
+    # A single-source "reported" verdict is weaker evidence than a corroborated
+    # "confirmed" one, so it carries ~70% of the weight.
+    if verdict == "reported":
+        risk *= 0.70
+    return risk, f"{verdict} breach, {when}"
+
 
 def _revenue_elasticity(rev):
     """Continuous (kink-free) revenue-scaling exponent. Linear in log10(revenue)
@@ -729,6 +786,15 @@ class RiskScorer:
 
         breach_count = results.get("breaches", {}).get("breach_count", 0)
         breach_risk = min(100, breach_count * 15)
+        # SCN-041: researched, DATED breach history supersedes the HIBP count in
+        # this same slot (see researched_breach_risk). HIBP stays a floor via
+        # max(), so a domain HIBP does know about never scores lower than before.
+        _bi_reason = None
+        if BREACH_INTEL_SCORING_ENABLED:
+            _bi = researched_breach_risk(results.get("breach_intel", {}))
+            if _bi:
+                _bi_risk, _bi_reason = _bi
+                breach_risk = max(breach_risk, _bi_risk)
 
         header_risk = inv(results.get("http_headers", {}).get("score", 50))
         website_risk = inv(results.get("website_security", {}).get("score", 50))
@@ -962,7 +1028,15 @@ class RiskScorer:
                     recommendations.append(rec)
                     seen.add(key)
 
-        if breach_count > 0 and "breach_rec" not in seen:
+        if _bi_reason and "breach_rec" not in seen:
+            # Researched intel available: lead with WHEN, since recency is what
+            # drives the risk here (and what an underwriter asks first).
+            recommendations.append(
+                f"Prior breach established by open-source research ({_bi_reason}). "
+                "Confirm with the insured what was remediated after the incident, "
+                "enforce password resets and MFA, and verify the root cause is closed."
+            )
+        elif breach_count > 0 and "breach_rec" not in seen:
             recommendations.append(
                 f"Domain found in {breach_count} breach(es). Enforce strong passwords, "
                 "implement credential monitoring, and review affected user accounts."
@@ -1232,6 +1306,38 @@ class RansomwareIndex:
             base += 0.08
             factors.append({"factor": "MEDIUM credential risk — historical credential exposure detected", "impact": 0.08, "priority": 2})
         # LOW = no contribution to RSI
+
+        # Prior confirmed breach (SCN-041). Repeat victimisation is a real effect:
+        # an organisation that was breached recently is materially more likely to
+        # be hit again — the access route, the exposed credentials and the
+        # unremediated weakness are often still live, and leak-site listings
+        # advertise the victim to other affiliates. Scaled by RECENCY, not count:
+        # an incident inside the year is the signal, a decade-old one is history.
+        # Sized below the credential (0.18-0.22) and RDP (0.20) channels because it
+        # is an indicator of susceptibility rather than an observed open door.
+        if BREACH_INTEL_SCORING_ENABLED:
+            _bi = categories.get("breach_intel", {}) or {}
+            if (_bi.get("status") == "completed"
+                    and _bi.get("verdict") in ("confirmed", "reported")):
+                _m = _bi.get("months_since_most_recent")
+                _imp = 0.0
+                if _m is None:
+                    _imp = 0.04            # confirmed but undated
+                elif _m <= 12:
+                    _imp = 0.10
+                elif _m <= 24:
+                    _imp = 0.06
+                elif _m <= 36:
+                    _imp = 0.03
+                if _bi.get("verdict") == "reported":
+                    _imp *= 0.70           # single-source evidence
+                if _imp > 0:
+                    _imp = round(_imp, 3)
+                    base += _imp
+                    _when = f"{_m:.0f} months ago" if _m is not None else "date unestablished"
+                    factors.append({
+                        "factor": f"Prior {_bi['verdict']} breach ({_when}) — repeat-victimisation risk",
+                        "impact": _imp, "priority": 1 if _imp >= 0.06 else 2})
 
         # KEV CVEs: +0.10 each, cap 0.24. Lifted from +0.08/0.20 (FIN-9): vuln-
         # exploitation is co-dominant with credentials in ransomware intrusions
@@ -3667,6 +3773,19 @@ class DataBreachIndex:
         components = {}
 
         breaches = categories.get("breaches", {})
+        # SCN-041: the DBI has always had a breach-recency lever, but it read
+        # HIBP's most_recent_breach, which is null for virtually every SA domain —
+        # the lever existed and never fired. Researched intel supplies a real
+        # date, so prefer it (and its incident count) when the research actually
+        # reached a verdict. Unassessed research changes nothing.
+        _bi = categories.get("breach_intel", {}) or {}
+        if (BREACH_INTEL_SCORING_ENABLED and _bi.get("status") == "completed"
+                and _bi.get("verdict") in ("confirmed", "reported")):
+            breaches = dict(breaches)
+            if _bi.get("most_recent_breach"):
+                breaches["most_recent_breach"] = _bi["most_recent_breach"]
+            breaches["breach_count"] = max(int(breaches.get("breach_count") or 0),
+                                           int(_bi.get("incident_count") or 0))
         dehashed = categories.get("dehashed", {})
         breach_count = breaches.get("breach_count", 0)
 
