@@ -44,7 +44,21 @@ APP_DIR="$APP_ROOT/security_scanner"
 
 echo "== [1/7] unpack code to $APP_ROOT =="
 sudo mkdir -p "$APP_ROOT"; sudo chown "$USER:$USER" "$APP_ROOT"
-tar -xzf "$TARBALL" -C "$APP_ROOT"          # -> $APP_ROOT/security_scanner
+# Server-owned secrets must NEVER arrive from the tarball. The documented build
+# command excludes them, but that is a convention a hand-rolled `tar -czf ...
+# security_scanner/` silently breaks -- and did, on 2026-07-27: a developer .env
+# rode along and replaced the VM's, taking a VM-only GOOGLE_API_KEY with it. The
+# running process kept serving from memory, so nothing looked wrong until the
+# next restart. Excluding at EXTRACT time makes the mistake unrepresentable,
+# whoever builds the tarball and however carelessly.
+if tar -tzf "$TARBALL" | grep -qE '(^|/)security_scanner/(\.env|secrets\.env)'; then
+  echo "   !! WARNING: tarball contains a .env / secrets.env -- IGNORING it."
+  echo "   !! Rebuild with --exclude=.env (see the Usage header) to silence this."
+fi
+tar -xzf "$TARBALL" -C "$APP_ROOT" \
+    --exclude='security_scanner/.env' \
+    --exclude='security_scanner/.env.*' \
+    --exclude='security_scanner/secrets.env'   # -> $APP_ROOT/security_scanner
 echo "   code at $APP_DIR"
 
 echo "== [2/7] secrets (generate once, reuse after) =="
