@@ -457,6 +457,28 @@ def _check_breach_intel(failures):
                             "must be None — an unresearched scan must never score as clean")
         print(f"  [{'PASS' if ok else 'FAIL'}] breach_failsafe:{status + '/' + verdict:<22} -> {got}")
 
+    # (b1) undated researched incident must NOT borrow a scraped article date.
+    # Live on the 2026-07-28 mip.co.za scan: the researched incident came back
+    # undated, the code fell back to the news-RSS dates, and a 2020 article aged a
+    # breach disclosed the previous month to "75.2 months" — which also fell
+    # outside every recency band and silently dropped the RSI factor.
+    from datetime import datetime as _dt, timezone as _tz
+    _old = _dt(2020, 4, 21, tzinfo=_tz.utc)
+    _undated_incident = [{"title": "x", "incident_date": "", "disclosure_date": ""}]
+    got_dates = bwd._incident_dates(_undated_incident)
+    ok = got_dates == []
+    if not ok:
+        failures.append(f"breach_undated: undated incident produced dates {got_dates}")
+    print(f"  [{'PASS' if ok else 'FAIL'}] breach_undated:incident_dates    -> {got_dates or 'undated (correct)'}")
+    # and the undated path must score as "date unestablished", not as an old breach
+    r_undated = _sa.researched_breach_risk(
+        {"status": "completed", "verdict": "confirmed", "researched": True,
+         "months_since_most_recent": None})
+    ok = bool(r_undated) and abs(r_undated[0] - 50.0) < 0.01
+    if not ok:
+        failures.append(f"breach_undated: undated confirmed scored {r_undated}, want 50.0")
+    print(f"  [{'PASS' if ok else 'FAIL'}] breach_undated:risk_band         -> {r_undated}")
+
     # (b2) mid-scan key failure: a degraded verdict must not drive the score
     for label, extra, should_score in BREACH_DEGRADED:
         bi = {"status": "completed", "verdict": "confirmed",
@@ -528,7 +550,7 @@ def main():
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
           f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib + "
           f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct + "
-          f"{3 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel "
+          f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel "
           "ground-truth scenarios")
 
 

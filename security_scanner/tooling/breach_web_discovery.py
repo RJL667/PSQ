@@ -287,9 +287,15 @@ def _gemini_extract(answer: str, sources: list, company: str, domain: str):
         f"--- SOURCES ---\n{src_lines}\n\n"
         "Extract each DISTINCT real security incident suffered by THIS SPECIFIC company. "
         "Ignore incidents at other companies, generic security commentary, and routine "
-        "business news. For each incident: incident_date = when the breach actually "
-        "OCCURRED (YYYY-MM-DD or YYYY-MM; \"\" if the answer never says), disclosure_date "
-        "= when it was first publicly reported/disclosed (\"\" if unknown), "
+        "business news. DATES MATTER MORE THAN ANYTHING ELSE HERE — recency drives how "
+        "this is scored, so read the answer carefully for any date it states or implies "
+        "and never leave both date fields empty when the answer mentions when something "
+        "was announced, disclosed, reported, updated or discovered. For each incident: "
+        "incident_date = when the breach actually OCCURRED (YYYY-MM-DD or YYYY-MM; \"\" "
+        "only if the answer genuinely never indicates it), disclosure_date "
+        "= when it was first publicly reported/disclosed — if the answer gives any "
+        "publication, statement or update date for the incident, use it ("
+        "\"\" only if there is truly none), "
         "records_affected (e.g. \"3.68M\", \"\" if unstated), breach_type, root_cause "
         "(one short phrase, e.g. 'third-party provider compromised via brute force'; \"\" "
         "if unstated), and confidence (high only when the answer cites multiple "
@@ -495,7 +501,17 @@ def discover(company: str, domain: str = "", aliases: list[str] | None = None) -
         engine_sources = judged.get("_sources") or []
         engine_providers = judged.get("_providers") or []
         cost = judged.get("_cost") or {}
-        dated = _incident_dates(incidents) or det_dated
+        # Date the verdict ONLY from the researched incidents. Falling back to the
+        # scraped article dates when an incident carries no date of its own is
+        # actively wrong: on the 2026-07-28 mip.co.za scan the researched incident
+        # came back undated and the fallback supplied 2020-04-21 from an unrelated
+        # old article, so a breach disclosed the previous month was reported as
+        # "75.2 months ago" — and, being outside every recency band, it silently
+        # dropped the RSI factor and the recent-breach flag. Undated is the honest
+        # answer; it maps to the "date unestablished" band rather than to a
+        # fabricated age. Article dates are still used when there is no researched
+        # incident at all (the deterministic path).
+        dated = _incident_dates(incidents) if incidents else det_dated
         confidence = {"confirmed": "high", "reported": "medium",
                       "possible": "low", "none": "none"}.get(verdict, det_conf)
         # A ransomware leak-site listing is direct evidence of compromise, so it
