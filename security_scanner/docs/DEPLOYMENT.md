@@ -289,6 +289,27 @@ When you point a real domain (or subdomain) at the VM later:
     || logger -t scanner-health "PROVIDER KEY DEGRADED — breach history is being reported unassessed"
   ```
 
+  The same probe also reports the **datastore backend** (`providers.datastore`):
+  `postgres` healthy, `sqlite_fallback` **degraded**. `scanner_db` falls back to
+  SQLite whenever `DATABASE_URL` is unset — right for local dev, silently wrong in
+  production. On 2026-07-27 a clobbered `.env` dropped `DATABASE_URL` and the
+  service came up serving a stale legacy `scans.db` while the real Postgres
+  history sat untouched and invisible, with every health check green. If you are
+  deliberately running on SQLite, set `SCANNER_ALLOW_SQLITE=1` and it reports
+  `sqlite` without alarming.
+
+### Never let a tarball carry `.env`
+
+`deploy_vm.sh` now excludes `.env` / `.env.*` / `secrets.env` at **extract** time, so
+a carelessly built tarball can no longer overwrite server-owned secrets. Build with
+the documented `--exclude=.env` anyway — the script warns when a tarball contains
+them. This matters because the VM `.env` is **not** a copy of the repo one: it also
+holds `GOOGLE_API_KEY`, `DATABASE_URL` and `SECRET_KEY`, none of which are in the
+repo. `DATABASE_URL` and `SECRET_KEY` are reconstructible from
+`/opt/phishield-scanner/secrets.env` (`PG_PW`, `SECRET_KEY`) with the knob defaults
+`phishield` / `phishield_scanner` / port `5544`; `GOOGLE_API_KEY` is **not**
+recoverable from the VM and must be re-supplied by the owner.
+
   The response names the degraded provider, a non-reversible key fingerprint (so a
   rotation is visible without exposing the key) and the operational impact. It is
   cached for `BREACH_INTEL_HEALTH_TTL_S` (default 300s), so polling costs nothing.

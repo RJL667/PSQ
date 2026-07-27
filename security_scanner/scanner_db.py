@@ -60,6 +60,19 @@ def is_postgres() -> bool:
     return bool(_cfg["url"])
 
 
+def configured_backend() -> str:
+    """Which backend is configured — ``"postgres"`` or ``"sqlite"``.
+
+    Unlike :func:`is_postgres` this does NOT call ``_ensure()``, so it never
+    opens a connection pool. That matters for the readiness probe: a health
+    check must be able to report "configured for Postgres" even when Postgres is
+    momentarily unreachable, rather than raising and reporting nothing useful.
+    """
+    if not _cfg["ready"]:
+        configure()
+    return "postgres" if _cfg["url"] else "sqlite"
+
+
 @contextmanager
 def _conn():
     """Yield a (connection, is_pg) pair; commit on success, rollback on error.

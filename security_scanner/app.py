@@ -1069,7 +1069,9 @@ def health_providers():
     Why this matters more than a normal outage: a dead web-search key does NOT
     stop scans. They keep completing and simply report breach history as
     "unassessed" — correct, but easy to miss across a batch. Without this probe
-    the failure is silent by construction.
+    the failure is silent by construction. The datastore check is here for the
+    same reason: an unset DATABASE_URL does not error either, it just serves the
+    SQLite fallback as though nothing happened.
 
     Cached (BREACH_INTEL_HEALTH_TTL_S, default 300s) so a once-a-minute monitor
     costs nothing.
@@ -1097,11 +1099,38 @@ def health_providers():
                       ("hibp", HIBP_API_KEY)):
         providers[name] = {"status": "configured" if key else "not_configured"}
 
+    # Datastore backend. scanner_db falls back to SQLite when DATABASE_URL is
+    # unset — correct for dev, silently catastrophic in production. On
+    # 2026-07-27 a clobbered .env dropped DATABASE_URL and the service came up
+    # serving a stale legacy scans.db while the real Postgres history sat
+    # untouched and invisible, with every health check green throughout. Same
+    # failure shape as a dead web-search key: it does not error, it just quietly
+    # answers from the wrong place. So report the live backend, and treat the
+    # fallback as an alarm unless it was deliberately asked for.
+    try:
+        import scanner_db
+        backend = scanner_db.configured_backend()   # no pool side effect
+        pg = backend == "postgres"
+        allow_sqlite = os.environ.get("SCANNER_ALLOW_SQLITE", "").strip().lower() \
+            in ("1", "true", "yes")
+        providers["datastore"] = {
+            "status": "postgres" if pg else ("sqlite" if allow_sqlite
+                                             else "sqlite_fallback"),
+            "backend": backend,
+        }
+        if not pg and not allow_sqlite:
+            degraded.append("datastore")
+    except Exception as e:
+        providers["datastore"] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+        degraded.append("datastore")
+
     try:
         import observability
         observability.set_provider_key_status(
             "web_search_gemini",
             1 if providers["web_search_gemini"].get("status") == "active" else 0)
+        observability.set_provider_key_status(
+            "datastore", 0 if "datastore" in degraded else 1)
     except Exception:
         pass
 
@@ -1112,9 +1141,20 @@ def health_providers():
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if degraded:
-        body["impact"] = ("Scans still complete, but breach history is reported as "
-                          "UNASSESSED rather than researched. Restore the key and "
-                          "re-run any scans taken while degraded.")
+        impacts = []
+        if "web_search_gemini" in degraded:
+            impacts.append(
+                "Scans still complete, but breach history is reported as UNASSESSED "
+                "rather than researched. Restore the key and re-run any scans taken "
+                "while degraded.")
+        if "datastore" in degraded:
+            impacts.append(
+                "DATABASE_URL is unset, so the scanner is reading and writing the "
+                "SQLite fallback instead of Postgres: existing scans are invisible "
+                "and new ones land in the wrong store. Restore DATABASE_URL (see "
+                "deploy/deploy_vm.sh, which reconstructs it from secrets.env) and "
+                "restart. If SQLite is intended, set SCANNER_ALLOW_SQLITE=1.")
+        body["impact"] = " ".join(impacts)
     return jsonify(body), (503 if degraded else 200)
 
 

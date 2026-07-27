@@ -437,6 +437,63 @@ KEY_PROBE_SCENARIOS = [
 ]
 
 
+# (e) DATASTORE FALLBACK. scanner_db silently falls back to SQLite when
+# DATABASE_URL is unset. That is right for dev and catastrophic in production:
+# on 2026-07-27 a clobbered .env dropped DATABASE_URL and the scanner came up
+# serving a stale legacy scans.db while the real Postgres history sat untouched,
+# with /health AND /health/providers both green the whole time. Nothing errored,
+# so nothing alarmed -- the same shape as a dead web-search key reporting a
+# clean breach history. The readiness probe must therefore treat an unasked-for
+# SQLite fallback as degraded (503), while still allowing a deliberate dev
+# SQLite run via SCANNER_ALLOW_SQLITE.
+#   (label, DATABASE_URL set?, SCANNER_ALLOW_SQLITE, expect_degraded, expect_status)
+DATASTORE_SCENARIOS = [
+    ("postgres configured",     True,  "",  False, "postgres"),
+    ("silent sqlite fallback",  False, "",  True,  "sqlite_fallback"),
+    ("sqlite asked for (dev)",  False, "1", False, "sqlite"),
+    ("postgres + dev flag",     True,  "1", False, "postgres"),
+]
+
+
+def _check_datastore_readiness(failures):
+    import importlib
+    app_mod = importlib.import_module("app")
+    for label, has_url, allow, want_degraded, want_status in DATASTORE_SCENARIOS:
+        env = {"SCANNER_ALLOW_SQLITE": allow}
+        if has_url:
+            env["DATABASE_URL"] = "postgresql://u:p@localhost:5544/db"
+        with mock.patch.dict(os.environ, env, clear=False):
+            if not has_url:
+                os.environ.pop("DATABASE_URL", None)
+            # Re-point scanner_db at the patched env, and keep the probe offline.
+            import scanner_db
+            scanner_db.configure(database_url=os.environ.get("DATABASE_URL"),
+                                 sqlite_path=":memory:")
+            with mock.patch("websearch.check_key_cached",
+                            return_value={"status": "active",
+                                          "key_fingerprint": "test", "cached": True}), \
+                 app_mod.app.test_client() as client:
+                resp = client.get("/health/providers")
+                body = resp.get_json() or {}
+        ds = (body.get("providers") or {}).get("datastore", {})
+        got_status = ds.get("status")
+        got_degraded = "datastore" in (body.get("degraded") or [])
+        code_ok = resp.status_code == (503 if want_degraded else 200)
+        ok = (got_status == want_status) and (got_degraded == want_degraded) and code_ok
+        if not ok:
+            failures.append(
+                f"datastore[{label}]: status={got_status!r} (want {want_status!r}), "
+                f"degraded={got_degraded} (want {want_degraded}), "
+                f"http={resp.status_code} — an unasked-for SQLite fallback must "
+                "raise the readiness alarm, otherwise the scanner can serve a stale "
+                "database while every health check reports green")
+        print(f"  [{'PASS' if ok else 'FAIL'}] datastore:{label:<22} "
+              f"{got_status} degraded={got_degraded} http={resp.status_code}")
+    # leave the module pointed somewhere harmless for any later check
+    import scanner_db
+    scanner_db.configure(database_url=None, sqlite_path=":memory:")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -564,6 +621,7 @@ def main():
     failures = []
     _check_breach_intel(failures)
     _check_key_probe(failures)
+    _check_datastore_readiness(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -601,7 +659,8 @@ def main():
           f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib + "
           f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct + "
           f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel + "
-          f"{len(KEY_PROBE_SCENARIOS)} key-probe "
+          f"{len(KEY_PROBE_SCENARIOS)} key-probe + "
+          f"{len(DATASTORE_SCENARIOS)} datastore-readiness "
           "ground-truth scenarios")
 
 
