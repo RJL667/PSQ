@@ -1308,13 +1308,18 @@ class RansomwareIndex:
         # LOW = no contribution to RSI
 
         # Prior confirmed breach (SCN-041). Repeat victimisation is a real effect:
-        # an organisation that was breached recently is materially more likely to
-        # be hit again — the access route, the exposed credentials and the
-        # unremediated weakness are often still live, and leak-site listings
-        # advertise the victim to other affiliates. Scaled by RECENCY, not count:
-        # an incident inside the year is the signal, a decade-old one is history.
-        # Sized below the credential (0.18-0.22) and RDP (0.20) channels because it
-        # is an indicator of susceptibility rather than an observed open door.
+        # an organisation breached recently is materially more likely to be hit
+        # again — the access route, the exposed credentials and the unremediated
+        # weakness are often still live, and leak-site listings advertise the
+        # victim to other affiliates. Scaled by RECENCY, not count.
+        #
+        # OWNER CALIBRATION 2026-07-27: the first year is cut into quarters rather
+        # than treated as one band, because the RECOVERY WINDOW is itself the
+        # elevated-risk period — an insured still rebuilding systems, rotating
+        # credentials and running IR is at its most exposed, and that exposure
+        # decays quarter by quarter as remediation lands. 0-3mo (+0.16) therefore
+        # sits between a KEV CVE (0.10) and RDP exposure (0.20); by 9-12mo it has
+        # eased to KEV level, and past 3 years it drops out entirely.
         if BREACH_INTEL_SCORING_ENABLED:
             _bi = categories.get("breach_intel", {}) or {}
             if (_bi.get("status") == "completed"
@@ -1323,6 +1328,12 @@ class RansomwareIndex:
                 _imp = 0.0
                 if _m is None:
                     _imp = 0.04            # confirmed but undated
+                elif _m <= 3:
+                    _imp = 0.16            # still in active recovery
+                elif _m <= 6:
+                    _imp = 0.14
+                elif _m <= 9:
+                    _imp = 0.12
                 elif _m <= 12:
                     _imp = 0.10
                 elif _m <= 24:
@@ -1335,8 +1346,11 @@ class RansomwareIndex:
                     _imp = round(_imp, 3)
                     base += _imp
                     _when = f"{_m:.0f} months ago" if _m is not None else "date unestablished"
+                    _recov = " — still within the post-breach recovery window" if (
+                        _m is not None and _m <= 12) else ""
                     factors.append({
-                        "factor": f"Prior {_bi['verdict']} breach ({_when}) — repeat-victimisation risk",
+                        "factor": (f"Prior {_bi['verdict']} breach ({_when}) — "
+                                   f"repeat-victimisation risk{_recov}"),
                         "impact": _imp, "priority": 1 if _imp >= 0.06 else 2})
 
         # KEV CVEs: +0.10 each, cap 0.24. Lifted from +0.08/0.20 (FIN-9): vuln-
