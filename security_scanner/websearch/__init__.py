@@ -50,9 +50,52 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-__all__ = ["deep_search", "deep_search_async", "scanner_search_config", "is_configured"]
+__all__ = ["deep_search", "deep_search_async", "scanner_search_config", "is_configured",
+           "check_key"]
 
 DEFAULT_TIMEOUT_S = 150.0
+_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def check_key(timeout_s: float = 10.0) -> dict:
+    """Health-probe the Gemini key — the guard against a silently-rotated key.
+
+    Uses the FREE ``GET /v1beta/models`` listing rather than a generation call, so
+    it costs nothing and consumes no grounding quota. Mirrors the Dehashed / IntelX
+    balance checks: ``active`` | ``no_api_key`` | ``inactive`` (key rejected) |
+    ``error`` (transient / unreachable).
+
+    This exists because the engine degrades *silently* to snippet-only results
+    when the key is bad — upstream shipped prod that way for weeks. A scan must be
+    able to say "not assessed" instead of a falsely clean "no breaches found".
+    """
+    key = (os.environ.get("GOOGLE_API_KEY", "")
+           or os.environ.get("GEMINI_API_KEY", "")).strip()
+    if not key:
+        return {"status": "no_api_key", "error": "GOOGLE_API_KEY not set"}
+    try:
+        import httpx
+        r = httpx.get(_MODELS_URL, params={"key": key, "pageSize": 1}, timeout=timeout_s)
+        if r.status_code == 200:
+            return {"status": "active", "key_fingerprint": _fingerprint(key)}
+        # 400 API_KEY_INVALID (rotated/typo'd) and 403 SERVICE_BLOCKED (wrong key
+        # type — e.g. a Custom Search key) both mean: present but unusable.
+        if r.status_code in (400, 403):
+            try:
+                msg = r.json().get("error", {}).get("message", "")[:160]
+            except Exception:
+                msg = r.text[:160]
+            return {"status": "inactive", "http": r.status_code, "error": msg,
+                    "key_fingerprint": _fingerprint(key)}
+        return {"status": "error", "http": r.status_code}
+    except Exception as e:
+        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
+
+
+def _fingerprint(key: str) -> str:
+    """Non-reversible key id, so a rotation is visible in logs without exposing it."""
+    import hashlib
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
 def scanner_search_config(api_key: Optional[str] = None):

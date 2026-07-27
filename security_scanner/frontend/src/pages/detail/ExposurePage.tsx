@@ -78,7 +78,7 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
         </Panel>
       </DetailGrid>
 
-      <MoreCheckers r={r} ids={['credential_risk', 'credential_correlation', 'vendor_breach', 'hudson_rock', 'intelx', 'related_domains', 'info_disclosure']} />
+      <MoreCheckers r={r} ids={['breach_intel', 'credential_risk', 'credential_correlation', 'vendor_breach', 'hudson_rock', 'intelx', 'related_domains', 'info_disclosure']} />
     </div>
   )
 }

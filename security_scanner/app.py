@@ -198,6 +198,7 @@ CHECKER_MANIFEST = [
     ]},
     {"section": "Exposure & Reputation", "checkers": [
         {"id": "breaches", "label": "Data Breaches (HIBP)"},
+        {"id": "breach_intel", "label": "Breach History (Web Research)"},
         {"id": "dehashed", "label": "Credential Leaks"},
         {"id": "credential_risk", "label": "Credential Risk Assessment"},
         {"id": "exposed_admin", "label": "Exposed Admin Panels"},
@@ -331,6 +332,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
              annual_revenue: float = 0, annual_revenue_zar: int = 0, country: str = "",
              include_fraudulent_domains: bool = False, client_ips: list = None,
              skip_dehashed: bool = False, skip_intelx: bool = False,
+             skip_breach_intel: bool = False,
              regulatory_flags: dict = None, sub_industry: str = None,
              related_domains: list = None, records_held: int = None):
     # WS8: progress flows through the bus (in-process default, Redis cross-worker
@@ -368,6 +370,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
                     annual_revenue_zar=annual_revenue_zar,
                     country=country,
                     include_fraudulent_domains=include_fraudulent_domains,
+                    skip_breach_intel=skip_breach_intel,
                     client_ips=client_ips,
                     related_domains=related_domains,
                     # WS3: persist per-checker checkpoints under this scan_id; resume=True
@@ -529,6 +532,34 @@ def dehashed_balance():
         return jsonify({"status": "error", "balance": None, "http": r.status_code})
     except Exception as e:
         return jsonify({"status": "error", "balance": None, "error": str(e)})
+
+
+@app.route("/api/breach-intel/status", methods=["GET"])
+@require_api_key
+@rate_limited(_light_limiter)
+def breach_intel_status():
+    """Health of the web-search (Gemini) key that powers breach-history research.
+
+    Same contract as the Dehashed / IntelX balance probes so the scan form can grey
+    the toggle out identically: active | no_api_key | inactive | error. Uses the
+    FREE model-listing endpoint, so polling it costs nothing.
+
+    This matters more than a normal credit check: the search engine degrades
+    SILENTLY to snippet-only results on a bad key, which would surface as "no
+    breaches found" — a false clean bill of health on an underwriting report. The
+    key fingerprint is returned (never the key) so a rotation is visible.
+    """
+    try:
+        from websearch import check_key
+        st = check_key()
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"{type(e).__name__}: {e}"})
+    st.setdefault("balance", None)  # shape-compatible with the other probes
+    if st.get("status") == "inactive":
+        st["hint"] = ("The Google AI Studio key is present but rejected — it was "
+                      "likely rotated or revoked. Update GOOGLE_API_KEY in the "
+                      "scanner .env; breach-history research is skipped until then.")
+    return jsonify(st)
 
 
 @app.route("/api/intelx/balance", methods=["GET"])
@@ -724,6 +755,7 @@ def start_scan():
     include_fraudulent_domains = bool(data.get("include_fraudulent_domains", False))
     skip_dehashed = bool(data.get("skip_dehashed", False))
     skip_intelx = bool(data.get("skip_intelx", False))
+    skip_breach_intel = bool(data.get("skip_breach_intel", False))
 
     # Regulatory exposure flags (default: POPIA only).
     # Each flag also carries an audit-trail "auto_detected" dict from the
@@ -803,7 +835,8 @@ def start_scan():
         "annual_revenue": annual_revenue, "annual_revenue_zar": annual_revenue_zar,
         "country": country, "include_fraudulent_domains": include_fraudulent_domains,
         "client_ips": client_ips, "skip_dehashed": skip_dehashed,
-        "skip_intelx": skip_intelx, "regulatory_flags": regulatory_flags,
+        "skip_intelx": skip_intelx, "skip_breach_intel": skip_breach_intel,
+        "regulatory_flags": regulatory_flags,
         "sub_industry": sub_industry, "related_domains": related_domains,
         "records_held": records_held,
     }

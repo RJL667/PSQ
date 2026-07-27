@@ -12,6 +12,7 @@ from checkers_supply_chain import (
     RelatedDomainsChecker, DependencyManifestChecker, ThirdPartyJSChecker,
     EmailVendorSurfaceChecker, CMSPluginSBOMChecker, VendorBreachChecker,
 )
+from checkers_breach_intel import BreachIntelChecker
 from scoring_analytics import *
 # Phase 5 + Phase 6 scoring/insurance invocation lives in scoring_pipeline so the
 # live scan and the golden/regen rescore share ONE call sequence (no drift — see
@@ -383,6 +384,7 @@ class SecurityScanner:
              annual_revenue_zar: int = 0,
              country: str = "",
              include_fraudulent_domains: bool = False,
+             skip_breach_intel: bool = False,
              client_ips: list = None,
              related_domains: list = None,
              scan_id: str = None, resume: bool = False,
@@ -500,6 +502,16 @@ class SecurityScanner:
         if include_fraudulent_domains:
             heavy_checkers.append(
                 ("fraudulent_domains", FraudulentDomainChecker().check, [domain], 60)
+            )
+        # SCN-040 breach-history intelligence. Heavy (it researches the open web:
+        # multi-provider search, page reads, synthesis) and metered (Gemini), so it
+        # runs sequentially with its own budget and is skippable like the other
+        # credit-consuming checkers. It health-probes its key first and returns a
+        # NON-CONCLUSIVE status if the key is missing/rotated, so a broken key can
+        # never masquerade as "no breaches found".
+        if not skip_breach_intel:
+            heavy_checkers.append(
+                ("breach_intel", BreachIntelChecker().check, [domain], 130)
             )
 
         # --- Phase 3: IP-level checkers (per-IP) ---
