@@ -115,6 +115,14 @@ def researched_breach_risk(breach_intel: dict) -> "tuple[float, str] | None":
         return None
     if breach_intel.get("status") != "completed":
         return None                     # no_api_key / error -> unassessed
+    # Only a properly RESEARCHED result may drive the recency lever. When the
+    # engine degrades to headline-matching, its "most recent" date is the date of
+    # the earliest ARTICLE, not of the incident — for Dis-Chem that was a 2025
+    # follow-up piece about a 2022 breach, which would have scored a three-year-old
+    # incident as if it happened last quarter. Older results predate the flag, so
+    # absence is treated as researched for backward compatibility.
+    if breach_intel.get("researched") is False:
+        return None
     verdict = breach_intel.get("verdict")
     if verdict not in ("confirmed", "reported"):
         return None                     # none / possible / unknown -> no uplift

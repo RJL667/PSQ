@@ -404,6 +404,18 @@ BREACH_FAILSAFE = [             # every one must contribute NOTHING
     ("no_api_key", "unknown"), ("error", "unknown"),
     ("completed", "none"), ("completed", "possible"),
 ]
+# Mid-scan key failure: the key is probed BEFORE the research, so it can die
+# during it (revoked, rotated, or -- as happened in production -- the AI Studio
+# credits running out between probe and synthesis). The engine then degrades to
+# headline-matching, whose "most recent" date is the earliest ARTICLE date, not
+# the incident date: for Dis-Chem that is a 2025 follow-up piece about a 2022
+# breach, which would score a three-year-old incident as if it were last quarter.
+# A degraded result must therefore never reach the recency lever.
+BREACH_DEGRADED = [
+    ("researched confirmed",     {"researched": True},  True),
+    ("degraded confirmed",       {"researched": False}, False),
+    ("legacy (flag absent)",     {},                    True),
+]
 
 
 def _check_breach_intel(failures):
@@ -444,6 +456,18 @@ def _check_breach_intel(failures):
             failures.append(f"breach_failsafe: status={status}/{verdict} returned {got}, "
                             "must be None — an unresearched scan must never score as clean")
         print(f"  [{'PASS' if ok else 'FAIL'}] breach_failsafe:{status + '/' + verdict:<22} -> {got}")
+
+    # (b2) mid-scan key failure: a degraded verdict must not drive the score
+    for label, extra, should_score in BREACH_DEGRADED:
+        bi = {"status": "completed", "verdict": "confirmed",
+              "months_since_most_recent": 1, **extra}
+        got = _sa.researched_breach_risk(bi)
+        ok = (got is not None) == should_score
+        if not ok:
+            failures.append(f"breach_degraded: {label} scored={got is not None}, "
+                            f"expected {should_score} — a headline-only verdict dates "
+                            "from the earliest ARTICLE, not the incident")
+        print(f"  [{'PASS' if ok else 'FAIL'}] breach_degraded:{label:<22} scores={got is not None}")
 
     # (c) recency ladder, both channels
     for months, verdict, want_risk, want_rsi in BREACH_LADDER:
@@ -504,7 +528,7 @@ def main():
           f"{len(TECHSTACK_EOL_SCENARIOS)} techstack-eol + {len(VPN_RDP_SCENARIOS)} "
           f"vpn-rdp + 1 dehashed-attr + {len(CRED_CALIB_SCENARIOS)} cred-calib + "
           f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct + "
-          f"{3 + len(BREACH_FAILSAFE) + len(BREACH_LADDER)} breach-intel "
+          f"{3 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel "
           "ground-truth scenarios")
 
 

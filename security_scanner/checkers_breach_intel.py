@@ -222,11 +222,40 @@ class BreachIntelChecker:
                 "confirm or rule out a prior breach.")
             return result
 
-        # The discovery layer degrades to a deterministic verdict if the engine
-        # fell over mid-flight; that is weaker evidence, so say so rather than
-        # presenting it as researched.
+        # MID-SCAN KEY FAILSAFE. The key is probed before the research starts, but
+        # it can die during it — revoked, rotated by an operator, or (as happened
+        # in production on 2026-07-27) the AI Studio credits running out between
+        # the probe and the synthesis call. The engine degrades silently in that
+        # window, so a scan could report a headline-only verdict while still
+        # claiming key_status "active" from the stale pre-flight probe.
+        #
+        # So: whenever the research did NOT complete properly, re-probe the key and
+        # let the answer decide what kind of failure this was.
         judged_by = found.get("judgment", "deterministic")
+        result["researched"] = (judged_by == "deepsearch")
         if judged_by != "deepsearch":
+            try:
+                from websearch import check_key as _recheck
+                ks2 = _recheck()
+            except Exception as e:
+                ks2 = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+            result["key_status"] = ks2.get("status", "error")
+            if ks2.get("status") != "active":
+                # The key died mid-scan. This is NOT a research result at all —
+                # report it exactly like a pre-flight key failure rather than
+                # presenting headline-matching as if it were researched.
+                result["status"] = ("no_api_key" if ks2.get("status") == "no_api_key"
+                                    else "error")
+                result["verdict"] = "unknown"
+                result["confidence"] = "none"
+                result["error"] = ks2.get("error") or f"HTTP {ks2.get('http')}"
+                result["issues"].append(
+                    "The web-search key stopped working DURING this scan "
+                    f"({result['key_status']}), so breach-history research did not "
+                    "complete. Treat the breach history as UNASSESSED, not clean, "
+                    "and re-run once the key is restored.")
+                return result
+            # Key is fine — a genuine research failure (network, provider outage).
             result["issues"].append(
                 "Breach research degraded to headline-matching only; treat a "
                 "'none' verdict as unconfirmed rather than clean.")
