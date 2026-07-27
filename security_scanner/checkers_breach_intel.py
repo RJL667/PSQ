@@ -254,5 +254,10 @@ class BreachIntelChecker:
                 f"RECENT breach — most recent incident {result['months_since_most_recent']} "
                 "months ago; recent incidents materially affect cyber posture.")
 
-        _cache_write(domain, dict(result, cached=False))
+        # Only cache a properly RESEARCHED result. Caching a degraded run would
+        # pin a weak answer for the whole TTL — exactly what happened when the
+        # Gemini credits lapsed mid-scan: the headline-only fallback would have
+        # been served for 14 days after billing was restored.
+        if judged_by == "deepsearch":
+            _cache_write(domain, dict(result, cached=False))
         return result
