@@ -170,14 +170,30 @@ def build(doc):
     )
     add_body(
         doc,
-        "The retrieved candidates are then judged by a large language model "
-        "(Claude Sonnet 5), which confirms which describe a real breach of THIS "
-        "specific company, clusters coverage of the same event into a single "
-        "incident, extracts the date the breach actually occurred (not merely the "
-        "article date), and grades each incident's confidence. The result is a "
-        "dated breach timeline that HIBP alone cannot produce, this matters "
-        "because a recent, confirmed breach materially changes cyber posture, "
-        "whereas a decade-old one is largely historical."
+        "The question is then RESEARCHED rather than merely matched. The scanner "
+        "runs a deep, multi-provider answer engine: the query is fanned out across "
+        "several independent search providers in parallel, the results are fused "
+        "and ranked, the highest-ranked source pages are actually fetched and "
+        "read, the engine reasons about what is still missing and searches again, "
+        "and a language model then synthesises an answer with inline citations to "
+        "the real sources. A second model pass renders that answer into structured "
+        "incidents."
+    )
+    add_body(
+        doc,
+        "Because the engine reads the sources rather than only their headlines, it "
+        "recovers detail a headline scrape cannot: the date the breach actually "
+        "OCCURRED (as distinct from the date it was first reported), the number of "
+        "records affected, the root cause, and any regulatory action. In the "
+        "Dis-Chem example the engine returns an incident date of approximately 28 "
+        "April 2022 with 3.68 million records affected, attributes the compromise "
+        "to a third-party e-statement provider accessed by brute force, and cites "
+        "the Information Regulator's own enforcement notice, where the first press "
+        "article is dated 11 May 2022 and states none of that. This distinction "
+        "matters commercially: a recent, confirmed breach materially changes cyber "
+        "posture, whereas a decade-old one is largely historical, and a "
+        "third-party root cause is a supply-chain signal rather than a failure of "
+        "the insured's own controls."
     )
     add_note(
         doc,
@@ -185,8 +201,11 @@ def build(doc):
         "confirmed breach requires a ransomware leak-site listing or two or more "
         "independent reputable outlets; a single ambiguous mention is graded "
         "low-confidence and is surfaced as a monitoring signal, not asserted as a "
-        "breach. If the language-model layer is unavailable, the check degrades "
-        "gracefully to the deterministic verdict rather than failing."
+        "breach. A leak-site listing is direct evidence of compromise and floors "
+        "the verdict at confirmed. If the research layer is unavailable, the check "
+        "degrades gracefully to the deterministic verdict rather than failing, and "
+        "records which layer produced the result so a thin answer is never mistaken "
+        "for a clean one."
     )
 
     # ══════════════════════════════════════════════════════════════════════

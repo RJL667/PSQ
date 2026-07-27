@@ -37,7 +37,7 @@ redis>=5.0.0
 # OpenTelemetry tracing is optional (guarded); add opentelemetry-* to enable it.
 prometheus_client>=0.20.0
 
-# Anthropic SDK — breach-discovery LLM judgment layer (tooling/breach_web_discovery.py).
-# Imported lazily and only when ANTHROPIC_API_KEY is set; the tool degrades to a
-# deterministic verdict without it, so this is a soft dependency.
-anthropic>=0.69.0
+# Deep web-search answer engine (websearch/, vendored from the veilguard stack —
+# see websearch/VENDORED.md). Powers breach-history corroboration; needs
+# GOOGLE_API_KEY for grounding + synthesis.
+httpx>=0.27.0
