@@ -57,17 +57,19 @@ DEFAULT_TIMEOUT_S = 150.0
 _MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
-def check_key(timeout_s: float = 10.0) -> dict:
-    """Health-probe the Gemini key — the guard against a silently-rotated key.
+def check_key(timeout_s: float = 10.0, verify_generation: bool = True) -> dict:
+    """Health-probe the Gemini key — the guard against a bad key faking a clean scan.
 
-    Uses the FREE ``GET /v1beta/models`` listing rather than a generation call, so
-    it costs nothing and consumes no grounding quota. Mirrors the Dehashed / IntelX
-    balance checks: ``active`` | ``no_api_key`` | ``inactive`` (key rejected) |
-    ``error`` (transient / unreachable).
+    Two failure modes, both of which have now happened in production:
+      * key ROTATED / revoked / wrong type -> caught by the free ``/v1beta/models``
+        listing (costs nothing, consumes no quota);
+      * key VALID BUT OUT OF CREDIT -> the listing still returns 200 while every
+        generation 429s ("prepayment credits are depleted"), so the cheap probe
+        alone would report ``active`` while research silently degraded to snippets.
+        ``verify_generation`` therefore issues a 1-token generation as well.
 
-    This exists because the engine degrades *silently* to snippet-only results
-    when the key is bad — upstream shipped prod that way for weeks. A scan must be
-    able to say "not assessed" instead of a falsely clean "no breaches found".
+    Statuses mirror the Dehashed / IntelX balance probes: ``active`` |
+    ``no_api_key`` | ``inactive`` (rejected) | ``quota_exhausted`` | ``error``.
     """
     key = (os.environ.get("GOOGLE_API_KEY", "")
            or os.environ.get("GEMINI_API_KEY", "")).strip()
@@ -77,7 +79,27 @@ def check_key(timeout_s: float = 10.0) -> dict:
         import httpx
         r = httpx.get(_MODELS_URL, params={"key": key, "pageSize": 1}, timeout=timeout_s)
         if r.status_code == 200:
-            return {"status": "active", "key_fingerprint": _fingerprint(key)}
+            if not verify_generation:
+                return {"status": "active", "key_fingerprint": _fingerprint(key)}
+            # The key is real; can it actually spend? One token is enough to find out.
+            model = os.environ.get("GEMINI_EXTRACT_MODEL", "gemini-2.5-flash")
+            g = httpx.post(
+                f"{_MODELS_URL}/{model}:generateContent",
+                params={"key": key},
+                json={"contents": [{"parts": [{"text": "ok"}]}],
+                      "generationConfig": {"maxOutputTokens": 1}},
+                timeout=timeout_s)
+            if g.status_code == 200:
+                return {"status": "active", "key_fingerprint": _fingerprint(key)}
+            if g.status_code == 429:
+                try:
+                    msg = g.json().get("error", {}).get("message", "")[:200]
+                except Exception:
+                    msg = g.text[:200]
+                return {"status": "quota_exhausted", "http": 429, "error": msg,
+                        "key_fingerprint": _fingerprint(key)}
+            return {"status": "error", "http": g.status_code,
+                    "key_fingerprint": _fingerprint(key)}
         # 400 API_KEY_INVALID (rotated/typo'd) and 403 SERVICE_BLOCKED (wrong key
         # type — e.g. a Custom Search key) both mean: present but unusable.
         if r.status_code in (400, 403):

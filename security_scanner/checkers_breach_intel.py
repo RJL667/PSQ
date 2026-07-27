@@ -181,11 +181,17 @@ class BreachIntelChecker:
             result["confidence"] = "none"
             detail = ks.get("error") or f"HTTP {ks.get('http')}"
             result["error"] = detail
+            cause = {
+                "no_api_key": "is not configured",
+                "quota_exhausted": "has no credit left — top up the Google AI "
+                                   "Studio billing account",
+                "inactive": f"was rejected ({detail}) — it has likely been rotated "
+                            "or revoked; update GOOGLE_API_KEY",
+            }.get(ks.get("status"), f"could not be verified ({detail})")
             result["issues"].append(
-                "Breach-history research did not run: the web-search API key is "
-                + ("not configured" if ks.get("status") == "no_api_key"
-                   else f"not usable ({detail}). Rotate or renew the key")
-                + ". This scan cannot confirm or rule out a prior breach."
+                f"Breach-history research did not run: the web-search API key {cause}. "
+                "This scan can neither confirm nor rule out a prior breach — treat "
+                "the breach history as UNASSESSED, not clean."
             )
             return result
 

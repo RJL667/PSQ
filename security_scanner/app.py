@@ -555,10 +555,18 @@ def breach_intel_status():
     except Exception as e:
         return jsonify({"status": "error", "error": f"{type(e).__name__}: {e}"})
     st.setdefault("balance", None)  # shape-compatible with the other probes
-    if st.get("status") == "inactive":
-        st["hint"] = ("The Google AI Studio key is present but rejected — it was "
-                      "likely rotated or revoked. Update GOOGLE_API_KEY in the "
-                      "scanner .env; breach-history research is skipped until then.")
+    hints = {
+        "inactive": ("The Google AI Studio key is present but rejected — it was "
+                     "likely rotated or revoked. Update GOOGLE_API_KEY in the "
+                     "scanner .env; breach-history research is skipped until then."),
+        "quota_exhausted": ("The key is valid but its Google AI Studio credits are "
+                            "depleted. Top up billing — until then breach history "
+                            "is reported as UNASSESSED rather than clean."),
+        "no_api_key": ("GOOGLE_API_KEY is not set, so breach-history research is "
+                       "skipped and reported as unassessed."),
+    }
+    if st.get("status") in hints:
+        st["hint"] = hints[st["status"]]
     return jsonify(st)
 
 
