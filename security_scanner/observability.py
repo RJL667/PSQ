@@ -31,6 +31,11 @@ PROVIDER_CALLS = Counter("provider_calls_total", "Metered provider calls", ["pro
 CHECKER_DURATION = Histogram("checker_duration_seconds", "Per-checker wall time",
                              ["checker"], buckets=(1, 5, 15, 30, 60, 120, 180, 300))
 BREAKER_OPEN = Counter("circuit_breaker_open_total", "Circuit-breaker trips", ["provider"])
+# 1 = usable, 0 = configured but not usable (rotated / revoked / out of credit).
+# A dead provider key does not fail a scan — it silently downgrades a checker to
+# "unassessed" — so it needs its own signal rather than showing up as an error rate.
+PROVIDER_KEY_OK = Gauge("provider_key_usable", "Provider key usable (1) or not (0)",
+                        ["provider"])
 
 CONTENT_TYPE = CONTENT_TYPE_LATEST
 
@@ -52,6 +57,14 @@ def record_checker_durations(durations: dict) -> None:
             CHECKER_DURATION.labels(checker=str(name)).observe(float(secs))
         except Exception:
             pass
+
+
+def set_provider_key_status(provider: str, usable: int) -> None:
+    """Record whether a provider key is usable (1) or not (0)."""
+    try:
+        PROVIDER_KEY_OK.labels(provider=provider).set(usable)
+    except Exception:
+        pass
 
 
 def set_queue_depth(n: int) -> None:

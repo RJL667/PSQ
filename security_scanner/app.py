@@ -868,6 +868,27 @@ def start_scan():
             "Only publicly routable IP addresses are scanned; private/"
             "loopback/link-local addresses were dropped"
         )
+    # Tell the submitter NOW if a metered key is down, rather than letting them
+    # discover it in the finished report. The scan form checks on page load, but a
+    # key that flips mid-book leaves a stale page (or an API caller) submitting
+    # scans that will quietly come back with breach history unassessed.
+    if not skip_breach_intel:
+        try:
+            from websearch import check_key_cached
+            ks = check_key_cached()
+            if ks.get("status") != "active":
+                response.setdefault("warnings", []).append({
+                    "checker": "breach_intel",
+                    "status": ks.get("status"),
+                    "message": ("The web-search key is not usable "
+                                f"({ks.get('status')}), so this scan will report "
+                                "breach history as UNASSESSED rather than "
+                                "researched — it will not be a clean result. "
+                                "Restore the key and re-run for a researched "
+                                "breach history."),
+                })
+        except Exception:
+            pass
     return jsonify(response), 202
 
 
@@ -1033,6 +1054,68 @@ def view_results(scan_id: str):
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()})
+
+
+@app.route("/health/providers")
+def health_providers():
+    """Readiness of the metered provider keys — returns **503 when degraded**.
+
+    `/health` deliberately stays a bare liveness probe (the deploy script gates on
+    it, and the app is genuinely up even with a dead provider key). This is the
+    separate readiness probe: point any uptime monitor at it and a key that flips
+    mid-book raises an alarm within one poll, instead of going unnoticed until
+    somebody happens to reload the scan form.
+
+    Why this matters more than a normal outage: a dead web-search key does NOT
+    stop scans. They keep completing and simply report breach history as
+    "unassessed" — correct, but easy to miss across a batch. Without this probe
+    the failure is silent by construction.
+
+    Cached (BREACH_INTEL_HEALTH_TTL_S, default 300s) so a once-a-minute monitor
+    costs nothing.
+    """
+    providers, degraded = {}, []
+
+    try:
+        from websearch import check_key_cached
+        ks = check_key_cached()
+        providers["web_search_gemini"] = {
+            "status": ks.get("status"), "key_fingerprint": ks.get("key_fingerprint"),
+            "cached": ks.get("cached"),
+            **({"error": ks["error"][:160]} if ks.get("error") else {}),
+        }
+        if ks.get("status") != "active":
+            degraded.append("web_search_gemini")
+    except Exception as e:
+        providers["web_search_gemini"] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+        degraded.append("web_search_gemini")
+
+    # Configured-but-unusable is the alarm condition. A provider that was never
+    # configured is a deliberate deployment choice, not a regression, so it is
+    # reported without failing the probe.
+    for name, key in (("dehashed", DEHASHED_API_KEY), ("intelx", INTELX_API_KEY),
+                      ("hibp", HIBP_API_KEY)):
+        providers[name] = {"status": "configured" if key else "not_configured"}
+
+    try:
+        import observability
+        observability.set_provider_key_status(
+            "web_search_gemini",
+            1 if providers["web_search_gemini"].get("status") == "active" else 0)
+    except Exception:
+        pass
+
+    body = {
+        "status": "degraded" if degraded else "ok",
+        "degraded": degraded,
+        "providers": providers,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if degraded:
+        body["impact"] = ("Scans still complete, but breach history is reported as "
+                          "UNASSESSED rather than researched. Restore the key and "
+                          "re-run any scans taken while degraded.")
+    return jsonify(body), (503 if degraded else 200)
 
 
 @app.route("/metrics")

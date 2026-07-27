@@ -269,6 +269,33 @@ When you point a real domain (or subdomain) at the VM later:
   Suspend then delete the `phishield-scanner` service in the Render dashboard to finish
   decommission.
 - **Monitoring**: app exposes Prometheus metrics at `/scanner/metrics`; not scraped yet.
+- **Provider-key readiness — `GET /scanner/health/providers`** (returns **503 when
+  degraded**, 200 when healthy). Point an uptime monitor at this. It exists because a
+  dead metered key is a *silent* failure mode: scans keep completing and simply report
+  breach history as **UNASSESSED** rather than researched, so without a probe the only
+  signal is somebody reloading the scan form. `/health` stays a bare liveness check —
+  the deploy script gates on it and the app is genuinely up with a dead key, so do not
+  make that one fail.
+
+  ```bash
+  # any uptime service (UptimeRobot / Better Uptime / Pingdom) → alert on non-200
+  https://veilguard.phishield.com/scanner/health/providers
+  ```
+
+  Or, with no third party, a cron on the VM:
+
+  ```bash
+  */15 * * * * curl -fsS https://veilguard.phishield.com/scanner/health/providers >/dev/null \
+    || logger -t scanner-health "PROVIDER KEY DEGRADED — breach history is being reported unassessed"
+  ```
+
+  The response names the degraded provider, a non-reversible key fingerprint (so a
+  rotation is visible without exposing the key) and the operational impact. It is
+  cached for `BREACH_INTEL_HEALTH_TTL_S` (default 300s), so polling costs nothing.
+  Prometheus carries the same signal as `provider_key_usable{provider="…"}`.
+  Submitting a scan while degraded also returns a `warnings[]` entry in the
+  `POST /api/scan` response, so an operator is told at submission time rather than
+  discovering it in the finished report.
 
 ---
 

@@ -120,6 +120,28 @@ def _fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
+# Cached health, so an uptime monitor can poll the readiness endpoint every minute
+# without spending a generation call each time.
+_HEALTH_TTL_S = float(os.environ.get("BREACH_INTEL_HEALTH_TTL_S", "300"))
+_health_cache: dict = {"at": 0.0, "value": None}
+
+
+def check_key_cached(ttl_s: Optional[float] = None) -> dict:
+    """``check_key`` behind a short TTL. Same contract, safe to poll."""
+    import time
+    ttl = _HEALTH_TTL_S if ttl_s is None else ttl_s
+    now = time.time()
+    if _health_cache["value"] is not None and (now - _health_cache["at"]) < ttl:
+        out = dict(_health_cache["value"])
+        out["cached"] = True
+        return out
+    val = check_key()
+    _health_cache.update({"at": now, "value": val})
+    out = dict(val)
+    out["cached"] = False
+    return out
+
+
 def scanner_search_config(api_key: Optional[str] = None):
     """Env-only :class:`SearchConfig` — never contacts the Command Centre.
 
