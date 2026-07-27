@@ -208,6 +208,40 @@ def build(doc):
         "for a clean one."
     )
 
+    add_bold_body(
+        doc,
+        "How a researched breach affects the score: ",
+        "Breach history is scored on RECENCY rather than on how many breaches are "
+        "listed. A single incident last quarter says far more about present-day "
+        "posture than several a decade ago, and the older count-based treatment "
+        "said the opposite. The researched result supersedes the HIBP count in the "
+        "same breach-history slot at the same weight, so nothing is double-counted "
+        "and HIBP is retained as a floor. An incident within the last year carries "
+        "the full weighting, tapering through roughly the three-year mark and "
+        "falling away beyond five years, on the reasoning that staff, "
+        "infrastructure and controls turn over. A single-source result carries "
+        "about seventy percent of a corroborated one."
+    )
+    add_body(
+        doc,
+        "The same dated result also drives the breach-recency component of the "
+        "Data Breach Resilience index, which previously depended on a HIBP date "
+        "that is absent for almost every South African domain, and it adds a "
+        "repeat-victimisation factor to the Ransomware Susceptibility Index. That "
+        "factor is weighted by quarter through the first year, because the "
+        "recovery window is itself the period of elevated risk: an insured still "
+        "rebuilding systems, rotating credentials and running incident response is "
+        "at its most exposed, and that exposure eases as remediation lands. It "
+        "falls away entirely beyond three years."
+    )
+    add_warning(
+        doc,
+        "If the research cannot run, the breach history is reported as UNASSESSED "
+        "and contributes nothing to the score. It is never reported as clean. An "
+        "absence of evidence produced by an outage is not evidence of absence, and "
+        "the distinction is visible on both the scan form and the report."
+    )
+
     # ══════════════════════════════════════════════════════════════════════
     # 4.6.2  IP/Domain Reputation (DNSBL)
     # ══════════════════════════════════════════════════════════════════════
