@@ -3,6 +3,11 @@
 # via security_scanner/deploy/deploy_vm.sh. Its Render service block was removed
 # from this blueprint; suspend/delete the phishield-scanner service in the Render
 # dashboard to complete decommission.
+# NOTE: the sme-rating-engine service was RETIRED (2026-07-27). Production now
+# runs on the Google Cloud VM (veilguard.phishield.com/smerating/), tarball-deployed
+# via sme_rating_engine/deploy/deploy_sme_vm.sh. Its Render service block was removed
+# from this blueprint; suspend/delete the sme-rating-engine service in the Render
+# dashboard to complete decommission.
 services:
   - type: web
     name: life-planner
@@ -13,16 +18,3 @@ services:
       - type: rewrite
         source: /*
         destination: /planner.html
-
-  - type: web
-    name: sme-rating-engine
-    runtime: python
-    rootDir: SME Rating Engine
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.12"
-      - key: PORT
-        value: "10000"
-    plan: free
