@@ -494,6 +494,125 @@ def _check_datastore_readiness(failures):
     scanner_db.configure(database_url=None, sqlite_path=":memory:")
 
 
+# (g) CREDENTIAL PROVIDERS MUST FAIL CLOSED. A dead or unfunded DeHashed/IntelX
+# produced a report that read CLEAN rather than unassessed - the same silent
+# degradation the breach-history checker was deliberately built to avoid, never
+# applied to these two. Four distinct leaks, all observed in code:
+#   * IntelX returns a 200 with NO search id once the daily free allowance is
+#     gone; the checker returned status="completed", total_results=0, which is
+#     byte-identical to a genuinely clean domain.
+#   * A failed result-poll (402/429/5xx) broke out of the loop with records=[]
+#     and status still "completed".
+#   * The Data Breach Index defaulted total_entries to 0 for any status except
+#     no_api_key/auth_failed, taking the FULL-MARKS 20/20 clean branch - so a
+#     BROKEN provider scored better than an ABSENT one (10/20 "Unknown").
+#   * CredentialRiskClassifier never read the status at all: no records meant
+#     class NONE / risk LOW plus the affirmative "exposure is historical and/or
+#     email-only" summary. That is the RSI-driving channel.
+# Every non-conclusive status must reach the scorer as "we did not look".
+NON_CONCLUSIVE = ["error", "timeout", "quota_exhausted", "subscription_required",
+                  "no_api_key", "auth_failed"]
+
+
+def _check_credential_failclosed(failures):
+    import importlib
+    ct_mod = importlib.import_module("checkers_threats")
+    sa = importlib.import_module("scoring_analytics")
+
+    # (1) the classifier must refuse to classify an unsearched estate
+    for st in NON_CONCLUSIVE:
+        res = ct_mod.CredentialRiskClassifier.classify(
+            {"status": st, "breach_details": [], "total_entries": 0}, {}, {})
+        lvl, assessed = res.get("risk_level"), res.get("assessed", True)
+        ok = (lvl == "UNKNOWN") and (assessed is False) \
+            and "NOT ASSESSED" in (res.get("summary") or "")
+        if not ok:
+            failures.append(
+                f"cred_failclosed[classify/{st}]: risk_level={lvl!r} assessed={assessed} "
+                "— an unsearched credential estate must report UNKNOWN/unassessed, "
+                "never LOW with a reassuring summary; this channel drives the RSI")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:classify/{st:<22} "
+              f"{lvl} assessed={assessed}")
+
+    # (2) a healthy-but-genuinely-clean lookup must STILL score clean (no over-correction)
+    clean = ct_mod.CredentialRiskClassifier.classify(
+        {"status": "completed", "breach_details": [], "total_entries": 0}, {}, {})
+    ok = clean.get("risk_level") == "LOW" and clean.get("assessed", True) is not False
+    if not ok:
+        failures.append(f"cred_failclosed[classify/genuinely-clean]: {clean.get('risk_level')!r} "
+                        "— a real empty result must still read LOW, or we have swapped "
+                        "one wrong answer for another")
+    print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:classify/genuine-clean   "
+          f"{clean.get('risk_level')}")
+
+    # (3) the Data Breach Index must not award the clean sweep to a failed lookup
+    def _dbi(status):
+        cats = {"breaches": {"status": "completed", "breach_count": 0, "issues": []},
+                "dehashed": {"status": status, "total_entries": 0}}
+        comp = sa.DataBreachIndex().calculate(cats)["components"]["credential_leaks"]
+        return comp["points"]
+    conclusive_pts = _dbi("completed")
+    for st in NON_CONCLUSIVE:
+        pts = _dbi(st)
+        ok = (pts is not None) and (pts < conclusive_pts)
+        if not ok:
+            failures.append(
+                f"cred_failclosed[dbi/{st}]: {pts} pts vs {conclusive_pts} for a real "
+                "clean lookup — a provider that never answered must not earn the "
+                "full-marks clean branch")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:dbi/{st:<24} "
+              f"{pts} pts (real clean = {conclusive_pts})")
+
+    # (4) the headline scorer must exclude them rather than treat them as valid
+    for st in ("quota_exhausted", "subscription_required"):
+        ok = st in sa.RiskScorer._FAILED_STATUSES
+        if not ok:
+            failures.append(f"cred_failclosed[failed_statuses/{st}]: not in _FAILED_STATUSES "
+                            "— it would score as a valid, clean category")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:failed_status/{st:<16} {ok}")
+
+    # (5) the PAGE must say so too. Correct scoring is invisible to a broker
+    # reading the PDF: an empty dark-web section still reads as good news unless
+    # the card states it was never searched.
+    pc = importlib.import_module("pdf_cards")
+    from pdf_helpers import build_styles
+    S = build_styles()
+
+    def _txt(parts):
+        return " ".join(getattr(p, "text", "") or "" for p in parts)
+
+    render_cases = [
+        ("dehashed/quota", pc.cat_dehashed,
+         {"dehashed": {"status": "quota_exhausted", "total_entries": 0, "issues": []}}, True),
+        ("dehashed/subscription", pc.cat_dehashed,
+         {"dehashed": {"status": "subscription_required", "total_entries": 0, "issues": []}}, True),
+        ("dehashed/genuine-clean", pc.cat_dehashed,
+         {"dehashed": {"status": "completed", "total_entries": 0, "unique_emails": 0, "issues": []}}, False),
+        ("intelx/quota", pc.cat_intelx,
+         {"intelx": {"status": "quota_exhausted", "total_results": 0, "issues": []}}, True),
+        ("intelx/poll-error", pc.cat_intelx,
+         {"intelx": {"status": "error", "total_results": 0, "issues": []}}, True),
+        ("intelx/genuine-clean", pc.cat_intelx,
+         {"intelx": {"status": "completed", "total_results": 0, "issues": []}}, False),
+        ("credrisk/unassessed", pc.cat_credential_risk,
+         {"credential_risk": {"risk_level": "UNKNOWN", "assessed": False,
+                              "status": "quota_exhausted"}}, True),
+        ("credrisk/real-low", pc.cat_credential_risk,
+         {"credential_risk": {"risk_level": "LOW", "risk_score": 100, "factors": []}}, False),
+    ]
+    for label, fn, data, want_caveat in render_cases:
+        txt = _txt(fn(data, S))
+        has = "Not assessed" in txt
+        ok = has == want_caveat
+        if not ok:
+            failures.append(
+                f"cred_failclosed[render/{label}]: caveat_present={has}, expected "
+                f"{want_caveat} — a card built from a lookup that never ran must say "
+                "'Not assessed'; correct scoring alone is invisible to the reader")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:render/{label:<22} "
+              f"caveat={has}")
+
+
 # (f) CREDENTIAL-EXPORT KILL SWITCH. The export releases a client's ACTUAL
 # breached passwords. What makes that lawful is the client's signed consent, and
 # the request's `consent: true` field is only a broker attestation -- during the
@@ -541,6 +660,78 @@ def _check_export_switch(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] export_switch:{label:<18} "
               f"env={str(val):<6} POST={post.status_code} DL={dl.status_code} "
               f"enabled={st.get('enabled')}")
+
+
+# (h) PROVIDER BUDGET GUARD. The guard existed but was decorative: caps were
+# placeholders 20x above the real quota (1000/day vs IntelX's free 50/day) so it
+# could never fire first, and the counters were in-process, so every deploy
+# handed the box a fresh allowance it did not have. The durable `usage` table
+# recorded every call and had no reader. Two subtleties are asserted here because
+# both were got wrong on the first attempt:
+#   * a FRESH ledger (i.e. after a restart) must inherit the day's durable spend;
+#   * a STALE durable read must not hand out allowance already spent — anchoring
+#     to max(durable, in-process) silently overruns the cap by up to one cache
+#     TTL's worth of calls, which is why the delta is measured from the
+#     in-process counter at fetch time instead.
+def _check_provider_budget(failures):
+    import importlib
+    P = importlib.import_module("providers")
+
+    def L(cap):
+        return P.DurableUsageLedger(default_daily_cap=None, daily_caps={"intelx": cap},
+                                    retry_cap_per_window=50, retry_window_seconds=300)
+
+    checks = []
+
+    # real quota, not a placeholder
+    checks.append(("real_quota", P._LEDGER.caps().get("intelx") == 50,
+                   f"intelx cap={P._LEDGER.caps().get('intelx')} — must be the real "
+                   "50/day free tier, or the guard can never fire before the provider"))
+
+    # the cap binds
+    l = L(3)
+    with mock.patch.object(l, "_durable_spend", return_value=0):
+        seq = []
+        for _ in range(5):
+            a = l.allow_call("intelx")
+            seq.append(a)
+            if a:
+                l.record_call("intelx")
+    checks.append(("cap_binds", seq == [True, True, True, False, False],
+                   f"cap=3 produced {seq} — the cap must stop the 4th call"))
+
+    # survives a restart
+    f = L(50)
+    with mock.patch.object(f, "_durable_spend", return_value=48):
+        rem0 = f.remaining("intelx")
+        f.record_call("intelx"); f.record_call("intelx")
+        after = f.allow_call("intelx")
+    checks.append(("survives_restart", rem0 == 2 and after is False,
+                   f"a fresh ledger saw remaining={rem0} then allow={after} — it must "
+                   "inherit the durable count, not restart the day's allowance at zero"))
+
+    # stale cache must not overrun
+    s = L(50)
+    with mock.patch.object(s, "_durable_spend", return_value=49):
+        s.spend_today("intelx")        # prime the cache
+        s.record_call("intelx")        # the 50th call
+        overran = s.allow_call("intelx")
+    checks.append(("stale_cache", overran is False,
+                   "a call made after the durable snapshot was not counted — the cap "
+                   "overruns by up to one cache TTL"))
+
+    # metering must never block a scan
+    b = L(50)
+    with mock.patch("scanner_db.usage_for", side_effect=RuntimeError("db down")):
+        okfail = b.allow_call("intelx")
+    checks.append(("fails_open_on_db_error", okfail is True,
+                   "a metering failure blocked a provider call — accounting must never "
+                   "take the scanner down"))
+
+    for label, ok, why in checks:
+        if not ok:
+            failures.append(f"provider_budget[{label}]: {why}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] provider_budget:{label:<24} {ok}")
 
 
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
@@ -672,6 +863,8 @@ def main():
     _check_key_probe(failures)
     _check_datastore_readiness(failures)
     _check_export_switch(failures)
+    _check_credential_failclosed(failures)
+    _check_provider_budget(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -711,7 +904,9 @@ def main():
           f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel + "
           f"{len(KEY_PROBE_SCENARIOS)} key-probe + "
           f"{len(DATASTORE_SCENARIOS)} datastore-readiness + "
-          f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch "
+          f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
+          f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
+          f"5 provider-budget "
           "ground-truth scenarios")
 
 

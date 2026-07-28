@@ -1,7 +1,8 @@
 import Panel from '../../components/primitives/Panel'
-import { PageTitle, CheckerHeader, KV, IssueList, DetailGrid } from '../../components/detail/parts'
+import { PageTitle, CheckerHeader, KV, IssueList, DetailGrid, NotAssessedNote } from '../../components/detail/parts'
 import { getResults } from '../../data/results'
 import { cat, CATEGORY_LABELS } from '../../data/selectors'
+import { isConclusive } from '../../data/checkerState'
 import CredentialExportPortal from '../../components/overview/CredentialExportPortal'
 import BreachIntelPanel from '../../components/detail/BreachIntelPanel'
 import type { Results, CategoryBase } from '../../types/results'
@@ -39,13 +40,21 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
         </Panel>
 
         <Panel title="Credential Leaks" action={<CheckerHeader category={dehashed} />}>
-          <KV rows={[
-            { label: 'Leaked records', value: String((dehashed?.total_entries as number) ?? '—') },
-            { label: 'Unique emails', value: String((dehashed?.unique_emails as number) ?? '—') },
-            { label: 'Passwords present', value: (dehashed?.has_passwords as boolean) ? 'Yes' : 'No' },
-          ]} />
-          <IssueList issues={dehashed?.issues as string[]} />
-          {((dehashed?.total_entries as number) ?? 0) > 0 && <CredentialExportPortal />}
+          {isConclusive(dehashed) ? (
+            <>
+              <KV rows={[
+                { label: 'Leaked records', value: String((dehashed?.total_entries as number) ?? '—') },
+                { label: 'Unique emails', value: String((dehashed?.unique_emails as number) ?? '—') },
+                { label: 'Passwords present', value: (dehashed?.has_passwords as boolean) ? 'Yes' : 'No' },
+              ]} />
+              <IssueList issues={dehashed?.issues as string[]} />
+              {((dehashed?.total_entries as number) ?? 0) > 0 && <CredentialExportPortal />}
+            </>
+          ) : (
+            // Suppress the counts entirely: a failed lookup returns 0 records, and
+            // "0 leaked records" is indistinguishable from a clean estate.
+            <NotAssessedNote category={dehashed} what="The breached-credential database" />
+          )}
         </Panel>
 
         <Panel title="VirusTotal Reputation" action={<CheckerHeader category={vt} />}>

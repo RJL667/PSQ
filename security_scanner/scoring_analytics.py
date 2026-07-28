@@ -744,8 +744,12 @@ class RiskScorer:
             "surface — review credentials at the affected vendors.",
     }
 
-    # Statuses that indicate a checker failed and should be excluded from scoring
-    _FAILED_STATUSES = {"error", "timeout"}
+    # Statuses that indicate a checker failed and should be excluded from scoring.
+    # "quota_exhausted" and "subscription_required" belong here for the same
+    # reason "error" does: the estate was never searched, so the absence of
+    # findings is absence of evidence. Leaving subscription_required out (as it
+    # was) let a plan/credit failure score as a validated clean result.
+    _FAILED_STATUSES = {"error", "timeout", "quota_exhausted", "subscription_required"}
     # Statuses that indicate a checker was intentionally skipped (no API key,
     # toggle off) — these should NOT count as failures in the completeness warning
     _SKIPPED_STATUSES = {"no_api_key", "auth_failed", "disabled", "skipped"}
@@ -3853,7 +3857,17 @@ class DataBreachIndex:
         }
 
         # 4. Credential leak volume from Dehashed (0-20 points)
-        total_leaks = dehashed.get("total_entries", 0) if dehashed.get("status") not in ("no_api_key", "auth_failed") else -1
+        # -1 routes to the "Unknown — middle score" branch below. Every
+        # non-conclusive status must land there: previously only no_api_key /
+        # auth_failed did, so an "error", an exhausted credit balance or a
+        # subscription problem defaulted total_entries to 0 and took the
+        # FULL-MARKS clean branch. A broken provider therefore scored better
+        # (20/20) than an absent one (10/20), which is exactly backwards.
+        _dh_status = dehashed.get("status")
+        _dh_conclusive = _dh_status not in (
+            "no_api_key", "auth_failed", "error", "timeout",
+            "quota_exhausted", "subscription_required")
+        total_leaks = dehashed.get("total_entries", 0) if _dh_conclusive else -1
         if total_leaks < 0:
             leak_pts = 10  # Unknown — middle score
         elif total_leaks == 0:

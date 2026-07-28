@@ -32,6 +32,8 @@ Migrated call sites map `None` to their existing failure path.
 """
 from __future__ import annotations
 
+import os
+
 from provider_client import ProviderClient
 from resilience import CircuitBreaker, RetryPolicy
 from usage_ledger import InMemoryUsageLedger
@@ -49,16 +51,108 @@ _CACHE = make_result_cache()
 # with the same interface: Redis counters (provider+day / provider+window) mirrored
 # to a Postgres `usage` table (SCALE-17/18). Daily caps below are conservative
 # placeholders — tune against real quotas. Free providers are uncapped.
-_LEDGER = InMemoryUsageLedger(
+class DurableUsageLedger(InMemoryUsageLedger):
+    """Daily caps that survive a restart, and that know the real quotas.
+
+    The in-process ledger was decorative on this deployment for two reasons, both
+    found on 2026-07-28:
+
+      * the caps were placeholders an order of magnitude above the real quota —
+        1000/day for IntelX against a free tier of 50/day, so the guard could
+        never fire before the provider did; and
+      * the counters live in memory, so every deploy handed the box a fresh
+        allowance it did not have.
+
+    The durable `usage` table already recorded every call (``record_usage``) —
+    it simply had no reader. This consults it, cached for a minute to keep it off
+    the hot path, and adds the calls made SINCE that snapshot.
+
+    The delta matters: taking max(durable, in-process) looks equivalent and is
+    not. With a cached durable count of 48 and two fresh calls, max() still reads
+    48 and hands out an allowance that was already spent — the cap then overruns
+    by up to one TTL's worth of calls. Anchoring to the in-process counter at
+    fetch time and adding the difference counts each call exactly once.
+    """
+
+    def __init__(self, *args, db_ttl_s: float = 60.0, **kw):
+        super().__init__(*args, **kw)
+        self._db_ttl = db_ttl_s
+        self._db_cache: dict = {}     # provider -> (fetched_at, durable, inmem_at_fetch)
+
+    def _durable_spend(self, provider: str) -> int:
+        try:
+            import scanner_db
+            return int(scanner_db.usage_for(provider))
+        except Exception:
+            return 0                   # never let metering block a scan
+
+    def spend_today(self, provider: str) -> int:
+        import time as _t
+        inmem = super().spend_today(provider)
+        hit = self._db_cache.get(provider)
+        if not hit or (_t.time() - hit[0]) >= self._db_ttl:
+            hit = (_t.time(), self._durable_spend(provider), inmem)
+            self._db_cache[provider] = hit
+        _, durable, inmem_at_fetch = hit
+        # durable already includes everything up to the snapshot; add only what
+        # this process has spent since.
+        return durable + max(0, inmem - inmem_at_fetch)
+
+    def allow_call(self, provider: str) -> bool:
+        cap = self._cap_for(provider)
+        if cap is None:
+            return True
+        return self.spend_today(provider) < cap
+
+    def remaining(self, provider: str):
+        """Calls left today, or None when the provider is uncapped."""
+        cap = self._cap_for(provider)
+        if cap is None:
+            return None
+        return max(0, cap - self.spend_today(provider))
+
+    def caps(self) -> dict:
+        return dict(self._daily_caps)
+
+
+def _cap(env: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(env, "").strip() or default))
+    except ValueError:
+        return default
+
+
+# Real quotas, env-tunable so a plan change needs no deploy.
+#   intelx   — free tier is 50 SEARCHES/day, reset midnight UTC (see the IntelX
+#              checker). One scan spends one search.
+#   dehashed — a credit POOL rather than a daily allowance, so this cap is a
+#              burn-rate limit: it stops a runaway loop draining the balance in
+#              an afternoon, it is not the balance itself.
+_LEDGER = DurableUsageLedger(
     default_daily_cap=None,
     daily_caps={
-        "shodan": 1000, "hibp": 1000, "dehashed": 1000, "intelx": 1000,
+        "shodan": 1000, "hibp": 1000,
+        "dehashed": _cap("DEHASHED_DAILY_CAP", 150),
+        "intelx": _cap("INTELX_DAILY_CAP", 50),
         "securitytrails": 2000, "virustotal": 500, "snusbase": 2000,
         "leakcheck": 2000, "whiteintel": 500,
     },
     retry_cap_per_window=50,
     retry_window_seconds=300,
 )
+
+# Metered providers whose remaining budget is worth reporting to an operator.
+METERED = ("dehashed", "intelx")
+
+
+def budget_report() -> dict:
+    """Per-provider {used, cap, remaining} for the readiness probe."""
+    out = {}
+    for name in METERED:
+        cap = _LEDGER.caps().get(name)
+        out[name] = {"used": _LEDGER.spend_today(name), "cap": cap,
+                     "remaining": _LEDGER.remaining(name)}
+    return out
 
 
 def _client(name: str, *, rate: float = 5.0, burst: int = 10,
