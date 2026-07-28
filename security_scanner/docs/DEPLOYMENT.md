@@ -307,8 +307,11 @@ them. This matters because the VM `.env` is **not** a copy of the repo one: it a
 holds `GOOGLE_API_KEY`, `DATABASE_URL` and `SECRET_KEY`, none of which are in the
 repo. `DATABASE_URL` and `SECRET_KEY` are reconstructible from
 `/opt/phishield-scanner/secrets.env` (`PG_PW`, `SECRET_KEY`) with the knob defaults
-`phishield` / `phishield_scanner` / port `5544`; `GOOGLE_API_KEY` is **not**
-recoverable from the VM and must be re-supplied by the owner.
+`phishield` / `phishield_scanner` / port `5544`. `GOOGLE_API_KEY` is **not**
+recoverable from the VM at all (it exists nowhere else on the box, and the running
+process holds it only in memory) — the owner keeps the authoritative copy on file
+and re-supplies it. Confirm a restored key with the fingerprint the readiness probe
+reports: `curl -s .../scanner/health/providers` → `providers.web_search_gemini.key_fingerprint`.
 
   The response names the degraded provider, a non-reversible key fingerprint (so a
   rotation is visible without exposing the key) and the operational impact. It is
