@@ -1144,6 +1144,25 @@ def health_providers():
                       ("hibp", HIBP_API_KEY)):
         providers[name] = {"status": "configured" if key else "not_configured"}
 
+    # Remaining daily budget for the metered credential providers. Exhaustion is
+    # no longer a correctness problem — those checkers now report UNASSESSED
+    # rather than a false clean — but it IS a quality-of-service one: every scan
+    # from here to midnight UTC comes back with that section unassessed, so the
+    # operator should hear about it rather than discover it in a client's report.
+    # Alarm on EXHAUSTED only, not on merely low: a probe that goes red while
+    # scans are still fine trains people to ignore it.
+    try:
+        import providers as _prov
+        budget = _prov.budget_report()
+        for name, b in budget.items():
+            if providers.get(name, {}).get("status") == "configured":
+                providers[name].update(b)
+                if b.get("remaining") == 0:
+                    providers[name]["status"] = "budget_exhausted"
+                    degraded.append(name)
+    except Exception as e:
+        budget = {"error": f"{type(e).__name__}: {e}"}
+
     # Datastore backend. scanner_db falls back to SQLite when DATABASE_URL is
     # unset — correct for dev, silently catastrophic in production. On
     # 2026-07-27 a clobbered .env dropped DATABASE_URL and the service came up
@@ -1199,6 +1218,15 @@ def health_providers():
                 "and new ones land in the wrong store. Restore DATABASE_URL (see "
                 "deploy/deploy_vm.sh, which reconstructs it from secrets.env) and "
                 "restart. If SQLite is intended, set SCANNER_ALLOW_SQLITE=1.")
+        spent = [n for n in ("dehashed", "intelx") if n in degraded]
+        if spent:
+            impacts.append(
+                f"Daily budget exhausted for: {', '.join(spent)}. Scans still "
+                "complete and correctly report those sections as UNASSESSED "
+                "rather than clean, but they carry no credential/dark-web "
+                "finding until the quota resets at midnight UTC. Raise the cap "
+                "(DEHASHED_DAILY_CAP / INTELX_DAILY_CAP) only if the provider "
+                "plan actually allows it.")
         body["impact"] = " ".join(impacts)
     return jsonify(body), (503 if degraded else 200)
 

@@ -289,6 +289,26 @@ When you point a real domain (or subdomain) at the VM later:
     || logger -t scanner-health "PROVIDER KEY DEGRADED — breach history is being reported unassessed"
   ```
 
+  It also reports the **daily budget** for the metered credential providers
+  (`providers.dehashed` / `providers.intelx` carry `used` / `cap` / `remaining`).
+  IntelX's free tier is **50 searches per day**, reset midnight UTC, and one scan
+  spends one search; DeHashed is a credit pool, so its cap is a burn-rate limit
+  rather than the balance. Both are env-tunable (`INTELX_DAILY_CAP`,
+  `DEHASHED_DAILY_CAP`) so a plan change needs no deploy. The counters are read
+  from the durable `usage` table, so a restart no longer hands the box a fresh
+  allowance it has not got.
+
+  The probe alarms (503) only when a budget is **exhausted**, not when it is
+  merely low — a probe that goes red while scans are still fine trains people to
+  ignore it. Exhaustion is worth an alarm because every scan until midnight then
+  reports that section as UNASSESSED.
+
+  **On a "reserve":** there is deliberately none. Holding back N credits "for a
+  real client scan" cannot work while every scan is equal at the queue — the
+  reserve would block the client scan exactly as it blocks a demo one. It would
+  only be meaningful once scans carry a priority flag, so what exists instead is
+  an honest remaining-count you can watch.
+
   The same probe also reports the **datastore backend** (`providers.datastore`):
   `postgres` healthy, `sqlite_fallback` **degraded**. `scanner_db` falls back to
   SQLite whenever `DATABASE_URL` is unset — right for local dev, silently wrong in

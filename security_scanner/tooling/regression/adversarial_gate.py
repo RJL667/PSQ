@@ -662,6 +662,78 @@ def _check_export_switch(failures):
               f"enabled={st.get('enabled')}")
 
 
+# (h) PROVIDER BUDGET GUARD. The guard existed but was decorative: caps were
+# placeholders 20x above the real quota (1000/day vs IntelX's free 50/day) so it
+# could never fire first, and the counters were in-process, so every deploy
+# handed the box a fresh allowance it did not have. The durable `usage` table
+# recorded every call and had no reader. Two subtleties are asserted here because
+# both were got wrong on the first attempt:
+#   * a FRESH ledger (i.e. after a restart) must inherit the day's durable spend;
+#   * a STALE durable read must not hand out allowance already spent — anchoring
+#     to max(durable, in-process) silently overruns the cap by up to one cache
+#     TTL's worth of calls, which is why the delta is measured from the
+#     in-process counter at fetch time instead.
+def _check_provider_budget(failures):
+    import importlib
+    P = importlib.import_module("providers")
+
+    def L(cap):
+        return P.DurableUsageLedger(default_daily_cap=None, daily_caps={"intelx": cap},
+                                    retry_cap_per_window=50, retry_window_seconds=300)
+
+    checks = []
+
+    # real quota, not a placeholder
+    checks.append(("real_quota", P._LEDGER.caps().get("intelx") == 50,
+                   f"intelx cap={P._LEDGER.caps().get('intelx')} — must be the real "
+                   "50/day free tier, or the guard can never fire before the provider"))
+
+    # the cap binds
+    l = L(3)
+    with mock.patch.object(l, "_durable_spend", return_value=0):
+        seq = []
+        for _ in range(5):
+            a = l.allow_call("intelx")
+            seq.append(a)
+            if a:
+                l.record_call("intelx")
+    checks.append(("cap_binds", seq == [True, True, True, False, False],
+                   f"cap=3 produced {seq} — the cap must stop the 4th call"))
+
+    # survives a restart
+    f = L(50)
+    with mock.patch.object(f, "_durable_spend", return_value=48):
+        rem0 = f.remaining("intelx")
+        f.record_call("intelx"); f.record_call("intelx")
+        after = f.allow_call("intelx")
+    checks.append(("survives_restart", rem0 == 2 and after is False,
+                   f"a fresh ledger saw remaining={rem0} then allow={after} — it must "
+                   "inherit the durable count, not restart the day's allowance at zero"))
+
+    # stale cache must not overrun
+    s = L(50)
+    with mock.patch.object(s, "_durable_spend", return_value=49):
+        s.spend_today("intelx")        # prime the cache
+        s.record_call("intelx")        # the 50th call
+        overran = s.allow_call("intelx")
+    checks.append(("stale_cache", overran is False,
+                   "a call made after the durable snapshot was not counted — the cap "
+                   "overruns by up to one cache TTL"))
+
+    # metering must never block a scan
+    b = L(50)
+    with mock.patch("scanner_db.usage_for", side_effect=RuntimeError("db down")):
+        okfail = b.allow_call("intelx")
+    checks.append(("fails_open_on_db_error", okfail is True,
+                   "a metering failure blocked a provider call — accounting must never "
+                   "take the scanner down"))
+
+    for label, ok, why in checks:
+        if not ok:
+            failures.append(f"provider_budget[{label}]: {why}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] provider_budget:{label:<24} {ok}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -792,6 +864,7 @@ def main():
     _check_datastore_readiness(failures)
     _check_export_switch(failures)
     _check_credential_failclosed(failures)
+    _check_provider_budget(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -832,7 +905,8 @@ def main():
           f"{len(KEY_PROBE_SCENARIOS)} key-probe + "
           f"{len(DATASTORE_SCENARIOS)} datastore-readiness + "
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
-          f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed "
+          f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
+          f"5 provider-budget "
           "ground-truth scenarios")
 
 
