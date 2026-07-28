@@ -684,9 +684,15 @@ def _check_provider_budget(failures):
     checks = []
 
     # real quota, not a placeholder
-    checks.append(("real_quota", P._LEDGER.caps().get("intelx") == 50,
-                   f"intelx cap={P._LEDGER.caps().get('intelx')} — must be the real "
-                   "50/day free tier, or the guard can never fire before the provider"))
+    # The cap is in HTTP CALLS, not searches: a live scan on 2026-07-28 showed one
+    # IntelX search costs 4 calls (1 initiate + 3 polls). Asserting 50 here — the
+    # search quota — is what shipped a cap that would throttle at a quarter of the
+    # real allowance. Assert the CALL budget covers 50 searches instead.
+    ix_cap = P._LEDGER.caps().get("intelx")
+    checks.append(("real_quota_unit", ix_cap is not None and ix_cap >= 50 * 4,
+                   f"intelx cap={ix_cap} calls — one search costs up to 4 calls, so a "
+                   "50-search/day free tier needs a 200-call budget; a lower value "
+                   "throttles while quota remains and wrongly marks dark-web unassessed"))
 
     # the cap binds
     l = L(3)

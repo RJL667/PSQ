@@ -123,17 +123,25 @@ def _cap(env: str, default: int) -> int:
 
 
 # Real quotas, env-tunable so a plan change needs no deploy.
-#   intelx   — free tier is 50 SEARCHES/day, reset midnight UTC (see the IntelX
-#              checker). One scan spends one search.
+# NOTE THE UNIT: this ledger counts HTTP CALLS, not searches. Measured on a live
+# scan 2026-07-28: one scan spends 1 dehashed call but FOUR intelx calls (1
+# search-initiate + up to 3 result polls). A cap expressed in searches would
+# therefore throttle at a quarter of the real quota, so these are call budgets.
+#   intelx   — free tier is 50 SEARCHES/day (reset midnight UTC), i.e. up to 200
+#              calls. Deliberately the loose direction: firing EARLY would mark
+#              dark-web sections unassessed while quota remained, whereas real
+#              exhaustion is now honest and visible on its own.
 #   dehashed — a credit POOL rather than a daily allowance, so this cap is a
 #              burn-rate limit: it stops a runaway loop draining the balance in
-#              an afternoon, it is not the balance itself.
+#              an afternoon, it is not the balance itself. 1 call per scan.
+# The exact fix for intelx is its FREE /authenticate/info balance endpoint, which
+# reports remaining searches authoritatively; see OUTSTANDING.
 _LEDGER = DurableUsageLedger(
     default_daily_cap=None,
     daily_caps={
         "shodan": 1000, "hibp": 1000,
         "dehashed": _cap("DEHASHED_DAILY_CAP", 150),
-        "intelx": _cap("INTELX_DAILY_CAP", 50),
+        "intelx": _cap("INTELX_DAILY_CAP", 200),
         "securitytrails": 2000, "virustotal": 500, "snusbase": 2000,
         "leakcheck": 2000, "whiteintel": 500,
     },

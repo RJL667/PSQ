@@ -291,9 +291,18 @@ When you point a real domain (or subdomain) at the VM later:
 
   It also reports the **daily budget** for the metered credential providers
   (`providers.dehashed` / `providers.intelx` carry `used` / `cap` / `remaining`).
-  IntelX's free tier is **50 searches per day**, reset midnight UTC, and one scan
-  spends one search; DeHashed is a credit pool, so its cap is a burn-rate limit
-  rather than the balance. Both are env-tunable (`INTELX_DAILY_CAP`,
+  **The caps are in HTTP calls, not searches.** Measured on a live scan
+  (2026-07-28): one scan costs **1 DeHashed call but 4 IntelX calls** (1
+  search-initiate + up to 3 result polls). IntelX's free tier is 50 *searches*
+  per day (reset midnight UTC), so the call budget is **200**; setting it to 50
+  would throttle at a quarter of the real allowance and wrongly mark dark-web
+  sections unassessed while quota remained. DeHashed is a credit pool, so its cap
+  is a burn-rate limit rather than the balance.
+
+  The exact instrument for IntelX is its **free** `/authenticate/info` endpoint,
+  which reports remaining *searches* authoritatively and would remove the
+  call-vs-search estimate entirely. Not yet wired in (see OUTSTANDING); the
+  call budget is deliberately loose in the meantime. Both are env-tunable (`INTELX_DAILY_CAP`,
   `DEHASHED_DAILY_CAP`) so a plan change needs no deploy. The counters are read
   from the durable `usage` table, so a restart no longer hands the box a fresh
   allowance it has not got.

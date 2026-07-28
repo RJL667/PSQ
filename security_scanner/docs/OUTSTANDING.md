@@ -29,6 +29,11 @@ production, and again the moment demo feedback is concluded.
 | **Encrypted credential export DISABLED** | Fails closed by default (2026-07-28) | Set `CREDENTIAL_EXPORT_ENABLED=1` in the VM `.env` and `sudo systemctl restart phishield-scanner`. Config only — no code change, no redeploy. | The export releases a client's **actual breached passwords**. What makes that lawful is the client's signed consent, and the `consent: true` field on the request is only a broker attestation — with demo testers who have signed nothing, it is not a control at all. Both the POST **and** the one-time download route are gated (gating only the POST would let a token minted before the flip still be redeemed). The dashboard shows the control as unavailable rather than letting a tester complete a consent attestation and then hit a 503. Everything else in the scan — which accounts are exposed, in which breaches, how recent — is unaffected. **Re-enable only once the consent/authorisation page ships.** |
 | **Demo-facing manual in circulation** | Written 2026-07-28 | Withdraw the demo manual; the full manual stays internal. | `Phishield_Scanner_Demo_Guide.docx` deliberately omits scoring weights, calibration anchors, checker internals, data sources and thresholds. Do not circulate the full `Phishield_Cyber_Risk_Scanner_User_Manual.docx` to demo testers. |
 
+**Also open (2026-07-28):** wire IntelX's **free** `/authenticate/info` endpoint
+into the budget guard. The guard currently counts HTTP calls and estimates the
+search quota from them (1 search = up to 4 calls); that endpoint reports remaining
+*searches* authoritatively, at no credit cost, and would remove the estimate.
+
 **Related, still open:** the production auth model (see *Enable API auth* in §1) is
 unchanged by the demo gate — edge Basic auth is a stopgap in front of an app that
 still has no authentication of its own. Also outstanding: attach an uptime monitor
