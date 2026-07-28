@@ -494,6 +494,55 @@ def _check_datastore_readiness(failures):
     scanner_db.configure(database_url=None, sqlite_path=":memory:")
 
 
+# (f) CREDENTIAL-EXPORT KILL SWITCH. The export releases a client's ACTUAL
+# breached passwords. What makes that lawful is the client's signed consent, and
+# the request's `consent: true` field is only a broker attestation -- during the
+# 2026-07-28 demo, with testers who have signed nothing, it is not a control at
+# all. So the export must FAIL CLOSED unless explicitly enabled, and the DOWNLOAD
+# route must be gated too: gating only the POST would still let a token minted
+# before the flip be redeemed after it. Asserted here so a future refactor cannot
+# quietly reopen it.
+#   (label, env value, expect_blocked)
+EXPORT_SWITCH_SCENARIOS = [
+    ("unset (default)",  None,    True),
+    ("explicit off",     "0",     True),
+    ("garbage value",    "maybe", True),   # anything but a true-ish value = closed
+    ("enabled",          "1",     False),
+]
+
+
+def _check_export_switch(failures):
+    # Two halves, deliberately: reloading app to re-read the env would re-run
+    # init_db() against whatever DB the env points at, so instead patch the flag
+    # the decorator reads at call time (route behaviour), and check the env
+    # parsing separately against the same values (config behaviour).
+    import importlib
+    app_mod = importlib.import_module("app")
+    for label, val, want_blocked in EXPORT_SWITCH_SCENARIOS:
+        parsed = str(val or "").strip().lower() in ("1", "true", "yes", "on")
+        with mock.patch.object(app_mod, "CREDENTIAL_EXPORT_ENABLED", parsed), \
+             app_mod.app.test_client() as c:
+            post = c.post("/api/credential-export", json={
+                "domain": "example.com", "consent": True, "authorised_by": "T",
+                "age_public_key": "age1" + "q" * 50})
+            dl = c.get("/api/credential-export/download/tok")
+            st = (c.get("/api/credential-export/status").get_json() or {})
+        blocked = (post.status_code == 503 and dl.status_code == 503)
+        env_ok = (parsed != want_blocked)      # env string -> the flag we expect
+        ok = (blocked == want_blocked) and (st.get("enabled") == (not want_blocked)) and env_ok
+        if not ok:
+            failures.append(
+                f"export_switch[{label}]: env={val!r} parsed={parsed} "
+                f"POST={post.status_code} DL={dl.status_code} "
+                f"status.enabled={st.get('enabled')} — expected "
+                f"{'BLOCKED (503 on both)' if want_blocked else 'open'}; the export "
+                "releases real breached passwords and must fail closed, including "
+                "the download route")
+        print(f"  [{'PASS' if ok else 'FAIL'}] export_switch:{label:<18} "
+              f"env={str(val):<6} POST={post.status_code} DL={dl.status_code} "
+              f"enabled={st.get('enabled')}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -622,6 +671,7 @@ def main():
     _check_breach_intel(failures)
     _check_key_probe(failures)
     _check_datastore_readiness(failures)
+    _check_export_switch(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -660,7 +710,8 @@ def main():
           f"{len(SUBDOMAIN_CT_SCENARIOS)} subdomain-ct + "
           f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel + "
           f"{len(KEY_PROBE_SCENARIOS)} key-probe + "
-          f"{len(DATASTORE_SCENARIOS)} datastore-readiness "
+          f"{len(DATASTORE_SCENARIOS)} datastore-readiness + "
+          f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch "
           "ground-truth scenarios")
 
 

@@ -110,6 +110,41 @@ def _release_on_exit(sem):
 # anonymous callers.
 SCANNER_API_KEY = os.environ.get("SCANNER_API_KEY")
 
+# Encrypted credential export (Manual §6.4) — releases a client's ACTUAL breached
+# passwords. FAIL CLOSED: off unless explicitly enabled, because the control that
+# makes it lawful is the client's signed consent, and the authorisation page that
+# would capture it is not live yet. The `consent: true` field on the request is an
+# operational attestation by the broker, not a technical control — during a demo,
+# with testers who have signed nothing, that is not a gate at all.
+#
+# TODO(demo-exit): re-enable once the consent/authorisation page ships and real
+# auth replaces the interim edge Basic auth. Flip with CREDENTIAL_EXPORT_ENABLED=1
+# in the VM .env + `sudo systemctl restart phishield-scanner` — config, not code.
+CREDENTIAL_EXPORT_ENABLED = os.environ.get(
+    "CREDENTIAL_EXPORT_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+_EXPORT_DISABLED_MSG = (
+    "Encrypted credential export is disabled on this deployment. It releases the "
+    "client's actual breached passwords, so it stays off until the consent / "
+    "authorisation page is live and the signed consent can be recorded against the "
+    "request. Everything else in the scan — including which accounts are exposed, "
+    "in which breaches, and how recent — is unaffected."
+)
+
+
+def require_credential_export_enabled(f):
+    """Fail closed on both export routes (issue AND download).
+
+    The download route is gated too: disabling only the POST would still let a
+    token minted before the flip be redeemed afterwards.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not CREDENTIAL_EXPORT_ENABLED:
+            return jsonify({"status": "disabled", "error": _EXPORT_DISABLED_MSG}), 503
+        return f(*args, **kwargs)
+    return wrapper
+
 
 def require_api_key(f):
     @wraps(f)
@@ -534,6 +569,14 @@ def dehashed_balance():
         return jsonify({"status": "error", "balance": None, "error": str(e)})
 
 
+@app.route("/api/credential-export/status", methods=["GET"])
+def credential_export_status():
+    """Whether the encrypted export is available, so the dashboard can present it
+    as unavailable rather than letting a broker fill the form and hit a 503."""
+    return jsonify({"enabled": CREDENTIAL_EXPORT_ENABLED,
+                    "reason": None if CREDENTIAL_EXPORT_ENABLED else _EXPORT_DISABLED_MSG})
+
+
 @app.route("/api/breach-intel/status", methods=["GET"])
 @require_api_key
 @rate_limited(_light_limiter)
@@ -597,6 +640,7 @@ def intelx_balance():
 
 @app.route("/api/credential-export", methods=["POST"])
 @require_api_key
+@require_credential_export_enabled
 @rate_limited(_scan_limiter)
 def credential_export():
     """On-demand encrypted credential export (Phase 2 / Manual 6.4). Re-queries
@@ -676,6 +720,7 @@ def credential_export():
 
 
 @app.route("/api/credential-export/download/<token>", methods=["GET"])
+@require_credential_export_enabled
 def credential_export_download(token: str):
     """One-time, expiring retrieval of an encrypted credential export (Manual 6.4
     step 4). The token IS the bearer credential (unguessable, single-use); the blob

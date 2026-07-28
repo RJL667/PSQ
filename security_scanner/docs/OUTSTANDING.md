@@ -16,6 +16,26 @@ outstanding item lands.
 
 ---
 
+## 0. DEMO WINDOW — must be reversed when the demo ends (opened 2026-07-28)
+
+A small group of external testers was given access to the live VM scanner. Three
+temporary controls were put in place for that window. **All three are reversals,
+not features** — work through this table before the scanner is treated as
+production, and again the moment demo feedback is concluded.
+
+| Item | Status | How to reverse | Notes |
+|---|---|---|---|
+| **Interim edge Basic auth on `/scanner`** | LIVE (Caddy, 2026-07-28) | Delete a tester's line from the `basic_auth` block in `/etc/caddy/Caddyfile`, then `sudo systemctl reload caddy`. Remove the whole `@needs_auth` + `basic_auth` block to reopen, or leave it in place to lock everyone out when the demo ends. | Accounts: `sarel`, `demo1`–`demo4` (bcrypt hashes; one login per tester so access can be revoked individually and the access log attributes activity). `/health` and `/health/providers` are deliberately EXEMPT so the uptime monitor and the deploy's public-reachability check keep working; `/metrics` IS gated. **This is a shared-secret gate, not user auth** — no per-user identity inside the app, no session expiry, no audit trail beyond Caddy's access log. It does NOT satisfy the production auth requirement below. |
+| **Encrypted credential export DISABLED** | Fails closed by default (2026-07-28) | Set `CREDENTIAL_EXPORT_ENABLED=1` in the VM `.env` and `sudo systemctl restart phishield-scanner`. Config only — no code change, no redeploy. | The export releases a client's **actual breached passwords**. What makes that lawful is the client's signed consent, and the `consent: true` field on the request is only a broker attestation — with demo testers who have signed nothing, it is not a control at all. Both the POST **and** the one-time download route are gated (gating only the POST would let a token minted before the flip still be redeemed). The dashboard shows the control as unavailable rather than letting a tester complete a consent attestation and then hit a 503. Everything else in the scan — which accounts are exposed, in which breaches, how recent — is unaffected. **Re-enable only once the consent/authorisation page ships.** |
+| **Demo-facing manual in circulation** | Written 2026-07-28 | Withdraw the demo manual; the full manual stays internal. | `Phishield_Scanner_Demo_Guide.docx` deliberately omits scoring weights, calibration anchors, checker internals, data sources and thresholds. Do not circulate the full `Phishield_Cyber_Risk_Scanner_User_Manual.docx` to demo testers. |
+
+**Related, still open:** the production auth model (see *Enable API auth* in §1) is
+unchanged by the demo gate — edge Basic auth is a stopgap in front of an app that
+still has no authentication of its own. Also outstanding: attach an uptime monitor
+to `https://veilguard.phishield.com/scanner/health/providers` (owner action).
+
+---
+
 ## 1. Hosting / infrastructure
 
 | Item | Status | Owner | Target date |

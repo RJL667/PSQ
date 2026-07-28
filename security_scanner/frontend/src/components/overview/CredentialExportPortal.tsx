@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { KeyRound, ShieldCheck, X, Copy, Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { KeyRound, ShieldCheck, X, Copy, Check, Lock } from 'lucide-react'
 import { getResults } from '../../data/results'
 import { withBase } from '../../base'
 
@@ -34,6 +34,20 @@ export default function CredentialExportPortal() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ExportResult | null>(null)
   const [copied, setCopied] = useState(false)
+  // Server decides. The API fails closed on its own, but asking up front lets us
+  // present the control as unavailable instead of letting a broker complete a
+  // consent attestation and only then hit a 503.
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [disabledReason, setDisabledReason] = useState('')
+
+  useEffect(() => {
+    let live = true
+    fetch(withBase('/api/credential-export/status'))
+      .then((r) => r.json())
+      .then((d) => { if (live) { setEnabled(!!d.enabled); setDisabledReason(d.reason || '') } })
+      .catch(() => { if (live) setEnabled(false) })   // unreachable -> assume off
+    return () => { live = false }
+  }, [])
 
   const close = () => {
     setOpen(false); setResult(null); setError(null); setBusy(false); setCopied(false)
@@ -68,6 +82,23 @@ export default function CredentialExportPortal() {
 
   const fullLink = result ? `${location.origin}${result.download_url}` : ''
   const copy = () => { navigator.clipboard?.writeText(fullLink).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800) }) }
+
+  if (enabled === null) return null            // don't flash a control we may disable
+
+  if (!enabled) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, padding: '9px 11px',
+        borderRadius: 8, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)',
+        background: 'var(--panel-bg-elevated)', border: '1px solid var(--border-emphasis)' }}>
+        <Lock size={13} style={{ marginTop: 2, flexShrink: 0, color: 'var(--text-muted)' }} />
+        <span>
+          <b style={{ color: 'var(--text-primary)' }}>Credential export unavailable.</b>{' '}
+          {disabledReason || 'Releasing the client’s actual breached passwords requires the '
+            + 'signed-consent authorisation flow, which is not live on this deployment.'}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <>
