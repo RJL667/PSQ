@@ -159,4 +159,27 @@ echo "== health check =="
 sleep 2
 curl -fsS "http://127.0.0.1:$PORT/health" -o /dev/null -w "   /health -> HTTP %{http_code}\n" \
   || echo "   /health probe failed — check: sudo journalctl -u phishield-scanner -n 50"
+
+# The probe above uses the SAME $PORT this script just baked into the unit, so it
+# proves self-consistency, not reachability. On 2026-07-27 a stray PORT=5001 (a
+# dev value, from a .env that should never have reached the VM) rebound gunicorn
+# to 5001; this probe cheerfully passed against 5001 while Caddy kept proxying
+# 8001 and the public scanner 502'd for nine minutes. So also verify the URL a
+# broker actually hits. Set PUBLIC_HEALTH_URL='' to skip (e.g. first-run boxes
+# with no DNS/edge yet).
+PUBLIC_HEALTH_URL=${PUBLIC_HEALTH_URL-https://veilguard.phishield.com/scanner/health}
+if [ -n "$PUBLIC_HEALTH_URL" ]; then
+  echo "== public reachability =="
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 25 "$PUBLIC_HEALTH_URL" || echo 000)
+  if [ "$code" = "200" ]; then
+    echo "   $PUBLIC_HEALTH_URL -> HTTP 200"
+  else
+    echo "   !! PUBLIC ENDPOINT NOT SERVING: $PUBLIC_HEALTH_URL -> HTTP $code"
+    echo "   !! gunicorn is bound to :$PORT (from PORT in $APP_DIR/.env)."
+    echo "   !! If Caddy proxies a different port, the site is DOWN despite the"
+    echo "   !! local probe passing. Check PORT in .env, then: sudo systemctl cat"
+    echo "   !! phishield-scanner | grep -- --bind"
+    exit 1
+  fi
+fi
 echo "DONE.  Caddy edge is wired separately (see deploy/caddy_patch.py / docs/DEPLOYMENT.md)."
