@@ -494,6 +494,84 @@ def _check_datastore_readiness(failures):
     scanner_db.configure(database_url=None, sqlite_path=":memory:")
 
 
+# (g) CREDENTIAL PROVIDERS MUST FAIL CLOSED. A dead or unfunded DeHashed/IntelX
+# produced a report that read CLEAN rather than unassessed - the same silent
+# degradation the breach-history checker was deliberately built to avoid, never
+# applied to these two. Four distinct leaks, all observed in code:
+#   * IntelX returns a 200 with NO search id once the daily free allowance is
+#     gone; the checker returned status="completed", total_results=0, which is
+#     byte-identical to a genuinely clean domain.
+#   * A failed result-poll (402/429/5xx) broke out of the loop with records=[]
+#     and status still "completed".
+#   * The Data Breach Index defaulted total_entries to 0 for any status except
+#     no_api_key/auth_failed, taking the FULL-MARKS 20/20 clean branch - so a
+#     BROKEN provider scored better than an ABSENT one (10/20 "Unknown").
+#   * CredentialRiskClassifier never read the status at all: no records meant
+#     class NONE / risk LOW plus the affirmative "exposure is historical and/or
+#     email-only" summary. That is the RSI-driving channel.
+# Every non-conclusive status must reach the scorer as "we did not look".
+NON_CONCLUSIVE = ["error", "timeout", "quota_exhausted", "subscription_required",
+                  "no_api_key", "auth_failed"]
+
+
+def _check_credential_failclosed(failures):
+    import importlib
+    ct_mod = importlib.import_module("checkers_threats")
+    sa = importlib.import_module("scoring_analytics")
+
+    # (1) the classifier must refuse to classify an unsearched estate
+    for st in NON_CONCLUSIVE:
+        res = ct_mod.CredentialRiskClassifier.classify(
+            {"status": st, "breach_details": [], "total_entries": 0}, {}, {})
+        lvl, assessed = res.get("risk_level"), res.get("assessed", True)
+        ok = (lvl == "UNKNOWN") and (assessed is False) \
+            and "NOT ASSESSED" in (res.get("summary") or "")
+        if not ok:
+            failures.append(
+                f"cred_failclosed[classify/{st}]: risk_level={lvl!r} assessed={assessed} "
+                "— an unsearched credential estate must report UNKNOWN/unassessed, "
+                "never LOW with a reassuring summary; this channel drives the RSI")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:classify/{st:<22} "
+              f"{lvl} assessed={assessed}")
+
+    # (2) a healthy-but-genuinely-clean lookup must STILL score clean (no over-correction)
+    clean = ct_mod.CredentialRiskClassifier.classify(
+        {"status": "completed", "breach_details": [], "total_entries": 0}, {}, {})
+    ok = clean.get("risk_level") == "LOW" and clean.get("assessed", True) is not False
+    if not ok:
+        failures.append(f"cred_failclosed[classify/genuinely-clean]: {clean.get('risk_level')!r} "
+                        "— a real empty result must still read LOW, or we have swapped "
+                        "one wrong answer for another")
+    print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:classify/genuine-clean   "
+          f"{clean.get('risk_level')}")
+
+    # (3) the Data Breach Index must not award the clean sweep to a failed lookup
+    def _dbi(status):
+        cats = {"breaches": {"status": "completed", "breach_count": 0, "issues": []},
+                "dehashed": {"status": status, "total_entries": 0}}
+        comp = sa.DataBreachIndex().calculate(cats)["components"]["credential_leaks"]
+        return comp["points"]
+    conclusive_pts = _dbi("completed")
+    for st in NON_CONCLUSIVE:
+        pts = _dbi(st)
+        ok = (pts is not None) and (pts < conclusive_pts)
+        if not ok:
+            failures.append(
+                f"cred_failclosed[dbi/{st}]: {pts} pts vs {conclusive_pts} for a real "
+                "clean lookup — a provider that never answered must not earn the "
+                "full-marks clean branch")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:dbi/{st:<24} "
+              f"{pts} pts (real clean = {conclusive_pts})")
+
+    # (4) the headline scorer must exclude them rather than treat them as valid
+    for st in ("quota_exhausted", "subscription_required"):
+        ok = st in sa.RiskScorer._FAILED_STATUSES
+        if not ok:
+            failures.append(f"cred_failclosed[failed_statuses/{st}]: not in _FAILED_STATUSES "
+                            "— it would score as a valid, clean category")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:failed_status/{st:<16} {ok}")
+
+
 # (f) CREDENTIAL-EXPORT KILL SWITCH. The export releases a client's ACTUAL
 # breached passwords. What makes that lawful is the client's signed consent, and
 # the request's `consent: true` field is only a broker attestation -- during the
@@ -672,6 +750,7 @@ def main():
     _check_key_probe(failures)
     _check_datastore_readiness(failures)
     _check_export_switch(failures)
+    _check_credential_failclosed(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -711,7 +790,8 @@ def main():
           f"{5 + len(BREACH_FAILSAFE) + len(BREACH_DEGRADED) + len(BREACH_LADDER)} breach-intel + "
           f"{len(KEY_PROBE_SCENARIOS)} key-probe + "
           f"{len(DATASTORE_SCENARIOS)} datastore-readiness + "
-          f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch "
+          f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
+          f"{len(NON_CONCLUSIVE) * 2 + 3} credential-failclosed "
           "ground-truth scenarios")
 
 

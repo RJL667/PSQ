@@ -1370,6 +1370,14 @@ class DehashedChecker:
 
             if r.status_code == 302 or r.status_code == 403:
                 result["status"] = "subscription_required"
+                result["error"] = f"HTTP {r.status_code} — Dehashed subscription/plan"
+                return result
+
+            if r.status_code in (402, 429):
+                # Credits depleted or throttled. Distinct from a generic error so
+                # the operator sees WHY the estate could not be searched.
+                result["status"] = "quota_exhausted"
+                result["error"] = f"HTTP {r.status_code} — Dehashed credits/rate"
                 return result
 
             if r.status_code != 200:
@@ -2039,6 +2047,32 @@ class CredentialRiskClassifier:
             return cls_self.KNOWN_BREACH_DATES.get(s, "Unknown")
 
         # ---- K1-K3: weight every DeHashed record by what it actually carries.
+        # Non-conclusive DeHashed => we never saw the credential estate, so we
+        # cannot classify it. Previously this method never read the status: an
+        # errored / unfunded / unsubscribed lookup yielded records=[] -> W=0 ->
+        # class NONE -> risk_level LOW, complete with the affirmative summary
+        # "exposure is historical and/or email-only". That reassurance was
+        # produced by a lookup that never happened, and it is this channel that
+        # drives the RSI (scanner.py). Report unassessed instead.
+        _status = (dehashed or {}).get("status")
+        if _status in ("no_api_key", "auth_failed", "error", "timeout",
+                       "quota_exhausted", "subscription_required"):
+            return {
+                "status": _status,
+                "assessed": False,
+                "cls": "UNKNOWN",
+                "risk_level": "UNKNOWN",
+                "risk_score": None,
+                "pbreach_contribution": 0.0,
+                "W": 0.0,
+                "records_assessed": 0,
+                "summary": ("Credential exposure NOT ASSESSED — the credential "
+                            "database could not be searched for this scan "
+                            f"({_status}). This is not evidence of a clean "
+                            "record; treat it as an open question."),
+                "issues": [],
+            }
+
         records = dehashed.get("breach_details", []) or []
         W = 0.0
         high_records = med_records = 0
@@ -2220,29 +2254,65 @@ class IntelXChecker:
             if r.status_code == 401:
                 result["status"] = "auth_failed"
                 return result
+            if r.status_code in (402, 429):
+                # Out of search credits / throttled. Distinct from a generic
+                # error so scoring can tell "we could not look" apart from
+                # "we looked and the estate is clean".
+                result["status"] = "quota_exhausted"
+                result["error"] = f"HTTP {r.status_code} — IntelX search quota"
+                return result
             if r.status_code != 200:
                 result["status"] = "error"
+                result["error"] = f"HTTP {r.status_code}"
                 return result
 
             search_id = r.json().get("id")
             if not search_id:
+                # A 200 with no search id is what the free tier returns once the
+                # daily search allowance is gone. Returning `result` unchanged
+                # here used to report status="completed", total_results=0 —
+                # byte-identical to a genuinely clean domain, so an exhausted
+                # quota rendered as a reassuring empty dark-web section. Never
+                # let an unperformed search look like a performed one.
+                result["status"] = "quota_exhausted"
+                result["error"] = "IntelX returned no search id (daily allowance exhausted)"
                 return result
 
             # Step 2: Poll for results (wait up to 8s)
             import time as _time
             _time.sleep(3)
             records = []
+            # Did the search actually reach a conclusion? Only a terminal status
+            # from IntelX proves the estate was searched. Without this flag a
+            # failed poll (402/429/5xx, or three timeouts) fell through with
+            # records=[] and status still "completed" — indistinguishable from a
+            # clean domain, which is the same silent-clean bug as the missing
+            # search id above.
+            search_concluded = False
+            poll_error = ""
             for _ in range(3):
                 r2 = INTELX.get(f"{self.API_URL}/intelligent/search/result",
                     params={"id": search_id},
                     headers={"X-Key": api_key}, timeout=10)
                 if r2 is None or r2.status_code != 200:
+                    poll_error = ("no response" if r2 is None
+                                  else f"HTTP {r2.status_code}")
                     break
                 data = r2.json()
                 records.extend(data.get("records", []))
                 if data.get("status") in (1, 2, 4):  # 1=done, 2=not found, 4=error
+                    search_concluded = True
                     break
                 _time.sleep(2)
+
+            if not search_concluded and not records:
+                # Nothing retrieved and never told the search finished: we cannot
+                # say the estate is clean, only that we failed to look.
+                result["status"] = "error" if poll_error else "timeout"
+                result["error"] = (f"IntelX result poll failed ({poll_error})"
+                                   if poll_error
+                                   else "IntelX search did not conclude within the poll window")
+                return result
 
             # The free API does not strictly honour maxresults, so truncate to
             # the requested cap — the displayed total is then reproducible and

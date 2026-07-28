@@ -107,6 +107,17 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
     has_pw = bool(de.get("has_passwords"))
     hibp_count = int(br.get("breach_count", 0) or 0)
     breached = de_total > 0 or hibp_count > 0
+    # Which sources actually answered? A failed provider yields 0 records, which
+    # is arithmetically identical to a clean estate — so without this the
+    # "nothing found" rationale below gets written on the strength of lookups
+    # that never ran.
+    _NON_CONCLUSIVE = {"no_api_key", "auth_failed", "error", "timeout",
+                       "quota_exhausted", "subscription_required"}
+    de_assessed = de.get("status") not in _NON_CONCLUSIVE
+    unassessed_sources = [
+        name for name, cat in (("credential database", de), ("dark-web / forum", ix))
+        if cat.get("status") in _NON_CONCLUSIVE
+    ]
 
     # Signal 2 — recency (parse every dated source we have)
     ages = []
@@ -202,8 +213,20 @@ def build_credential_correlation(cat_results: dict, today=None) -> dict:
     }
 
     if not breached and not active_theft and not circulating:
-        out["rationale"] = ("No breached credentials, infostealer infections, or "
-                            "dark-web/forum mentions detected for this domain.")
+        if unassessed_sources:
+            # Say what was not looked at rather than implying it was looked at
+            # and found clean. Same discipline as the breach-history checker.
+            out["assessed"] = False
+            out["unassessed_sources"] = unassessed_sources
+            out["rationale"] = (
+                "Credential exposure NOT FULLY ASSESSED — the "
+                + " and the ".join(unassessed_sources)
+                + " could not be searched for this scan. Nothing was found in the "
+                  "sources that did respond, but that is not evidence of a clean "
+                  "record. Re-run once the source is available.")
+        else:
+            out["rationale"] = ("No breached credentials, infostealer infections, or "
+                                "dark-web/forum mentions detected for this domain.")
         return out
 
     # Verdict — driven by DATE-PROVEN active theft, not re-circulation. STAFF
