@@ -88,6 +88,13 @@ const RAW_STATE_MAP: Record<string, CheckerState> = {
   rate_limited: 'rate_limited',
   ratelimited: 'rate_limited',
   throttled: 'rate_limited',
+  // The provider refused on usage grounds: credits spent or allowance hit. Same
+  // class as rate_limited (non-conclusive, never green). Unmapped statuses
+  // already fall back to not_assessed, so this is about giving the operator a
+  // precise label rather than about safety.
+  quota_exhausted: 'rate_limited',
+  quota_exceeded: 'rate_limited',
+  credits_exhausted: 'rate_limited',
 
   skipped: 'skipped',
   skip: 'skipped',
@@ -109,6 +116,9 @@ export function inconclusiveLabel(raw: string | null | undefined): string {
   const r = String(raw ?? '').toLowerCase().trim()
   if (r === 'no_api_key' || r === 'no_key' || r === 'missing_api_key') return 'No API key'
   if (r === 'unreachable') return 'Unreachable'
+  if (r === 'quota_exhausted' || r === 'quota_exceeded' || r === 'credits_exhausted') {
+    return 'Search quota exhausted'
+  }
   return STATE_META[normalizeState(raw)].label
 }
 

@@ -14,6 +14,26 @@ export function PageTitle({ title, subtitle }: { title: string; subtitle?: strin
   )
 }
 
+/** Loud "we did not look" note for an inconclusive checker.
+ *
+ *  A status badge alone is not enough where the panel also prints counts: a
+ *  failed credential lookup yields 0 records, and "0 leaked records" reads as a
+ *  clean estate to anyone skimming. Render this INSTEAD of the numbers, so the
+ *  absence of findings can never be mistaken for a finding of absence. */
+export function NotAssessedNote({ category, what }: { category: CategoryBase | undefined; what: string }) {
+  if (!category || isConclusive(category)) return null
+  const why = inconclusiveLabel(category.status as string).toLowerCase()
+  return (
+    <div style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--text-secondary)',
+      background: 'var(--panel-bg-elevated)', border: '1px solid var(--border-emphasis)',
+      borderRadius: 8, padding: '9px 11px' }}>
+      <b style={{ color: 'var(--text-primary)' }}>Not assessed.</b>{' '}
+      {what} could not be searched for this scan ({why}), so exposure can be neither
+      confirmed nor ruled out. This is <b>not</b> evidence of a clean record.
+    </div>
+  )
+}
+
 /** Status header for a checker that NEVER presents a stale score as a pass when
  *  the checker did not actually complete (spec §18/§33). */
 export function CheckerHeader({ category }: { category: CategoryBase | undefined }) {

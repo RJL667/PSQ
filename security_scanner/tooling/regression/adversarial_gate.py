@@ -571,6 +571,47 @@ def _check_credential_failclosed(failures):
                             "— it would score as a valid, clean category")
         print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:failed_status/{st:<16} {ok}")
 
+    # (5) the PAGE must say so too. Correct scoring is invisible to a broker
+    # reading the PDF: an empty dark-web section still reads as good news unless
+    # the card states it was never searched.
+    pc = importlib.import_module("pdf_cards")
+    from pdf_helpers import build_styles
+    S = build_styles()
+
+    def _txt(parts):
+        return " ".join(getattr(p, "text", "") or "" for p in parts)
+
+    render_cases = [
+        ("dehashed/quota", pc.cat_dehashed,
+         {"dehashed": {"status": "quota_exhausted", "total_entries": 0, "issues": []}}, True),
+        ("dehashed/subscription", pc.cat_dehashed,
+         {"dehashed": {"status": "subscription_required", "total_entries": 0, "issues": []}}, True),
+        ("dehashed/genuine-clean", pc.cat_dehashed,
+         {"dehashed": {"status": "completed", "total_entries": 0, "unique_emails": 0, "issues": []}}, False),
+        ("intelx/quota", pc.cat_intelx,
+         {"intelx": {"status": "quota_exhausted", "total_results": 0, "issues": []}}, True),
+        ("intelx/poll-error", pc.cat_intelx,
+         {"intelx": {"status": "error", "total_results": 0, "issues": []}}, True),
+        ("intelx/genuine-clean", pc.cat_intelx,
+         {"intelx": {"status": "completed", "total_results": 0, "issues": []}}, False),
+        ("credrisk/unassessed", pc.cat_credential_risk,
+         {"credential_risk": {"risk_level": "UNKNOWN", "assessed": False,
+                              "status": "quota_exhausted"}}, True),
+        ("credrisk/real-low", pc.cat_credential_risk,
+         {"credential_risk": {"risk_level": "LOW", "risk_score": 100, "factors": []}}, False),
+    ]
+    for label, fn, data, want_caveat in render_cases:
+        txt = _txt(fn(data, S))
+        has = "Not assessed" in txt
+        ok = has == want_caveat
+        if not ok:
+            failures.append(
+                f"cred_failclosed[render/{label}]: caveat_present={has}, expected "
+                f"{want_caveat} — a card built from a lookup that never ran must say "
+                "'Not assessed'; correct scoring alone is invisible to the reader")
+        print(f"  [{'PASS' if ok else 'FAIL'}] cred_failclosed:render/{label:<22} "
+              f"caveat={has}")
+
 
 # (f) CREDENTIAL-EXPORT KILL SWITCH. The export releases a client's ACTUAL
 # breached passwords. What makes that lawful is the client's signed consent, and
@@ -791,7 +832,7 @@ def main():
           f"{len(KEY_PROBE_SCENARIOS)} key-probe + "
           f"{len(DATASTORE_SCENARIOS)} datastore-readiness + "
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
-          f"{len(NON_CONCLUSIVE) * 2 + 3} credential-failclosed "
+          f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed "
           "ground-truth scenarios")
 
 

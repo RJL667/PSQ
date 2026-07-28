@@ -1204,8 +1204,44 @@ def cat_shodan(d, S):
     return parts
 
 
+# Statuses that mean the lookup never happened. Rendering these as "Clean" is
+# how a dead provider used to read as a validated all-clear; the scoring side
+# now excludes them, and the page must say so too, or a broker sees an empty
+# section and takes it as good news. Mirrors the breach-history card's wording.
+_CRED_NOT_ASSESSED = {"no_api_key", "auth_failed", "error", "timeout",
+                      "quota_exhausted", "subscription_required"}
+_CRED_WHY = {
+    "no_api_key": "no API key is configured for this deployment",
+    "auth_failed": "the provider rejected our credentials",
+    "quota_exhausted": "the search allowance for this provider was exhausted",
+    "subscription_required": "the provider subscription does not cover this lookup",
+    "timeout": "the search did not complete in time",
+    "error": "the provider could not be reached",
+}
+
+
+def _not_assessed_block(title, what, status, S):
+    """The unassessed card body. Emitted unconditionally rather than via
+    build_cat_card(fallback=), which only renders when the issues list is empty
+    — the caveat is the most important line here and must never be suppressed."""
+    return [
+        Paragraph(f"<b>{title}</b>", S["cat_title"]),
+        Spacer(1, 1 * mm),
+        Paragraph(
+            f"<b>Not assessed.</b> {what} could not be searched for this scan "
+            f"({_CRED_WHY.get(status, status)}), so exposure can be neither "
+            f"confirmed nor ruled out. Treat as unassessed, <b>not</b> as a clean "
+            f"record.", S["body"]),
+        Spacer(1, 3 * mm),
+    ]
+
+
 def cat_dehashed(d, S):
     dh     = d.get("dehashed", {})
+    if dh.get("status") in _CRED_NOT_ASSESSED:
+        return _not_assessed_block("Credential Exposure (DeHashed)",
+                                   "The breached-credential database",
+                                   dh.get("status"), S)
     status = dh.get("status", "completed")
     total  = dh.get("total_entries", 0)
     col    = (C_CRITICAL if total > 50 else C_RED if total > 10 else
@@ -1343,6 +1379,13 @@ def cat_intelx(d, S):
     ix = d.get("intelx", {})
     if ix.get("status") == "no_api_key":
         return []
+    if ix.get("status") in _CRED_NOT_ASSESSED:
+        # Everything except an absent key: the search was attempted and failed,
+        # so the reader is owed the distinction between "nothing is circulating"
+        # and "we could not look".
+        return _not_assessed_block("Dark Web Monitoring (IntelX)",
+                                   "Dark-web forums and leak databases",
+                                   ix.get("status"), S)
     total = ix.get("total_results", 0)
     darkweb = ix.get("darkweb_count", 0)
     pastes = ix.get("paste_count", 0)
@@ -1420,6 +1463,14 @@ def cat_credential_risk(d, S):
     cr = d.get("credential_risk", {})
     if not cr or not cr.get("risk_level"):
         return []
+    # The classifier now reports UNKNOWN when the credential estate was never
+    # searched. This is the card that carries the RSI-driving verdict, so a
+    # green "LOW" here off an unperformed lookup is the single most misleading
+    # line the report could print.
+    if cr.get("risk_level") == "UNKNOWN" or cr.get("assessed") is False:
+        return _not_assessed_block(
+            "Credential Risk", "The breached-credential database",
+            cr.get("status", "error"), S)
     level = cr.get("risk_level", "LOW")
     col = C_CRITICAL if level == "CRITICAL" else (C_RED if level == "HIGH" else (C_AMBER if level == "MEDIUM" else C_GREEN))
     rows = [
