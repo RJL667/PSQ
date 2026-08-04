@@ -285,7 +285,7 @@ doc.add_paragraph()
 
 ver = doc.add_paragraph()
 ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = ver.add_run("Version 2.0  |  July 2026\nConfidential \u2014 Internal Use Only")
+run = ver.add_run("Version 2.1  |  August 2026\nConfidential \u2014 Internal Use Only")
 run.font.size = Pt(10)
 run.font.color.rgb = PHISHIELD_GREY
 
@@ -408,8 +408,7 @@ flowchart_lines = [
     ("\u2514\u2500 All other industries \u2192 Continue", 1, False, PHISHIELD_GREEN),
     ("    \u2193", 1, False, PHISHIELD_GREY),
     ("Underwriting Assessment", 0, True, PHISHIELD_DARK),
-    ("\u251c\u2500 Q1.1 (AV/EDR) No OR Q1.2 (Firewall) No \u2192 DECLINE (blocked)", 1, False, PHISHIELD_RED),
-    ("\u251c\u2500 Q1.3 / Q1.4 No \u2192 Condition of Cover (proceed with caution)", 1, False, PHISHIELD_ACCENT),
+    ("\u251c\u2500 Q1.1 / Q1.2 / Q1.3 / Q1.4 No \u2192 Condition of Cover (proceed with caution)", 1, False, PHISHIELD_ACCENT),
     ("\u251c\u2500 Q2.1\u2013Q5: Count \"No\" answers \u2192 Apply loading (0\u201315%, grace of 2)", 1, False, PHISHIELD_ACCENT),
     ("\u251c\u2500 Q6/Q7 (if FP > R250k): No = Condition of Cover", 1, False, PHISHIELD_ACCENT),
     ("\u2514\u2500 Q8 (prior cover) \u2014 auto-Yes on Renewal; No on Renewal \u2192 REFER", 1, False, PHISHIELD_ACCENT),
@@ -657,23 +656,30 @@ doc.add_paragraph(
     "and product name\u2019 is available for record-keeping (e.g. SentinelOne Singularity, Sophos Intercept X)."
 )
 
-add_bold_para("Q1 decision logic \u2014 decline gate vs Conditions of Cover")
+add_bold_para("Q1 decision logic \u2014 Conditions of Cover")
 make_table(
     ["Scenario", "Engine behaviour"],
     [
-        ["Q1.1 No OR Q1.2 No", "Automatic decline. AV/EDR and firewall are non-negotiable baseline controls."],
-        ["Q1.1 Yes AND Q1.2 Yes AND (Q1.3 No OR Q1.4 No)", "Proceed with Caution. The missing baseline control(s) are added as Conditions of Cover and printed on the quote output."],
+        ["Any of Q1.1\u2013Q1.4 = No", "Proceed with Caution. Each missing baseline control is added as a Condition of Cover and printed on the quote output. No loading is applied."],
         ["All four Yes", "Standard \u2014 no Q1 impact. (Loading may still be applied from Q2\u2013Q5 Nos.)"],
     ]
 )
 add_tip_box(
-    "The endpoint vendor / product name free-text field is OPTIONAL. The go/no-go for Q1 is the four "
+    "The endpoint vendor / product name free-text field is OPTIONAL. The Q1 outcome is driven by the four "
     "Yes/No toggles only.",
     "note"
 )
 add_tip_box(
-    "Q1 is the sole decline gate in the underwriting section. There is no decline driven by Q2\u2013Q5 "
-    "answers \u2014 those only drive loading.",
+    "August 2026 change: Q1.1 (AV/EDR) and Q1.2 (firewall) previously produced an automatic DECLINE that "
+    "blocked the quote. They are now treated exactly like Q1.3 / Q1.4 \u2014 recorded as Conditions of Cover. "
+    "This is not a relaxation of appetite: the minimum controls remain a requirement of any bound cover. "
+    "The change lets the broker issue a quote and show the client precisely which controls must be in "
+    "place to accept it.",
+    "important"
+)
+add_tip_box(
+    "Q1 carries NO premium impact \u2014 it sits outside the Q2\u2013Q5 loading pool. A Q1 \u2018No\u2019 changes the "
+    "Conditions of Cover printed on the quote, not the premium.",
     "important"
 )
 
@@ -721,7 +727,8 @@ make_table(
 
 add_tip_box(
     "There is no decline from the Q2\u2013Q5 loading pool. Even 5 Nos (every soft control absent) "
-    "produces a 15% loading, not a decline. The decline gate is Q1.1 / Q1.2 only.",
+    "produces a 15% loading, not a decline. As of August 2026 the engine has no automatic decline "
+    "outcome at all \u2014 the former Q1.1 / Q1.2 gate now records Conditions of Cover instead.",
     "note"
 )
 
@@ -980,7 +987,8 @@ doc.add_paragraph("On Renewal quotes only: Current Cover Limit, Current Annual P
 
 add_tip_box(
     "If the button remains greyed out, check that all mandatory fields are filled in and that no blockers "
-    "are active (Prior claim ticked, Refer for UW, turnover > R200M, Q1.1 or Q1.2 = No, or Renewal-Q8 contradiction).",
+    "are active (Prior claim ticked, Refer for UW, turnover > R200M, or Renewal-Q8 contradiction). "
+    "Answering Q1.1 / Q1.2 ‘No’ is not a blocker — it records a Condition of Cover.",
     "tip"
 )
 
@@ -1343,7 +1351,7 @@ doc.add_paragraph(
 
 add_heading("7.3 Underwriting Summary", level=2)
 doc.add_paragraph(
-    "Shows the underwriting outcome (Standard Rates / Proceed with Caution / Loading / Refer / Decline), "
+    "Shows the underwriting outcome (Standard Rates / Proceed with Caution / Loading / Refer), "
     "any loading percentage applied, and conditions of cover."
 )
 
@@ -1758,11 +1766,12 @@ faqs = [
     (
         "The 'Continue' button is greyed out. What am I missing?",
         "Check the following: (1) Company name is entered, (2) Industry is selected, "
-        "(3) At least one turnover figure is entered, (4) Q1.1 AND Q1.2 have been answered (the two "
-        "baseline gate questions), (5) if Renewal: Current Cover Limit, Current Annual Premium and "
-        "Current FP Sub-limit are all filled. Also check for active blockers: turnover > R200M, "
-        "Q1.1 or Q1.2 = No (decline), Prior claim ticked, Renewal with Q8 = No (contradiction), "
-        "or a referred industry."
+        "(3) At least one turnover figure is entered, (4) Q1.1 AND Q1.2 have been answered (either "
+        "Yes or No — they must simply be answered), (5) if Renewal: Current Cover Limit, Current "
+        "Annual Premium and Current FP Sub-limit are all filled. Also check for active blockers: "
+        "turnover > R200M, Prior claim ticked, Renewal with Q8 = No (contradiction), or a referred "
+        "industry. Note that answering Q1.1 / Q1.2 ‘No’ no longer blocks — it records a Condition "
+        "of Cover."
     ),
     (
         "I see 'Refer for Underwriting'. Can I still generate a quote?",
@@ -1772,12 +1781,13 @@ faqs = [
         "must assess and override outside the engine before proceeding."
     ),
     (
-        "What is the difference between 'Decline' and 'Refer'?",
-        "Decline: The risk fails the baseline security gate (Q1.1 = No or Q1.2 = No). The quote "
-        "cannot proceed in any form. Refer: The risk has factors that require senior review (Prior "
-        "claim, Renewal-with-Q8-No contradiction, Healthcare / Public Admin industry, or turnover "
-        "> R200M). Both outcomes hard-block the Continue button \u2014 a senior underwriter must "
-        "assess offline."
+        "What happened to the 'Decline' outcome?",
+        "It was removed in August 2026. Q1.1 = No or Q1.2 = No used to decline the risk outright and "
+        "block the quote; those answers now record Conditions of Cover instead, so the client can be "
+        "quoted and shown exactly which minimum controls must be in place to accept it. The controls "
+        "remain a requirement of any bound cover. 'Refer' is unchanged and is still a hard block: it "
+        "is triggered by a Prior claim, a Renewal-with-Q8-No contradiction, a Healthcare / Public "
+        "Admin industry, or turnover > R200M, and needs a senior underwriter to assess offline."
     ),
     (
         "Why does my Software & Technology client's premium look higher?",
@@ -1913,9 +1923,8 @@ doc.add_paragraph("All others: 1.00x (no modifier)")
 
 doc.add_paragraph()
 
-add_bold_para("UNDERWRITING RULES (April 2026 revised)")
-doc.add_paragraph("Q1.1 (AV/EDR) No OR Q1.2 (Firewall) No \u2192 Decline (hard block)")
-doc.add_paragraph("Q1.3 / Q1.4 No \u2192 Condition of Cover (proceed with caution)")
+add_bold_para("UNDERWRITING RULES (August 2026 revised)")
+doc.add_paragraph("Q1.1 / Q1.2 / Q1.3 / Q1.4 No \u2192 Condition of Cover (proceed with caution, no loading)")
 doc.add_paragraph("Q2.1\u2013Q5 loading: 0\u20132 No = 0% | 3 No = 5% | 4 No = 10% | 5 No = 15% (grace of 2, no decline)")
 doc.add_paragraph("Q6/Q7 (FP > R250k): No = Condition of Cover")
 doc.add_paragraph("Q8 (prior cover): auto-Yes on Renewal; No on Renewal via data-load \u2192 Refer (hard block)")
@@ -2104,6 +2113,18 @@ make_table(
          "check (49,000+ premium, 5,200+ underwriting and 596 recommendation/renewal comparisons, plus "
          "a PDF text-and-position comparison, all identical to the previous version). The workflow, "
          "screens, and outputs are unchanged; only the web address is different."],
+        ["2.1", "August 2026",
+         "Underwriting change: Q1.1 (AV/EDR) and Q1.2 (Firewall) answered ‘No’ no longer produce an "
+         "automatic Decline that blocks the quote. They are now recorded as Conditions of Cover, "
+         "exactly as Q1.3 and Q1.4 already were. The engine therefore no longer produces a Decline "
+         "outcome at all. This is not a relaxation of underwriting appetite — the minimum controls "
+         "remain a requirement of any bound cover; the change allows a quote to be issued so the "
+         "client can see precisely which controls must be in place to accept it. There is NO premium "
+         "impact: Q1 sits outside the Q2–Q5 loading pool, so a Q1 ‘No’ changes only the Conditions of "
+         "Cover printed on the quote. Q1.1 and Q1.2 must still be ANSWERED before Continue is enabled. "
+         "The Step 1 ‘Condition of Cover’ banner now lists the Q1 baseline-control conditions as well "
+         "as the Funds Protect ones, so the underwriter sees them at the point of answering; they also "
+         "appear in the Step 4 underwriting panel, the Step 5 summary, and the quote-output PDF."],
     ]
 )
 

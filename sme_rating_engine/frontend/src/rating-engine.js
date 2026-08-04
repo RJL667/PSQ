@@ -435,11 +435,15 @@ export function getCardStyling(role, isAlsoRecommended) {
  * derives, with all DOM side-effects removed. Returns everything a caller needs
  * to price + display:
  *   { outcome, loadingPct, noCount, q1Conditions, fpConditions, allConditions }
- * outcome ∈ 'decline' | 'refer' | 'standard' | 'caution' | 'loading'.
+ * outcome ∈ 'refer' | 'standard' | 'caution' | 'loading'. ('decline' is no
+ * longer produced — see the Q1 note below — but downstream label maps still
+ * carry it so an older saved quote renders correctly.)
  *
- * Control flow matches the legacy exactly:
- *   - Q1.1 or Q1.2 = No -> decline (loading 0, no conditions).
- *   - Q1.3 / Q1.4 = No -> Q1 conditions of cover (do NOT decline).
+ * Control flow matches the legacy EXCEPT for the Q1.1/Q1.2 rule below, which is
+ * a deliberate post-migration divergence (owner-approved 2026-08-04; the legacy
+ * is retired and is NOT being updated — see tools/parity.mjs for the exception):
+ *   - Q1.1 / Q1.2 = No -> Q1 conditions of cover (LEGACY: declined outright).
+ *   - Q1.3 / Q1.4 = No -> Q1 conditions of cover (unchanged).
  *   - Loading pool = Q2.1, Q2.2, Q3, Q4, Q5 (five independent No's); grace of
  *     two, then 5/10/15% at 3/4/5 No's (UNDERWRITING_LOADINGS).
  *   - Prior claim, or Renewal + Q8 = No -> refer (loadingPct kept as computed).
@@ -451,13 +455,18 @@ export function evaluateUnderwriting(answers, ctx = {}) {
   const priorClaim = !!ctx.priorClaim;
   const fpOver250k = !!ctx.fpOver250k;
 
-  // Q1 decline gate — Q1.1 (AV/EDR) and Q1.2 (firewall) are non-negotiable.
-  if (a['q1-1'] === false || a['q1-2'] === false) {
-    return { outcome: 'decline', loadingPct: 0, noCount: 0, q1Conditions: [], fpConditions: [], allConditions: [] };
-  }
-
-  // Q1.3 / Q1.4 No -> conditions of cover (only meaningful past the gate).
+  // Q1.1-Q1.4 No -> conditions of cover. The minimum controls remain a
+  // REQUIREMENT of any bound cover; making them conditions (rather than an
+  // outright decline) lets the client see a quote and exactly which controls
+  // they must put in place to accept it. Carries no premium impact by design:
+  // Q1 stays outside the loading pool (see UNDERWRITING_LOADINGS).
   const q1Conditions = [];
+  if (a['q1-1'] === false) {
+    q1Conditions.push('Antivirus/anti-malware with real-time endpoint detection and response (EDR) must be installed on all computer systems and access devices as a condition of cover.');
+  }
+  if (a['q1-2'] === false) {
+    q1Conditions.push('A network firewall configured to filter incoming and outgoing traffic must be implemented as a condition of cover.');
+  }
   if (a['q1-3'] === false) {
     q1Conditions.push('An email security solution that filters for phishing, malware and malicious attachments must be implemented as a condition of cover.');
   }

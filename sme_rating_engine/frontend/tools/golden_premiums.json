@@ -253,7 +253,7 @@
       }
     },
     {
-      "label": "decline (q1-1 no)",
+      "label": "q1-1 no — LEGACY declined (SUPERSEDED 2026-08-04, see divergence below)",
       "output": {
         "outcome": "decline",
         "loadingPct": 0,
@@ -302,5 +302,57 @@
         ]
       }
     }
-  ]
+  ],
+  "intendedDivergence": {
+    "note": "Q1.1/Q1.2 = No: legacy declined outright; the new engine records conditions of cover instead (owner-approved 2026-08-04). Premium-neutral — Q1 is outside the loading pool.",
+    "cases": [
+      {
+        "label": "q1-1 no",
+        "output": {
+          "outcome": "caution",
+          "loadingPct": 0,
+          "noCount": 0,
+          "q1Conditions": [
+            "Antivirus/anti-malware with real-time endpoint detection and response (EDR) must be installed on all computer systems and access devices as a condition of cover."
+          ],
+          "fpConditions": [],
+          "allConditions": [
+            "Antivirus/anti-malware with real-time endpoint detection and response (EDR) must be installed on all computer systems and access devices as a condition of cover."
+          ]
+        }
+      },
+      {
+        "label": "q1-2 no",
+        "output": {
+          "outcome": "caution",
+          "loadingPct": 0,
+          "noCount": 0,
+          "q1Conditions": [
+            "A network firewall configured to filter incoming and outgoing traffic must be implemented as a condition of cover."
+          ],
+          "fpConditions": [],
+          "allConditions": [
+            "A network firewall configured to filter incoming and outgoing traffic must be implemented as a condition of cover."
+          ]
+        }
+      },
+      {
+        "label": "q1-1 + q1-2 no",
+        "output": {
+          "outcome": "caution",
+          "loadingPct": 0,
+          "noCount": 0,
+          "q1Conditions": [
+            "Antivirus/anti-malware with real-time endpoint detection and response (EDR) must be installed on all computer systems and access devices as a condition of cover.",
+            "A network firewall configured to filter incoming and outgoing traffic must be implemented as a condition of cover."
+          ],
+          "fpConditions": [],
+          "allConditions": [
+            "Antivirus/anti-malware with real-time endpoint detection and response (EDR) must be installed on all computer systems and access devices as a condition of cover.",
+            "A network firewall configured to filter incoming and outgoing traffic must be implemented as a condition of cover."
+          ]
+        }
+      }
+    ]
+  }
 }

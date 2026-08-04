@@ -193,12 +193,14 @@ export default function Step1Client({ state, patch, dispatch, derived, onNext })
             )}
           </div>
 
-          {/* Condition of Cover banner (FP conditions) */}
-          {uw.fpConditions.length > 0 && (
+          {/* Condition of Cover banner — Q1 baseline controls + FP conditions.
+              Surfaced here (not only on Steps 4/5) so the underwriter sees the
+              required controls at the point of answering. */}
+          {uw.allConditions.length > 0 && (
             <div className="condition-of-cover-banner" style={{ display: 'block' }} aria-live="polite">
               <strong>Condition of Cover</strong>
               <p>The following will become conditions of cover and will be noted in the quote audit and printed output:</p>
-              <ul>{uw.fpConditions.map((c, i) => <li key={i}>{c}</li>)}</ul>
+              <ul>{uw.allConditions.map((c, i) => <li key={i}>{c}</li>)}</ul>
             </div>
           )}
 

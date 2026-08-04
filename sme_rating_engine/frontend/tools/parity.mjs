@@ -230,6 +230,17 @@ function legacyUW(answers, ctx) {
 }
 let uwChecked = 0;
 let uwFirst = null;
+// INTENDED DIVERGENCE (owner-approved 2026-08-04): Q1.1/Q1.2 = No used to decline
+// outright; the new engine records them as conditions of cover instead, so the
+// client can see a quote plus the exact minimum controls required to accept it.
+// The legacy is RETIRED and is deliberately NOT being updated. Rather than skip
+// those cases (which would silently drop ~half the grid), we assert the
+// divergence is EXACTLY the intended one: legacy must still decline, and the new
+// result must equal the legacy's own gate-PASSING result plus the Q1.1/Q1.2
+// condition sentences. Every other field still has to match the legacy.
+const Q11_COND = 'Antivirus/anti-malware with real-time endpoint detection and response (EDR) must be installed on all computer systems and access devices as a condition of cover.';
+const Q12_COND = 'A network firewall configured to filter incoming and outgoing traffic must be implemented as a condition of cover.';
+let uwDiverged = 0;
 // (a) targeted: sweep the pricing pool + gates
 for (const q11 of BI) for (const q12 of BI) for (const q13 of TRI) for (const q14 of TRI)
 for (const q21 of BI) for (const q22 of BI) for (const q3 of BI) for (const q4 of BI) for (const q5 of BI) {
@@ -237,6 +248,33 @@ for (const q21 of BI) for (const q22 of BI) for (const q3 of BI) for (const q4 o
   for (const ctx of [{ quoteType: 'new', priorClaim: false, fpOver250k: false }, { quoteType: 'renewal', priorClaim: false, fpOver250k: false }]) {
     const lo = legacyUW(answers, ctx); const no = N.evaluateUnderwriting(answers, ctx);
     uwChecked++;
+    if (q11 === false || q12 === false) {
+      uwDiverged++;
+      // Baseline: what the legacy itself produces once the Q1 gate passes.
+      const base = legacyUW({ ...answers, 'q1-1': true, 'q1-2': true }, ctx);
+      const expectedQ1 = [].concat(
+        q11 === false ? [Q11_COND] : [],
+        q12 === false ? [Q12_COND] : [],
+        base.q1Conditions,
+      );
+      const expected = {
+        outcome: base.outcome === 'standard' ? 'caution' : base.outcome,
+        loadingPct: base.loadingPct,
+        noCount: base.noCount,
+        q1Conditions: expectedQ1,
+        fpConditions: base.fpConditions,
+        allConditions: [].concat(expectedQ1, base.fpConditions),
+      };
+      if (lo.outcome !== 'decline') {
+        uwFirst = uwFirst || { why: 'legacy baseline no longer declines on Q1.1/Q1.2', answers, ctx, lo };
+        fail('Q1 intended-divergence: legacy baseline changed');
+      } else if (!eq(expected, no)) {
+        uwFirst = uwFirst || { why: 'Q1 divergence is not the specified one', answers, ctx, expected, no };
+        fail('Q1 intended-divergence: unexpected result shape');
+      }
+      if (failures > 12) break;
+      continue;
+    }
     if (!eq(lo, no)) { uwFirst = uwFirst || { answers, ctx, lo, no }; fail('evaluateUnderwriting (pricing pool)'); if (failures > 12) break; }
   }
 }
@@ -249,7 +287,8 @@ for (const priorClaim of BI) for (const fpOver250k of BI) for (const quoteType o
   uwChecked++;
   if (!eq(lo, no)) { uwFirst = uwFirst || { answers, ctx, lo, no }; fail('evaluateUnderwriting (FP/claim/renewal)'); if (failures > 12) break; }
 }
-console.log(`    ${uwChecked} underwriting evaluations compared`);
+console.log(`    ${uwChecked} underwriting evaluations compared`
+  + ` (${uwDiverged} of them the intended Q1.1/Q1.2 condition-of-cover divergence)`);
 if (uwFirst) console.error('    first UW mismatch: ' + JSON.stringify(uwFirst).slice(0, 500));
 
 // ---------------------------------------------------------------------------
@@ -346,12 +385,22 @@ for (const g of goldScenarios) {
 }
 const goldUW = [
   { label: 'all yes', answers: { 'q1-1': true, 'q1-2': true, 'q1-3': true, 'q1-4': true, 'q2-1': true, 'q2-2': true, q3: true, q4: true, q5: true }, ctx: { quoteType: 'new' } },
-  { label: 'decline (q1-1 no)', answers: { 'q1-1': false }, ctx: { quoteType: 'new' } },
+  { label: 'q1-1 no — LEGACY declined (SUPERSEDED 2026-08-04, see divergence below)', answers: { 'q1-1': false }, ctx: { quoteType: 'new' } },
   { label: '3 nos -> 5% loading', answers: { 'q1-1': true, 'q1-2': true, 'q2-1': false, q3: false, q4: false }, ctx: { quoteType: 'new' } },
   { label: 'refer prior claim', answers: { 'q1-1': true, 'q1-2': true }, ctx: { quoteType: 'new', priorClaim: true } },
   { label: 'fp conditions', answers: { 'q1-1': true, 'q1-2': true, 'q6-1': false, q7: false }, ctx: { quoteType: 'new', fpOver250k: true } },
 ];
 for (const g of goldUW) golden.underwriting.push({ label: g.label, output: legacyUW(g.answers, { quoteType: 'new', priorClaim: false, fpOver250k: false, ...g.ctx }) });
+// The one place the new engine INTENTIONALLY differs from the legacy — recorded
+// from the NEW engine so the snapshot documents live behaviour, not history.
+golden.intendedDivergence = {
+  note: 'Q1.1/Q1.2 = No: legacy declined outright; the new engine records conditions of cover instead (owner-approved 2026-08-04). Premium-neutral — Q1 is outside the loading pool.',
+  cases: [
+    { label: 'q1-1 no', answers: { 'q1-1': false, 'q1-2': true } },
+    { label: 'q1-2 no', answers: { 'q1-1': true, 'q1-2': false } },
+    { label: 'q1-1 + q1-2 no', answers: { 'q1-1': false, 'q1-2': false } },
+  ].map((c) => ({ label: c.label, output: N.evaluateUnderwriting(c.answers, { quoteType: 'new', priorClaim: false, fpOver250k: false }) })),
+};
 writeFileSync(resolve(__dirname, 'golden_premiums.json'), JSON.stringify(golden, null, 2), 'utf8');
 
 // ---------------------------------------------------------------------------
