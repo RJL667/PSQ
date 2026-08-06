@@ -36,8 +36,14 @@ search quota from them (1 search = up to 4 calls); that endpoint reports remaini
 
 **Related, still open:** the production auth model (see *Enable API auth* in §1) is
 unchanged by the demo gate — edge Basic auth is a stopgap in front of an app that
-still has no authentication of its own. Also outstanding: attach an uptime monitor
-to `https://veilguard.phishield.com/scanner/health/providers` (owner action).
+still has no authentication of its own.
+
+### Deferred, flagged for review (not defects — decisions not yet taken)
+
+| Item | Owner | Why it is parked |
+|---|---|---|
+| **Uptime monitor on `/scanner/health/providers`** | Owner (ops) | The readiness probe returns 503 when a provider key dies, the datastore falls back to SQLite, or a metered budget is exhausted — all silent failures otherwise. Nothing is watching it yet. A 2026-07-27 drill confirmed the 503 fires correctly; only the monitor is missing. |
+| **Should lookalike mail-capability carry SEVERITY?** | Owner (calibration) | Lookalike posture probing (MX / SPF / parking / content) ships as **reporting-only**: the category score is still a flat penalty per resolved domain, so a mail-capable near-typo and a parked null-MX domain score identically. Weighting by capability means either replacing that channel or justifying a second one, plus the manual paragraph that locks it — a calibration decision under the no-double-count rule, not a code tweak. Options: weight the existing penalty by risk band, add a probability uplift, or keep reporting-only permanently. |
 
 ---
 
