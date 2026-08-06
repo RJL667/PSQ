@@ -800,6 +800,46 @@ def _check_lookalike_posture(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] lookalike_self:{dom:<22} "
               f"perms={len(perms)} self={len(hits)}")
 
+    # COVERAGE: a cap must never delete a whole ATTACK CLASS. The old
+    # `permutations[:60]` truncated a list built technique-by-technique, so on
+    # phishield.com it probed 0 of 16 tld-variants, 0 of 8 dot-insertions, 0 of 8
+    # hyphen-insertions and 0 of 6 IDN homoglyphs — and missed three live
+    # lookalikes (phishield.io, phi-shield.com, phish.ield.com). It also
+    # reported "115 permutations tested" while testing 60.
+    import collections as _collections
+    _probed = []
+
+    def _fake_resolves(self, d):
+        _probed.append(d)
+        return False
+
+    with mock.patch.object(F, "_resolves", _fake_resolves):
+        _out = F().check("phishield.com")
+    _c = F()
+    _n, _t = _c._split_domain("phishield.com")
+    _perms = _c._generate_permutations(_n, _t)
+    _tech = {p[0]: p[1] for p in _perms}
+    _cov = _collections.Counter(_tech.get(d, "?") for d in _probed)
+    _all = _collections.Counter(p[1] for p in _perms)
+    _missing = sorted(t for t in _all if _cov.get(t, 0) == 0)
+    ok_cov = not _missing
+    if not ok_cov:
+        failures.append(
+            f"lookalike_coverage: technique(s) never probed at all: {_missing} — a "
+            "probe cap must sample across techniques, not amputate whole attack "
+            "classes (tld-variant carries .co.za / .co / .io)")
+    print(f"  [{'PASS' if ok_cov else 'FAIL'}] lookalike_coverage:all_techniques "
+          f"probed={len(_probed)}/{len(_perms)} unprobed_classes={len(_missing)}")
+
+    ok_honest = _out.get("total_permutations") == len(_probed)
+    if not ok_honest:
+        failures.append(
+            f"lookalike_coverage[reporting]: reports total_permutations="
+            f"{_out.get('total_permutations')} but probed {len(_probed)} — the panel "
+            "must state what was actually tested, not what was generated")
+    print(f"  [{'PASS' if ok_honest else 'FAIL'}] lookalike_coverage:honest_count  "
+          f"reported={_out.get('total_permutations')} probed={len(_probed)}")
+
     for label, raw, want_usable, want_null in MX_SCENARIOS:
         usable, null = F._usable_mx(raw)
         ok = (len(usable) == want_usable) and (null == want_null)
@@ -1487,7 +1527,7 @@ def main():
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
           f"5 provider-budget + "
-          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
+          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 8} lookalike-posture + "
           f"3 table-header + "
           f"15 blocked-not-clean + 1 base-path + 2 balance-metering "
           "ground-truth scenarios")
