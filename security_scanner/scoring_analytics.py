@@ -3837,7 +3837,31 @@ class DataBreachIndex:
         breach_count = breaches.get("breach_count", 0)
 
         # 1. Breach count (0-30 points)
-        if breach_count == 0:
+        # A breach lookup that never ran must not take the full-marks branch.
+        # HIBP requires an API key and has none on the current deployment, so
+        # `breach_count` defaulted to 0 and every scan banked 30/30 plus an
+        # "Excellent" DBI label off a lookup that never happened. Route every
+        # non-conclusive status to the same middle ground the credential-leak
+        # component already uses for unknowns. The researched breach-history
+        # checker (merged above) is what genuinely covers this, and when IT is
+        # conclusive the merged count is used and this branch is not reached.
+        # WHO IS THE AUTHORITY HERE. HIBP is no longer the primary source: the
+        # researched breach-history checker is, and it is the only one that
+        # finds anything for most SA domains. So a missing HIBP key must not by
+        # itself make the picture "unknown" — if the research ran and reached a
+        # verdict, including a verdict of NONE, the estate WAS assessed and the
+        # result is earned either way. Only when neither source concluded is
+        # this genuinely unknown.
+        _bi_conclusive = (
+            BREACH_INTEL_SCORING_ENABLED
+            and _bi.get("status") == "completed"
+            and _bi.get("verdict") in ("confirmed", "reported", "none")
+            and _bi.get("researched") is not False)
+        _b_status = breaches.get("status")
+        _b_conclusive = _b_status in (None, "completed") or _bi_conclusive
+        if not _b_conclusive:
+            bc_pts = 15          # unknown — neither credit nor penalty
+        elif breach_count == 0:
             bc_pts = 30
         elif breach_count <= 3:
             bc_pts = 15

@@ -1151,6 +1151,77 @@ def _check_balance_not_metered(failures):
           f"balance={got} extra_paid={calls['n'] - before}")
 
 
+def _check_hibp_and_waf_evidence(failures):
+    """Two more of the same defect, found by an empirical WAF smoke test.
+
+    1. BreachChecker with no HIBP key returned status="completed",
+       breach_count=0 — rendering "Known Breaches (HIBP): 0 - Passed" from a
+       lookup that never ran. HIBP_API_KEY is unset on the live deployment, so
+       EVERY scan carried that false clean, and the DBI banked 30/30 for it.
+    2. waf.blocking_observed was keyed off the APEX tracker only. A site that
+       serves 200 at the root but 403s every sensitive path never trips it —
+       excellentmeat.co.za did exactly that (apex {200:18, 503:2} => blocked
+       False) while info_disclosure was refused 8/8. The WAF row therefore kept
+       claiming "No WAF detected" on a page that also said "refused by a
+       WAF/CDN". Per-checker probe codes are the stronger evidence.
+    """
+    import importlib
+    ct_m = importlib.import_module("checkers_threats")
+    sa_m = importlib.import_module("scoring_analytics")
+
+    out = ct_m.BreachChecker().check("example.com")          # no key
+    ok = out.get("status") == "no_api_key"
+    if not ok:
+        failures.append(
+            f"hibp[no_key]: status={out.get('status')!r} breach_count="
+            f"{out.get('breach_count')} — with no API key the lookup cannot have "
+            "run, so 'completed / 0 breaches' is a green pass on breach history "
+            "nobody checked")
+    print(f"  [{'PASS' if ok else 'FAIL'}] hibp:no_key_is_not_clean        {out.get('status')}")
+
+    def _dbi(status):
+        cats = {"breaches": {"status": status, "breach_count": 0, "issues": []},
+                "dehashed": {"status": "completed", "total_entries": 0}}
+        r = sa_m.DataBreachIndex().calculate(cats)
+        return r["components"]["breach_count"]["points"]
+
+    def _dbi_bi(status, bi):
+        cats = {"breaches": {"status": status, "breach_count": 0, "issues": []},
+                "dehashed": {"status": "completed", "total_entries": 0}}
+        if bi:
+            cats["breach_intel"] = bi
+        r = sa_m.DataBreachIndex().calculate(cats)
+        return r["components"]["breach_count"]["points"]
+
+    full, unknown = _dbi("completed"), _dbi("no_api_key")
+    ok2 = unknown < full
+    if not ok2:
+        failures.append(
+            f"hibp[dbi]: an unassessed breach lookup scored {unknown}/30, the same "
+            f"as a real clean {full}/30 — the index must not award full marks for a "
+            "check that never happened")
+    print(f"  [{'PASS' if ok2 else 'FAIL'}] hibp:dbi_no_full_marks          "
+          f"unknown={unknown} real_clean={full}")
+
+    # RESEARCH IS THE AUTHORITY, NOT HIBP. HIBP finds almost nothing for SA
+    # domains and has no key on this deployment; the researched breach-history
+    # checker is the real source. So a missing HIBP key must NOT by itself make
+    # the picture unknown when the research reached a verdict — including a
+    # verdict of NONE, which is a genuine, earned clean.
+    researched_clean = _dbi_bi("no_api_key",
+                               {"status": "completed", "verdict": "none"})
+    researched_hit = _dbi_bi("no_api_key",
+                             {"status": "completed", "verdict": "confirmed",
+                              "incident_count": 1, "most_recent_breach": "2026-06-26"})
+    ok3 = researched_clean == full and researched_hit < full
+    if not ok3:
+        failures.append(
+            f"hibp[research_authority]: researched-clean scored {researched_clean}/30 "
+            f"(expected {full}) and researched-breach {researched_hit}/30 — a missing "
+            "HIBP key must not downgrade a verdict the web research actually reached")
+    print(f"  [{'PASS' if ok3 else 'FAIL'}] hibp:research_is_authority      "
+          f"researched_clean={researched_clean} researched_hit={researched_hit}")
+
 def _check_base_path_links(failures):
     src_dir = os.path.join(SEC, "frontend", "src")
     # (?!/) excludes protocol-relative "//cdn.example.com" while still matching
@@ -1318,6 +1389,7 @@ def main():
     _check_blocked_not_clean(failures)
     _check_base_path_links(failures)
     _check_balance_not_metered(failures)
+    _check_hibp_and_waf_evidence(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
