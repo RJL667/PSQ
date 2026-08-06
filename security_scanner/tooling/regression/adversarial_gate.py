@@ -961,6 +961,71 @@ def _check_blocked_not_clean(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:info_disc/{label:<22} "
               f"{got} scored={scored}")
 
+    # --- exposed_admin / vpn_remote / payment_security --------------------
+    # Same shape: each returns "nothing found" when a WAF refuses every probe.
+    # exposed_admin is the worst on screen (it renders a green "Passed"), and
+    # vpn_remote is the worst in words (it prints "No VPN/remote access gateway
+    # detected", an assertion of absence from a probe that never landed).
+    cc = importlib.import_module("checkers_core")
+    cn_mod = importlib.import_module("checkers_network")
+
+    def _admin(code):
+        with mock.patch("http_client.HTTP") as H:
+            H.discover.return_value = _Resp(code)
+            H.get.return_value = _Resp(code, "x" * 500)
+            H.stop_probing.return_value = False
+            return cc.ExposedAdminChecker().check("example.com")
+
+    def _simple(mod, cls, code):
+        with mock.patch.object(mod, "HTTP") as H:
+            H.get.return_value = _Resp(code, "nope")
+            H.stop_probing.return_value = False
+            return getattr(mod, cls)().check("example.com")
+
+    trio = [
+        ("exposed_admin",    lambda c: _admin(c)),
+        ("vpn_remote",       lambda c: _simple(cn_mod, "VPNRemoteAccessChecker", c)),
+        ("payment_security", lambda c: _simple(ct_mod, "PaymentSecurityChecker", c)),
+    ]
+    for name, run in trio:
+        blocked, clean = run(403), run(404)
+        ok = (blocked.get("status") == "unreachable"
+              and clean.get("status") == "completed")
+        if not ok:
+            failures.append(
+                f"blocked_clean[{name}]: blocked={blocked.get('status')!r} "
+                f"clean={clean.get('status')!r} — a blanket WAF deny must read as "
+                "unreachable, while an origin answering 404 must still read as a "
+                "genuine clean result")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:{name:<18} "
+              f"blocked={blocked.get('status')} clean={clean.get('status')}")
+
+    # vpn_remote must stop ASSERTING absence when it was blocked
+    v_blocked = _simple(cn_mod, "VPNRemoteAccessChecker", 403)
+    asserts = any("No VPN" in str(i) for i in v_blocked.get("issues", []))
+    if asserts:
+        failures.append(
+            "blocked_clean[vpn_remote/absence]: still prints 'No VPN/remote access "
+            "gateway detected' after every probe was refused — that reads to a broker "
+            "as 'they have no VPN', which a blanket 403 does not support")
+    print(f"  [{'PASS' if not asserts else 'FAIL'}] blocked_clean:vpn_absence_claim     "
+          f"asserts={asserts}")
+
+    # a REAL exposure must survive the guard (no suppression of true positives)
+    with mock.patch("http_client.HTTP") as H:
+        H.discover.side_effect = lambda url, **kw: _Resp(200) if "/admin" in url else _Resp(403)
+        H.get.return_value = _Resp(200, "admin login panel " * 40)
+        H.stop_probing.return_value = False
+        real = cc.ExposedAdminChecker().check("example.com")
+    kept = real.get("status") == "completed" and (real.get("high_count") or 0) > 0
+    if not kept:
+        failures.append(
+            f"blocked_clean[exposed_admin/true_positive]: status={real.get('status')!r} "
+            f"high_count={real.get('high_count')} — a genuine exposure found amid "
+            "blocking must still be reported, or the guard hides real findings")
+    print(f"  [{'PASS' if kept else 'FAIL'}] blocked_clean:true_positive_kept    "
+          f"high_count={real.get('high_count')}")
+
     # --- scoring: unreachable must EXCLUDE, not fall back to a 100 default --
     ok_excl = "unreachable" in sa.RiskScorer._FAILED_STATUSES
     if not ok_excl:
@@ -1174,7 +1239,7 @@ def main():
           f"5 provider-budget + "
           f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
           f"3 table-header + "
-          f"7 blocked-not-clean "
+          f"12 blocked-not-clean "
           "ground-truth scenarios")
 
 

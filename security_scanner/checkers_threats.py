@@ -430,6 +430,7 @@ class PaymentSecurityChecker:
 
         payment_page_found = None
         probed = 0
+        _codes: dict = {}   # status -> count; tells "no payment page" from "no answer"
         for path in self.PAYMENT_PATHS:
             # WAF-aware early-exit: stop enumerating once the apex is hard-blocking.
             if HTTP.stop_probing(domain, probed):
@@ -439,6 +440,8 @@ class PaymentSecurityChecker:
                 r = HTTP.get(f"https://{domain}{path}", timeout=4,
                              allow_redirects=True)
                 probed += 1
+                if r is not None:
+                    _codes[r.status_code] = _codes.get(r.status_code, 0) + 1
                 if r is not None and r.status_code == 200:
                     body = r.text[:50000].lower()
                     # Check if this looks like a payment page
@@ -449,6 +452,24 @@ class PaymentSecurityChecker:
                         break
             except Exception:
                 pass
+
+        result["probe_status_codes"] = dict(sorted(_codes.items()))
+        # No payment page found is only meaningful if the site answered. When a
+        # WAF refused every path we cannot say whether card data is handled
+        # on-site, which is the whole point of this checker for PCI exposure.
+        _BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
+        _n = sum(_codes.values())
+        _answered = sum(k for c, k in _codes.items() if c not in _BLOCKING)
+        if _n and not payment_page_found and _answered == 0:
+            result["status"] = "unreachable"
+            result["http_status"] = max(_codes, key=_codes.get)
+            result["unreachable_reason"] = (
+                f"Payment-page security could not be assessed — all {_n} probes were "
+                f"refused by a WAF/CDN (HTTP "
+                f"{', '.join(str(c) for c in sorted(_codes))}). No verdict on card "
+                f"handling or PCI exposure is implied.")
+            result.pop("score", None)
+            return result
 
         if payment_page_found:
             path, final_url, body = payment_page_found

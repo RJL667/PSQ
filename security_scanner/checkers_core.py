@@ -1202,6 +1202,19 @@ class ExposedAdminChecker:
         import threading as _threading
         _probed = {"n": 0}
         _plock = _threading.Lock()
+        # What each probe actually met. The 200-only gate below is right for
+        # avoiding false positives (a 403 means the path is PROTECTED, not
+        # exposed) but on its own it cannot tell "protected" from "we were never
+        # allowed to look": a WAF blanket-denying every path yields zero
+        # exposures and renders a green "Passed" for admin panels nobody probed.
+        # A genuine origin answers 404 for paths it does not have, so the
+        # presence of any 404/200 is the evidence that we were really talking to
+        # the site.
+        _codes: dict = {}
+
+        def _note(code):
+            with _plock:
+                _codes[code] = _codes.get(code, 0) + 1
 
         def probe(path, risk):
             # WAF-aware early-exit: once the apex is hard-blocking, skip the
@@ -1225,6 +1238,7 @@ class ExposedAdminChecker:
             # orgs hardest. 404/3xx are likewise not exposures. Mirrors the
             # WAF-robust 200-only + body-sanity gate in S-3
             # DependencyManifestChecker._probe (checkers_supply_chain.py).
+            _note(r.status_code)
             if r.status_code != 200:
                 return None
             # Body-sanity check: a 200 from a CDN/WAF catch-all (login page,
@@ -1271,6 +1285,26 @@ class ExposedAdminChecker:
         result["exposed"] = sorted(exposed, key=lambda x: ["critical", "high", "medium"].index(x["risk"]))
         result["critical_count"] = sum(1 for e in exposed if e["risk"] == "critical")
         result["high_count"] = sum(1 for e in exposed if e["risk"] == "high")
+        result["probe_status_codes"] = dict(sorted(_codes.items()))
+
+        # Blanket-deny detection. If every probe was refused and not one path
+        # produced an honest 404 or a 200, the origin never answered us and
+        # "0 exposed admin panels" is a statement about the WAF, not the site.
+        # Rendering that as a green "Passed" is the most misleading cell on the
+        # page — it is read as "no admin panel is reachable".
+        BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
+        probed = sum(_codes.values())
+        answered = sum(n for c, n in _codes.items() if c not in BLOCKING)
+        if probed and not exposed and answered == 0:
+            result["status"] = "unreachable"
+            result["http_status"] = max(_codes, key=_codes.get)
+            result["unreachable_reason"] = (
+                f"Exposed admin panels could not be assessed — all {probed} probes "
+                f"were refused by a WAF/CDN (HTTP "
+                f"{', '.join(str(c) for c in sorted(_codes))}) and no path returned "
+                f"an origin response. No verdict on reachable admin panels is "
+                f"implied; this is not evidence that none are exposed.")
+            result.pop("score", None)
 
         for e in exposed:
             if e["risk"] == "critical":
