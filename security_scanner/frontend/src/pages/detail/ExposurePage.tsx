@@ -9,6 +9,38 @@ import type { Results, CategoryBase } from '../../types/results'
 import type { KVRow } from '../../components/detail/parts'
 import styles from './detail.module.css'
 
+/** A registered domain that impersonates the client's. `technique` is how the
+ *  string was derived (char-swap, char-omission, homoglyph…), `similarity` how
+ *  close it is — both matter when deciding which ones to act on first. */
+export interface Lookalike {
+  domain: string
+  technique?: string
+  similarity?: number
+}
+
+function LookalikeList({ domains }: { domains?: Lookalike[] }) {
+  if (!domains || domains.length === 0) return null
+  return (
+    <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0,
+      display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {domains.map((d) => (
+        <li key={d.domain} style={{ display: 'flex', alignItems: 'baseline', gap: 8,
+          flexWrap: 'wrap', fontSize: 12 }}>
+          <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            color: 'var(--text-primary)', fontWeight: 600 }}>{d.domain}</span>
+          {d.technique && (
+            <span style={{ fontSize: 10.5, color: 'var(--text-muted)', border: '1px solid var(--border)',
+              borderRadius: 999, padding: '1px 7px' }}>{d.technique}</span>
+          )}
+          {typeof d.similarity === 'number' && (
+            <span style={{ fontSize: 11, color: 'var(--warning)' }}>{d.similarity}% similar</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
   const get = (id: string) => cat(r, id)
   const breaches = get('breaches')
@@ -89,6 +121,11 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
             { label: 'Permutations tested', value: String((fraud?.total_permutations as number) ?? '—') },
             { label: 'Resolved (live)', value: String((fraud?.resolved_count as number) ?? 0), severity: (fraud?.resolved_count as number) > 0 ? 'medium' : 'positive' },
           ]} />
+          {/* Name the domains. A count alone is not actionable: brand-abuse
+              follow-up (registrar complaint, defensive registration, monitoring)
+              starts from the actual strings, and every other panel that finds
+              specific assets lists them. */}
+          <LookalikeList domains={fraud?.fraudulent_domains as Lookalike[] | undefined} />
           <IssueList issues={fraud?.issues as string[]} />
         </Panel>
       </DetailGrid>

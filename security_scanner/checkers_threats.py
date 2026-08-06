@@ -2173,6 +2173,14 @@ class CredentialRiskClassifier:
         }
 
         return {
+            # This path IS a real verdict, so say so. The classifier previously
+            # returned no status at all, which the dashboard normalises to
+            # "not_assessed" — so a healthy LOW rendered the same grey
+            # "Not assessed" badge as a genuinely unsearched estate, right next
+            # to a row reading "risk level LOW". Harmless-looking before; now
+            # actively misleading, because the unassessed state above is real.
+            "status": "completed",
+            "assessed": True,
             "risk_level": risk_level,
             "credential_class": cls,
             "risk_score": risk_score,
