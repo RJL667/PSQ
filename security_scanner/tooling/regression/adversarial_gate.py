@@ -1526,6 +1526,38 @@ def _check_base_path_links(failures):
     print(f"  [{'PASS' if ok else 'FAIL'}] base_path:no_bare_absolute_links   "
           f"offenders={len(offenders)}")
 
+    # ...and the SHIPPED bundle, which the source check cannot see.
+    #
+    # BASE is baked in at BUILD time from import.meta.env.BASE_URL, so the
+    # prefix is only correct when the build is run as
+    # `SCANNER_BASE_PATH=/scanner npm run build`. A plain `npm run build` emits
+    # a bundle where BASE is "" and every withBase('/api/...') call resolves to
+    # /api/... instead of /scanner/api/... — off the Caddy `handle_path
+    # /scanner/*` mount entirely.
+    #
+    # That failure is close to silent. The dashboard still renders (Flask serves
+    # results.html, not this index.html), the elapsed timer still ticks, and
+    # ScanProgress's polling fallback treats any non-200/non-500 as "keep
+    # polling" — so a finished scan sits on screen at 0/39 forever. Shipped
+    # 2026-08-06; the running scan had already completed server-side.
+    #
+    # The committed artefact is what deploys, so assert on the artefact.
+    idx = os.path.join(SEC, "static", "dashboard", "index.html")
+    if os.path.exists(idx):
+        html = open(idx, encoding="utf-8").read()
+        refs = _re.findall(r'(?:src|href)="([^"]*static/dashboard[^"]*)"', html)
+        bad = [r for r in refs if not r.startswith("/scanner/")]
+        ok_b = bool(refs) and not bad
+        if not ok_b:
+            failures.append(
+                f"base_path[built_bundle]: index.html asset refs {bad or refs} are not "
+                "under /scanner/ — this bundle was built without SCANNER_BASE_PATH, so "
+                "every API call from the dashboard will miss the Caddy mount and the "
+                "scan progress screen will hang at 0 checks on a completed scan. "
+                "Rebuild with SCANNER_BASE_PATH=/scanner npm run build")
+        print(f"  [{'PASS' if ok_b else 'FAIL'}] base_path:built_bundle_prefixed   "
+              f"refs={refs}")
+
 
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
