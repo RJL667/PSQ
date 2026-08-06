@@ -1026,6 +1026,31 @@ def _check_blocked_not_clean(failures):
     print(f"  [{'PASS' if kept else 'FAIL'}] blocked_clean:true_positive_kept    "
           f"high_count={real.get('high_count')}")
 
+    # --- the WAF row must not claim ABSENCE while blocking is observed ------
+    # The report said "No WAF detected" in red, charged RSI +0.04 and BI +0.015,
+    # and advised buying a WAF — on the same page as "20 of 20 probes returned
+    # 403, active blocking pattern". We cannot claim a WAF either (a 403 wall may
+    # be a bot-manager, a CDN rule or plain auth), so the correct position is
+    # neutral: no penalty, and no detected-WAF credit.
+    for label, wafcat, want_penalty in (
+        ("no waf, no blocking",      {"detected": False}, True),
+        ("blocking observed",        {"detected": False, "blocking_observed": True}, False),
+        ("vendor detected",          {"detected": True, "waf_name": "Cloudflare"}, False),
+    ):
+        cats = {"waf": wafcat,
+                "breaches": {"status": "completed", "breach_count": 0, "issues": []},
+                "credential_risk": {"risk_level": "LOW"}}
+        rsi = sa.RansomwareIndex().calculate(cats, industry="technology")
+        charged = any("No WAF detected" in f.get("factor", "")
+                      for f in rsi.get("contributing_factors", []))
+        ok = charged == want_penalty
+        if not ok:
+            failures.append(
+                f"waf_row[{label}]: RSI 'No WAF detected' charged={charged}, expected "
+                f"{want_penalty} — penalising absence while the scan reports being "
+                "blocked contradicts the evidence on the same page")
+        print(f"  [{'PASS' if ok else 'FAIL'}] waf_row:{label:<24} penalty={charged}")
+
     # --- scoring: unreachable must EXCLUDE, not fall back to a 100 default --
     ok_excl = "unreachable" in sa.RiskScorer._FAILED_STATUSES
     if not ok_excl:
@@ -1239,7 +1264,7 @@ def main():
           f"5 provider-budget + "
           f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
           f"3 table-header + "
-          f"12 blocked-not-clean "
+          f"15 blocked-not-clean "
           "ground-truth scenarios")
 
 

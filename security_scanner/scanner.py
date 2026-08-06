@@ -1364,6 +1364,33 @@ class SecurityScanner:
         # if it reported "no data" outcomes while the apex shows blocked.
         # Used by the PDF / HTML to render per-card disclaimers.
         if waf_apex_status.get("blocked"):
+            # The WAF card itself contradicted this page. WAFChecker decides
+            # `detected` purely from VENDOR SIGNATURES (headers, cookies, Server
+            # token) — body matching was removed because it produced phantom
+            # positives. An unbranded or self-hosted blocking layer therefore
+            # fingerprints as nothing, and the report then said "No WAF
+            # detected" in red, charged an RSI and BI penalty for it, and
+            # advised buying a WAF — on the same page as "20 of 20 probes
+            # returned 403, active blocking pattern".
+            #
+            # We cannot honestly claim a WAF: a 403 wall could be a bot-manager,
+            # a CDN rule or plain auth. But we certainly cannot claim ABSENCE.
+            # Record the observation so scoring can drop the penalty without
+            # granting the detected-WAF bonus either — neutral is the only
+            # defensible position, and `detected` keeps its narrow meaning
+            # ("a named vendor was fingerprinted") for everything else.
+            _wafc = cat_results.get("waf")
+            if isinstance(_wafc, dict) and not _wafc.get("detected"):
+                _wafc["blocking_observed"] = True
+                _wafc["blocking_evidence"] = waf_apex_status.get("evidence", "")
+                _wafc["issues"] = [
+                    i for i in (_wafc.get("issues") or [])
+                    if "No WAF detected" not in str(i)
+                ]
+                _wafc["issues"].append(
+                    "Active blocking observed but no WAF vendor could be "
+                    "fingerprinted — treat protection status as UNCONFIRMED, not "
+                    "absent. " + str(waf_apex_status.get("evidence", "")).strip())
             affected = []
             # The checkers most sensitive to WAF interference are the
             # path-probers and tech fingerprinters. Anything that returns
