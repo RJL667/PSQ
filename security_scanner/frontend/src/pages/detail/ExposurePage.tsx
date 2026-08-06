@@ -16,27 +16,71 @@ export interface Lookalike {
   domain: string
   technique?: string
   similarity?: number
+  risk?: 'high' | 'medium' | 'low'
+  recommendation?: string
+  mail_capable?: boolean | null
+  null_mx?: boolean
+  spf?: string
+  mx_hosts?: string[]
+  nameservers?: string[]
+  listed_for_sale?: boolean
+  serves_content?: boolean
+  http_status?: number
+  page_title?: string
 }
 
+const LA_RISK: Record<string, { color: string; bg: string; label: string }> = {
+  high: { color: 'var(--high)', bg: 'var(--high-soft)', label: 'High' },
+  medium: { color: 'var(--warning)', bg: 'var(--warning-soft)', label: 'Medium' },
+  low: { color: 'var(--text-muted)', bg: 'var(--panel-bg-elevated)', label: 'Low' },
+}
+
+/** Lookalikes ordered by what they can actually DO, not just how similar they
+ *  look. A near-typo with working MX and no site can phish your people today;
+ *  a parked domain with a null MX cannot email anyone. Sorting high-risk first
+ *  is what makes the panel actionable rather than a list of 20 strings. */
 function LookalikeList({ domains }: { domains?: Lookalike[] }) {
   if (!domains || domains.length === 0) return null
+  const rank = (d: Lookalike) => (d.risk === 'high' ? 0 : d.risk === 'medium' ? 1 : 2)
+  const sorted = [...domains].sort((a, b) => rank(a) - rank(b) || (b.similarity ?? 0) - (a.similarity ?? 0))
   return (
     <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0,
-      display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {domains.map((d) => (
-        <li key={d.domain} style={{ display: 'flex', alignItems: 'baseline', gap: 8,
-          flexWrap: 'wrap', fontSize: 12 }}>
-          <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            color: 'var(--text-primary)', fontWeight: 600 }}>{d.domain}</span>
-          {d.technique && (
-            <span style={{ fontSize: 10.5, color: 'var(--text-muted)', border: '1px solid var(--border)',
-              borderRadius: 999, padding: '1px 7px' }}>{d.technique}</span>
-          )}
-          {typeof d.similarity === 'number' && (
-            <span style={{ fontSize: 11, color: 'var(--warning)' }}>{d.similarity}% similar</span>
-          )}
-        </li>
-      ))}
+      display: 'flex', flexDirection: 'column', gap: 9 }}>
+      {sorted.map((d) => {
+        const rs = LA_RISK[d.risk ?? 'low'] ?? LA_RISK.low
+        const caps: string[] = []
+        if (d.mail_capable) caps.push('sends mail')
+        else if (d.null_mx) caps.push('no mail (null MX)')
+        if (d.serves_content) caps.push('live site')
+        if (d.listed_for_sale) caps.push('for sale')
+        if (d.spf) caps.push(`SPF ${d.spf}`)
+        return (
+          <li key={d.domain} style={{ borderLeft: `2px solid ${rs.color}`, paddingLeft: 9 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{d.domain}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: rs.color, background: rs.bg,
+                borderRadius: 999, padding: '1px 7px' }}>{rs.label}</span>
+              {d.technique && (
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{d.technique}</span>
+              )}
+              {typeof d.similarity === 'number' && (
+                <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{d.similarity}%</span>
+              )}
+            </div>
+            {caps.length > 0 && (
+              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                {caps.join(' · ')}
+              </div>
+            )}
+            {d.recommendation && (
+              <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)', marginTop: 3 }}>
+                {d.recommendation}
+              </div>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }

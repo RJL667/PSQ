@@ -1868,10 +1868,29 @@ def cat_fraudulent_domains(d, S):
         ("Variants checked",  fd.get("total_permutations", 0)),
         ("Lookalikes found",  found),
     ]
-    for dom in fd.get("fraudulent_domains", [])[:5]:
+    # Order by what each domain can actually DO. A near-typo with working MX and
+    # no website can phish today; a parked domain with a null MX cannot email
+    # anyone. Similarity alone puts those two side by side and reads as equal.
+    _rank = {"high": 0, "medium": 1, "low": 2}
+    doms = sorted(fd.get("fraudulent_domains", []),
+                  key=lambda x: (_rank.get(x.get("risk"), 3), -(x.get("similarity") or 0)))
+    for dom in doms[:5]:
         sim = dom.get("similarity")
         sim_str = f" ({int(sim)}% similar)" if sim else ""
-        rows.append((dom.get("technique", "lookalike"), f"{dom.get('domain','')}{sim_str}"))
+        caps = []
+        if dom.get("mail_capable"):
+            caps.append("SENDS MAIL")
+        elif dom.get("null_mx"):
+            caps.append("no mail")
+        if dom.get("serves_content"):
+            caps.append("live site")
+        if dom.get("listed_for_sale"):
+            caps.append("for sale")
+        cap_str = f" — {', '.join(caps)}" if caps else ""
+        label = dom.get("technique", "lookalike")
+        if dom.get("risk"):
+            label = f"{label} [{dom['risk'].upper()}]"
+        rows.append((label, f"{dom.get('domain','')}{sim_str}{cap_str}"))
     fb = f"{found} lookalike domain(s) detected — these could be used for phishing attacks against staff or customers." if found > 0 else "No active lookalike domains detected — low brand impersonation risk."
     parts = build_cat_card("Fraudulent Domains (Typosquat)", col, f"{found} found", rows, fd.get("issues", []), S, fallback=fb)
 
@@ -1887,6 +1906,32 @@ def cat_fraudulent_domains(d, S):
         parts.append(Spacer(1, 2 * mm))
         parts.append(Paragraph("<b>Recommended Actions</b>", S["cat_title"]))
         parts.append(Spacer(1, 1 * mm))
+        # Per-domain guidance where we probed it. Generic advice ("investigate
+        # each domain") makes the reader do the triage we already did: the
+        # mail-capable near-typo needs a registrar report today, the parked
+        # one only needs watching, and saying so is the difference between a
+        # finding and an instruction.
+        probed = [x for x in doms if x.get("recommendation")]
+        if probed:
+            mailers = [x for x in probed if x.get("mail_capable")]
+            if mailers:
+                parts.append(Paragraph(
+                    f"<b>{len(mailers)} of these can send email as your brand</b> "
+                    f"({', '.join(x['domain'] for x in mailers[:4])}). That is the "
+                    "capability that turns a lookalike into a working phishing "
+                    "campaign against your staff, clients and brokers — treat these "
+                    "first.", S["body"]))
+                parts.append(Spacer(1, 2 * mm))
+            for x in probed[:5]:
+                parts.append(Paragraph(
+                    f"<b>{x['domain']}</b> ({x.get('risk', 'low')}): "
+                    f"{x['recommendation']}", S["body"]))
+            if fd.get("enrichment_capped"):
+                parts.append(Paragraph(
+                    f"<i>{fd['enrichment_capped']} further lookalike(s) were found but not "
+                    "probed in depth (per-scan cap) — they are listed above without a "
+                    "mail/hosting verdict, not cleared.</i>", S["body"]))
+            parts.append(Spacer(1, 2 * mm))
         parts.append(Paragraph("1. Investigate each lookalike domain to determine if it is being used for phishing.", S["body"]))
         parts.append(Paragraph("2. Submit takedown requests to the registrars of confirmed malicious domains.", S["body"]))
         parts.append(Paragraph("3. Register common typo variants of your domain defensively to prevent future abuse.", S["body"]))
