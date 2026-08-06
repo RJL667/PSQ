@@ -3837,7 +3837,19 @@ class DataBreachIndex:
         breach_count = breaches.get("breach_count", 0)
 
         # 1. Breach count (0-30 points)
-        if breach_count == 0:
+        # A breach lookup that never ran must not take the full-marks branch.
+        # HIBP requires an API key and has none on the current deployment, so
+        # `breach_count` defaulted to 0 and every scan banked 30/30 plus an
+        # "Excellent" DBI label off a lookup that never happened. Route every
+        # non-conclusive status to the same middle ground the credential-leak
+        # component already uses for unknowns. The researched breach-history
+        # checker (merged above) is what genuinely covers this, and when IT is
+        # conclusive the merged count is used and this branch is not reached.
+        _b_status = breaches.get("status")
+        _b_conclusive = _b_status in (None, "completed")
+        if not _b_conclusive:
+            bc_pts = 15          # unknown — neither credit nor penalty
+        elif breach_count == 0:
             bc_pts = 30
         elif breach_count <= 3:
             bc_pts = 15

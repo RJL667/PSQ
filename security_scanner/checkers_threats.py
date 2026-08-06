@@ -260,10 +260,21 @@ class BreachChecker:
         }
         if not REQUESTS_AVAILABLE:
             result["status"] = "error"; result["error"] = "requests not installed"; return result
+        # HIBP's breach API requires a key. Without one the request cannot
+        # succeed, yet the result defaults to breach_count=0 / status=completed —
+        # which the dashboard renders as "Known Breaches (HIBP): 0 — Passed".
+        # That is a green pass on breach history produced by a lookup that never
+        # happened, and it was live: HIBP_API_KEY is unset on the VM, so EVERY
+        # scan showed a clean HIBP card. Report the truth instead; the
+        # researched breach-history checker is what actually covers this ground.
+        if not api_key:
+            result["status"] = "no_api_key"
+            result["error"] = ("HIBP breach lookup requires an API key — breach "
+                               "history was NOT checked against HIBP. This is not "
+                               "evidence of a clean record.")
+            return result
         try:
-            headers = {"User-Agent": USER_AGENT}
-            if api_key:
-                headers["hibp-api-key"] = api_key
+            headers = {"User-Agent": USER_AGENT, "hibp-api-key": api_key}
             r = HIBP.get(self.HIBP_URL, params={"domain": domain},
                          headers=headers, timeout=DEFAULT_TIMEOUT)
             if r is None:

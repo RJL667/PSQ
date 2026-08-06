@@ -1363,7 +1363,37 @@ class SecurityScanner:
         # Compute per-checker WAF flags: a checker is flagged WAF-affected
         # if it reported "no data" outcomes while the apex shows blocked.
         # Used by the PDF / HTML to render per-card disclaimers.
-        if waf_apex_status.get("blocked"):
+        # Blocking evidence from the CHECKERS themselves, not only the apex.
+        # The apex tracker watches the homepage, so a site that serves 200 at
+        # the root but 403s every sensitive path — ordinary path-based WAF
+        # rules — never trips it. excellentmeat.co.za did exactly that: apex
+        # codes {200: 18, 503: 2} => blocked=False, while info_disclosure was
+        # refused 8/8 with 403. Keying the WAF row off the apex alone therefore
+        # left it claiming "No WAF detected" on a page that also said "refused
+        # by a WAF/CDN". The per-probe status codes are the stronger evidence.
+        _REFUSAL = {401, 403, 406, 409, 418, 429, 451}
+        _checker_refusals = {}
+        for _cn, _cv in cat_results.items():
+            if not isinstance(_cv, dict):
+                continue
+            for _code, _n in (_cv.get("probe_status_codes") or {}).items():
+                try:
+                    _code = int(_code)
+                except (TypeError, ValueError):
+                    continue
+                if _code in _REFUSAL:
+                    _checker_refusals[_cn] = _checker_refusals.get(_cn, 0) + _n
+        # Only treat it as an active blocking layer when a checker was refused
+        # OUTRIGHT (status unreachable). Scattered 403s on a site that otherwise
+        # answers are normal access control, not a blocking layer.
+        _refused_blind = sorted(
+            n for n in _checker_refusals
+            if isinstance(cat_results.get(n), dict)
+            and cat_results[n].get("status") == "unreachable"
+        )
+        results["_scan_completeness"]["refusal_blinded_checkers"] = _refused_blind
+
+        if waf_apex_status.get("blocked") or _refused_blind:
             # The WAF card itself contradicted this page. WAFChecker decides
             # `detected` purely from VENDOR SIGNATURES (headers, cookies, Server
             # token) — body matching was removed because it produced phantom
@@ -1381,8 +1411,15 @@ class SecurityScanner:
             # ("a named vendor was fingerprinted") for everything else.
             _wafc = cat_results.get("waf")
             if isinstance(_wafc, dict) and not _wafc.get("detected"):
+                _evidence = str(waf_apex_status.get("evidence", "")).strip()
+                if not _evidence and _refused_blind:
+                    _evidence = (
+                        "path probes refused for: " + ", ".join(_refused_blind)
+                        + " (" + ", ".join(
+                            f"{n}×{c}" for n, c in sorted(_checker_refusals.items())
+                            if n in _refused_blind) + ")")
                 _wafc["blocking_observed"] = True
-                _wafc["blocking_evidence"] = waf_apex_status.get("evidence", "")
+                _wafc["blocking_evidence"] = _evidence
                 _wafc["issues"] = [
                     i for i in (_wafc.get("issues") or [])
                     if "No WAF detected" not in str(i)
@@ -1390,7 +1427,7 @@ class SecurityScanner:
                 _wafc["issues"].append(
                     "Active blocking observed but no WAF vendor could be "
                     "fingerprinted — treat protection status as UNCONFIRMED, not "
-                    "absent. " + str(waf_apex_status.get("evidence", "")).strip())
+                    "absent. " + _evidence)
             affected = []
             # The checkers most sensitive to WAF interference are the
             # path-probers and tech fingerprinters. Anything that returns
