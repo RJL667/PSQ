@@ -493,6 +493,40 @@ class HttpClient:
         """Surface WAF status for an apex to the report renderers."""
         return self.waf_tracker.status(apex)
 
+    # HTTP codes that mean "we were turned away", not "the origin answered".
+    REFUSAL_CODES = frozenset({401, 403, 406, 409, 418, 429, 451, 503})
+
+    def origin_answering(self, domain: str, *, timeout: int = 8) -> Optional[bool]:
+        """Control probe: did the ORIGIN answer a plain request for the site root?
+
+        DENIED IS NOT BLIND. Path-enumeration checkers that probe only
+        should-be-denied paths (/.env, /admin, /remote/login, /package.json)
+        cannot, from their own probes alone, tell these two apart:
+
+          (a) the server denied exactly those paths — correct hardening, and
+              precisely the result we want to report; from the client's risk
+              point of view the file is NOT publicly retrievable, which is the
+              question the checker asks; or
+          (b) an edge refused everything — we are blind and must say so.
+
+        Both look like "every probe returned 403". Calling (a) unassessed
+        converts good configuration into a coverage gap and, because the WAF
+        card reads blindness as evidence of a blocking layer, also invents an
+        active WAF on a site that has none.
+
+        The site root discriminates: a normal page nobody has reason to deny.
+        If it answers, we were talking to the origin and the refusals are
+        path-level denials.
+
+        True  = root answered — refusals are denials, the clean result is earned
+        False = root refused too — genuinely walled off, report unreachable
+        None  = no response at all — treat as blind
+        """
+        r = self.get(f"https://{domain}/", timeout=timeout)
+        if r is None:
+            return None
+        return r.status_code not in self.REFUSAL_CODES
+
     def hard_blocked(self, apex_or_url: str, min_samples: int = 8) -> bool:
         """True when an apex shows SUSTAINED WAF blocking. Conservative: requires at
         least `min_samples` observations so a single stray 403 can't trip it. Accepts

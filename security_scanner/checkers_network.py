@@ -549,14 +549,17 @@ class VPNRemoteAccessChecker:
         _BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
         _probed_n = sum(_codes.values())
         _answered = sum(n for c, n in _codes.items() if c not in _BLOCKING)
-        if _probed_n and not result["vpn_detected"] and _answered == 0:
+        # The site root is the control: a gateway path denied by a server that
+        # otherwise answers is not exposed, which is what this checker asks.
+        if (_probed_n and not result["vpn_detected"] and _answered == 0
+                and not HTTP.origin_answering(domain)):
             result["status"] = "unreachable"
             result["http_status"] = max(_codes, key=_codes.get)
             result["unreachable_reason"] = (
                 f"Remote-access posture could not be assessed — all {_probed_n} "
                 f"gateway probes were refused by a WAF/CDN (HTTP "
-                f"{', '.join(str(c) for c in sorted(_codes))}). No verdict on VPN "
-                f"or remote-access exposure is implied.")
+                f"{', '.join(str(c) for c in sorted(_codes))}), as was the site "
+                f"root. No verdict on VPN or remote-access exposure is implied.")
             result.pop("score", None)
         elif not result["vpn_detected"]:
             result["issues"].append("No VPN/remote access gateway detected — remote access method unknown")

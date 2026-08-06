@@ -1295,16 +1295,32 @@ class ExposedAdminChecker:
         BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
         probed = sum(_codes.values())
         answered = sum(n for c, n in _codes.items() if c not in BLOCKING)
+        #
+        # ...but only when we were genuinely turned away. Every path this checker
+        # probes is one a hardened server SHOULD deny, so "all 403" is equally
+        # consistent with correct configuration. The site root settles it: if it
+        # answers, the origin was talking to us, nothing is reachable, and the
+        # clean result is earned rather than assumed.
         if probed and not exposed and answered == 0:
-            result["status"] = "unreachable"
-            result["http_status"] = max(_codes, key=_codes.get)
-            result["unreachable_reason"] = (
-                f"Exposed admin panels could not be assessed — all {probed} probes "
-                f"were refused by a WAF/CDN (HTTP "
-                f"{', '.join(str(c) for c in sorted(_codes))}) and no path returned "
-                f"an origin response. No verdict on reachable admin panels is "
-                f"implied; this is not evidence that none are exposed.")
-            result.pop("score", None)
+            _origin_up = HTTP.origin_answering(domain)
+            if _origin_up:
+                result["denied_not_blind"] = probed
+                result["issues"].append(
+                    f"All {probed} admin-path probes were refused (HTTP "
+                    f"{', '.join(str(c) for c in sorted(_codes))}) while the site "
+                    f"root responded normally — no admin panel is publicly "
+                    f"reachable. This is the correct configuration.")
+            else:
+                result["status"] = "unreachable"
+                result["http_status"] = max(_codes, key=_codes.get)
+                result["unreachable_reason"] = (
+                    f"Exposed admin panels could not be assessed — all {probed} probes "
+                    f"were refused by a WAF/CDN (HTTP "
+                    f"{', '.join(str(c) for c in sorted(_codes))}) and no path returned "
+                    f"an origin response, including the site root. No verdict on "
+                    f"reachable admin panels is implied; this is not evidence that "
+                    f"none are exposed.")
+                result.pop("score", None)
 
         for e in exposed:
             if e["risk"] == "critical":

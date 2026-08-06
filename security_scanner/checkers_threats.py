@@ -3537,9 +3537,11 @@ class InformationDisclosureChecker:
                         "Info disclosure probe batch hit 60s wall-clock — remaining paths skipped"
                     )
 
-            # Directory listing probe (separate — checks root HTML, not path)
+            # Directory listing probe (separate — checks root HTML, not path).
+            # It doubles as the CONTROL for the blocked/denied question below.
             from http_client import HTTP
             r = HTTP.get(f"{base}/", timeout=8)
+            result["control_status"] = r.status_code if r is not None else None
             if r is not None and (
                 "Index of /" in r.text or "<title>Index of" in r.text
             ):
@@ -3565,10 +3567,33 @@ class InformationDisclosureChecker:
             # never allowed to request. Only when there are no findings AND no
             # successful probe: a single 200 (or any real 404) means the origin
             # was answering us and the empty result is genuine.
+            # DENIED IS NOT BLIND. This checker probes ONLY sensitive files
+            # (/.env, /.git/HEAD, /wp-config.php, /backup.sql...). A properly
+            # hardened server denies exactly those with 403 — which is the
+            # RESULT WE WANT, not a failure to look. Treating that as
+            # "unreachable" converts good configuration into "not assessed" and,
+            # worse, propagates into the WAF card as "active blocking observed".
+            # excellentmeat.co.za is precisely this case: apex 19/19 200,
+            # exposed_admin got 404s, and all 8 sensitive paths returned 403.
+            #
+            # The control decides it. The site root was just fetched above: if it
+            # answered, the origin is talking to us and the 403s are path-level
+            # denials — a clean, EARNED result. Only when the control is refused
+            # too is the host actually walled off.
             BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
             probed = sum(_codes.values())
             blocked = sum(n for c, n in _codes.items() if c in BLOCKING)
-            if probed and not exposed and blocked == probed:
+            ctl = result.get("control_status")
+            origin_answering = ctl is not None and ctl not in BLOCKING
+            if origin_answering and probed and blocked == probed:
+                result["sensitive_paths_denied"] = probed
+                result["issues"].append(
+                    f"All {probed} sensitive-file probes were refused (HTTP "
+                    f"{', '.join(str(c) for c in sorted(_codes))}) while the site "
+                    f"root responded normally (HTTP {ctl}) — the server is denying "
+                    f"access to these paths, which is the correct configuration. "
+                    f"No exposed files were found.")
+            if probed and not exposed and blocked == probed and not origin_answering:
                 result["status"] = "unreachable"
                 result["http_status"] = max(_codes, key=_codes.get)
                 result["unreachable_reason"] = (

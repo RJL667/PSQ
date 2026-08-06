@@ -102,6 +102,46 @@ def build(doc):
         "never read as a weakness where it is not one.",
     )
 
+    add_bold_body(doc, "Refused is not the same as blinded", "")
+
+    add_body(
+        doc,
+        "One case deserves separating from the rest, because it looks identical "
+        "on the wire and means the opposite. Four checks ask only whether "
+        "something is publicly retrievable: sensitive files such as .env or a "
+        "database backup, an administrator login page, a remote-access gateway, "
+        "and a dependency manifest. Every path they request is one a properly "
+        "configured server ought to refuse. When such a server answers HTTP 403 "
+        "to all of them, it has not blocked the assessment - it has ANSWERED it. "
+        "The file is not publicly retrievable, which is precisely the question "
+        "asked, and the result is a genuine clean one.",
+    )
+
+    add_body(
+        doc,
+        "The scanner separates the two with a control request for the site's "
+        "home page, a page nobody has reason to deny. If the home page answers "
+        "normally while the sensitive paths are refused, the server was talking "
+        "to us throughout and the refusals are deliberate access control: the "
+        "check is recorded as assessed and clean, and the report says so in "
+        "words. If the home page is refused as well, the target is genuinely "
+        "walled off, and the check is recorded as not assessed as described "
+        "above. Checks that ask what something IS rather than whether it is "
+        "reachable - security headers, software versions, cookie flags, payment "
+        "page handling - gain nothing from a 403 and are always treated as not "
+        "assessed when refused.",
+    )
+
+    add_note(
+        doc,
+        "This distinction also governs the WAF card. Because a wholly blinded "
+        "check is evidence of a blocking layer, treating correct hardening as "
+        "blindness previously caused the report to announce active blocking on "
+        "sites that had no WAF at all - while simultaneously withholding credit "
+        "for the hardening. Both readings are now correct: good configuration "
+        "is credited, and a genuine absence of a WAF is still charged for.",
+    )
+
     # 6.1 Full Technical Report ---------------------------------------- #
     add_h2(doc, "6.1 Full Technical Report")
 

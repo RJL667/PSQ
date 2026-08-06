@@ -541,14 +541,18 @@ class DependencyManifestChecker:
         _BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
         _n = sum(self._codes.values())
         _answered = sum(k for c, k in self._codes.items() if c not in _BLOCKING)
-        if _n and not result["exposed_manifests"] and _answered == 0:
+        # A manifest denied by a server that still serves its home page is not
+        # leaked — the control probe separates that from a blanket edge block.
+        from http_client import HTTP as _HTTP
+        if (_n and not result["exposed_manifests"] and _answered == 0
+                and not _HTTP.origin_answering(domain)):
             result["status"] = "unreachable"
             result["http_status"] = max(self._codes, key=self._codes.get)
             result["unreachable_reason"] = (
                 f"Exposed dependency manifests could not be assessed — all {_n} "
                 f"probes were refused by a WAF/CDN (HTTP "
-                f"{', '.join(str(c) for c in sorted(self._codes))}). No verdict on "
-                f"a leaked dependency map is implied.")
+                f"{', '.join(str(c) for c in sorted(self._codes))}), as was the "
+                f"site root. No verdict on a leaked dependency map is implied.")
             result.pop("score", None)
 
         return result

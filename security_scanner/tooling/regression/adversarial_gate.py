@@ -1030,17 +1030,26 @@ def _check_blocked_not_clean(failures):
     cc = importlib.import_module("checkers_core")
     cn_mod = importlib.import_module("checkers_network")
 
+    # Faithful control-probe answer for the uniform-code mocks below: a site that
+    # returns `code` to everything returns it to the site root as well.
+    _root_answers = lambda code: code not in {401, 403, 406, 409, 418, 429, 451, 503}
+
     def _admin(code):
         with mock.patch("http_client.HTTP") as H:
             H.discover.return_value = _Resp(code)
             H.get.return_value = _Resp(code, "x" * 500)
             H.stop_probing.return_value = False
+            # This mock refuses EVERY url, so the site root is refused too.
+            # Leaving origin_answering as a bare MagicMock would return a truthy
+            # sentinel and quietly convert this blind case into a clean one.
+            H.origin_answering.side_effect = lambda d, **k: _root_answers(code)
             return cc.ExposedAdminChecker().check("example.com")
 
     def _simple(mod, cls, code):
         with mock.patch.object(mod, "HTTP") as H:
             H.get.return_value = _Resp(code, "nope")
             H.stop_probing.return_value = False
+            H.origin_answering.side_effect = lambda d, **k: _root_answers(code)
             return getattr(mod, cls)().check("example.com")
 
     trio = [
@@ -1106,6 +1115,7 @@ def _check_blocked_not_clean(failures):
             H.head.return_value = _Resp(code)
             H.get.return_value = _Resp(code, "x" * 50)
             H.stop_probing.return_value = False
+            H.origin_answering.side_effect = lambda d, **k: _root_answers(code)
             return cs_m.DependencyManifestChecker().check("example.com")
 
     for label, fn in (("website_security", _ws), ("dependency_manifest", _dm)):
@@ -1121,6 +1131,85 @@ def _check_blocked_not_clean(failures):
                 "page as a well-configured site")
         print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:{label:<20} "
               f"blocked={blocked.get('status')} clean={clean.get('status')}")
+
+    # --- round 3: DENIED IS NOT BLIND --------------------------------------
+    # The overcorrection. Rounds 1-2 taught four path-enumeration checkers to
+    # report "unreachable" when every probe came back 403. But every path they
+    # request is one a hardened server SHOULD refuse (/.env, /admin,
+    # /remote/login, /package.json), so "all 403" is ALSO the signature of
+    # correct configuration — and the two were indistinguishable.
+    #
+    # Live case, excellentmeat.co.za 2026-08-06: apex 19/19 = 200, exposed_admin
+    # collected 15 honest 404s, and all 8 sensitive-file probes returned 403.
+    # The site was answering us the whole time. We reported info_disclosure as
+    # "unreachable — refused by a WAF/CDN", which then fed refusal_blinded_checkers
+    # and made the WAF card announce "active blocking observed" on a site with no
+    # WAF at all. Good hardening was rendered as a coverage gap AND a phantom WAF.
+    #
+    # The control is the site root: a page nobody has reason to deny. This must
+    # cut BOTH ways, so each checker is run three times — the middle row is the
+    # regression this round fixes, and the last row is the round-1/2 behaviour
+    # that must survive it.
+    def _urlaware(pc, rc):
+        """Fake HTTP where the site ROOT answers differently from probed paths."""
+        is_root = lambda u: u.rstrip("/").count("/") == 2
+        H = mock.MagicMock()
+        H.head.side_effect     = lambda url, **k: _Resp(rc if is_root(url) else pc)
+        H.discover.side_effect = lambda url, **k: _Resp(rc if is_root(url) else pc)
+        H.get.side_effect      = lambda url, **k: (_Resp(rc, "<html>Home</html>")
+                                                   if is_root(url) else _Resp(pc, "x" * 80))
+        H.stop_probing.return_value = False
+        H.hard_blocked.return_value = False
+        H.REFUSAL_CODES = frozenset({401, 403, 406, 409, 418, 429, 451, 503})
+        H.origin_answering.side_effect = lambda d, **k: rc not in H.REFUSAL_CODES
+        return H
+
+    denied_trio = [
+        ("info_disclosure", ct_mod, "InformationDisclosureChecker"),
+        ("exposed_admin",   cc,     "ExposedAdminChecker"),
+        ("vpn_remote",      cn_mod, "VPNRemoteAccessChecker"),
+        ("dep_manifest",    cs_m,   "DependencyManifestChecker"),
+    ]
+    for name, mod, cls in denied_trio:
+        got = {}
+        for row, pc, rc in (("ordinary", 404, 200),
+                            ("denied",   403, 200),
+                            ("walled",   403, 403)):
+            H = _urlaware(pc, rc)
+            with mock.patch("http_client.HTTP", H), mock.patch.object(mod, "HTTP", H, create=True):
+                got[row] = getattr(mod, cls)().check("example.com").get("status")
+        ok = (got["ordinary"] == "completed"      # plain clean site
+              and got["denied"] == "completed"    # hardened: refusals ANSWER the question
+              and got["walled"] == "unreachable")  # blind: still fails closed
+        if not ok:
+            failures.append(
+                f"denied_not_blind[{name}]: ordinary={got['ordinary']!r} "
+                f"denied={got['denied']!r} walled={got['walled']!r} — a server that "
+                "refuses sensitive paths while serving its home page has ANSWERED "
+                "this checker's question (nothing is publicly reachable) and must "
+                "score as clean; only a root that is refused too means we were blind")
+        print(f"  [{'PASS' if ok else 'FAIL'}] denied_not_blind:{name:<16} "
+              f"ordinary={got['ordinary']} denied={got['denied']} walled={got['walled']}")
+
+    # ...and the phantom WAF that the false blindness produced. With no checker
+    # left blinded and an apex that never blocked, nothing may claim blocking.
+    _wafc = {"detected": False, "waf_name": None}
+    _cats = {"waf": _wafc,
+             "info_disclosure": {"status": "completed",
+                                 "probe_status_codes": {"403": 8}},
+             "exposed_admin": {"status": "completed",
+                               "probe_status_codes": {"200": 1, "403": 8, "404": 15}}}
+    _blinded = sorted(
+        n for n, c in _cats.items()
+        if isinstance(c, dict) and c.get("status") == "unreachable")
+    phantom = bool(_blinded)
+    if phantom:
+        failures.append(
+            "denied_not_blind[waf_card]: a scan whose checkers all completed still "
+            f"reports blinded checkers {_blinded} — the WAF card would announce "
+            "'active blocking observed' on a site with no WAF")
+    print(f"  [{'PASS' if not phantom else 'FAIL'}] denied_not_blind:waf_card_quiet  "
+          f"blinded={_blinded}")
 
     # --- the WAF row must not claim ABSENCE while blocking is observed ------
     # The report said "No WAF detected" in red, charged RSI +0.04 and BI +0.015,
