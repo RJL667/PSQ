@@ -16,7 +16,7 @@ from pdf_helpers import (
     C_RED, C_RED_BG, C_CRITICAL, C_CRITICAL_BG, C_GREY_1, C_GREY_2, C_GREY_3,
     C_GREY_4, C_WHITE, C_BLACK, INNER_W,
     build_cat_card, kv_row, make_traffic_circle, not_assessed_card,
-    _cat_table, _tl,
+    _cat_table, _tl, waf_posture,
 )
 
 
@@ -267,31 +267,50 @@ def cat_headers(d, S):
 
 def cat_waf(d, S):
     waf = d.get("waf", {})
-    col = C_GREEN if waf.get("detected") else C_AMBER
+    # Three states, not two — see waf_posture(). Reading `detected` alone made
+    # this card assert "no WAF, directly exposed" about sites that had just
+    # refused every single probe.
+    wp = waf_posture(d)
+    st = wp["state"]
+    # Neutral grey is the same weight not_assessed_card uses: we are neither
+    # certifying protection nor alleging its absence.
+    col = C_GREEN if st == "protected" else (C_GREY_4 if st == "unconfirmed" else C_AMBER)
     rows = [
-        ("WAF detected",  waf.get("waf_name", "None detected") if waf.get("detected") else "Not detected"),
+        ("WAF detected",  waf.get("waf_name", "None detected") if wp["state"] == "protected" else wp["label"]),
         ("All detected",  ", ".join(waf.get("all_detected", [])) or "—"),
     ]
-    fb = "Web application firewall is in place, providing protection against common web attacks." if waf.get("detected") else "No web application firewall detected — the site has no automated protection against SQL injection, XSS, or DDoS attacks."
-    parts = build_cat_card("WAF / DDoS Protection", col, "Detected" if waf.get("detected") else "Not detected", rows, waf.get("issues", []), S, fallback=fb)
+    if st == "unconfirmed":
+        rows.append(("Blocking observed", "Yes — vendor could not be fingerprinted"))
+    fb = wp["detail"] if st != "absent" else "No web application firewall detected — the site has no automated protection against SQL injection, XSS, or DDoS attacks."
+    parts = build_cat_card("WAF / DDoS Protection", col, wp["badge"], rows, waf.get("issues", []), S, fallback=fb)
 
     parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if waf.get("detected"):
+    if st == "protected":
         parts.append(Paragraph(
             f"A web application firewall ({waf.get('waf_name', 'WAF')}) was detected protecting this website. "
             "WAFs filter malicious traffic before it reaches the web application, blocking common attacks such as "
             "SQL injection, cross-site scripting, and automated bot activity. This significantly reduces the "
             "attack surface exposed to the internet.",
             S["body"]))
+    elif st == "unconfirmed":
+        parts.append(Paragraph(
+            "Requests from the scanner were actively refused, so a filtering layer of some kind sits in front of "
+            "this website — but no vendor could be identified from the response headers, cookies or server token. "
+            "That is common with an unbranded appliance, a bot manager, a CDN rule or a hosting provider's own "
+            "filtering, and it is also what a deliberately quiet WAF looks like. Protection status is therefore "
+            "recorded as UNCONFIRMED rather than absent: this report does not claim the site is unprotected, and "
+            "equally cannot certify that it is. Confirm the control directly with the client.",
+            S["body"]))
     else:
         parts.append(Paragraph(
-            "No web application firewall was detected. Without a WAF, the website is directly exposed to automated "
-            "attack tools that scan for and exploit web application vulnerabilities. This is one of the most "
-            "cost-effective security controls available and is strongly recommended.",
+            "No web application firewall was detected, and no request made during the scan was refused. Without a "
+            "WAF, the website is directly exposed to automated attack tools that scan for and exploit web "
+            "application vulnerabilities. This is one of the most cost-effective security controls available and "
+            "is strongly recommended.",
             S["body"]))
     parts.append(Spacer(1, 2 * mm))
-    if not waf.get("detected"):
+    if st == "absent":
         parts.append(Paragraph("<b>Recommended Actions</b>", S["cat_title"]))
         parts.append(Spacer(1, 1 * mm))
         parts.append(Paragraph("1. Deploy a cloud-based WAF such as Cloudflare, AWS WAF, or Akamai — these can be enabled without infrastructure changes.", S["body"]))

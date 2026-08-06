@@ -30,6 +30,7 @@ from pdf_helpers import (
     build_styles, section_header, section_with_first_card, badge_text,
     kv_row, issues_cell, build_cat_card, not_assessed_card,
     _header_footer, _section_header_banner, _risk_colour_value, _colour_issue,
+    waf_posture,
     _cat_table, _tl, _load_assessment_brand, _brand,
 )
 from pdf_cards import (
@@ -355,11 +356,15 @@ def _assessment_top_findings(results: dict) -> list:
             "detail": "Without proper SPF/DKIM/DMARC, attackers can impersonate this domain to phish staff, customers, and suppliers."
         }))
 
-    # WAF missing
-    if not cats.get("waf", {}).get("detected"):
+    # WAF missing. Only claim ABSENCE when nothing refused us either — a site
+    # that returned 403 to every probe plainly has SOMETHING in front of it,
+    # and "no protective filter, directly exposed" is then contradicted by the
+    # evidence elsewhere in the same report.
+    _wp = waf_posture(cats)
+    if _wp["state"] == "absent":
         cands.append((55, {
             "level": "MEDIUM",
-            "headline": "No web application firewall",
+            "headline": _wp["headline"],
             "summary": "Web traffic is not filtered for malicious patterns.",
             "detail": "The website has no protective filter, leaving it directly exposed to automated attacks and traffic floods."
         }))

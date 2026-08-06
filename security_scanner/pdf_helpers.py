@@ -501,3 +501,72 @@ def _brand() -> dict:
     if _BRAND_CACHE is None:
         _BRAND_CACHE = _load_assessment_brand()
     return _BRAND_CACHE
+
+
+# --------------------------------------------------------------------------
+# WAF posture: three states, not two.
+#
+# `waf.detected` means one thing only: a named vendor was FINGERPRINTED from
+# headers, cookies or the Server token. Body matching was removed because it
+# produced phantom positives. An unbranded WAF, a self-hosted bot manager, a
+# CDN rule or a hosting provider's default filter therefore fingerprints as
+# nothing — and every renderer that read `detected` alone printed the flat
+# negative "No web application firewall — the site has no protective filter,
+# leaving it directly exposed", on reports where the scanner had just been
+# refused on 20 of 20 probes.
+#
+# That is the worst sentence we can put in front of a client: it is confidently
+# wrong, and the evidence contradicting it is on the same page. `detected` is
+# kept narrow, and the ABSENCE claim is now gated on there being no observed
+# blocking either.
+#
+#   protected   - a vendor was named. Green.
+#   unconfirmed - something is refusing us but we cannot name it. Neutral: we
+#                 may not claim protection, and we certainly may not claim its
+#                 absence. No bonus is earned and no penalty is charged.
+#   absent      - nobody fingerprinted, nothing blocked. The honest negative,
+#                 and the only state that may say "no WAF".
+# --------------------------------------------------------------------------
+
+def waf_posture(cats: dict) -> dict:
+    """Resolve the WAF row to one of three states with display strings.
+
+    Returns {state, label, headline, detail, name} where state is
+    'protected' | 'unconfirmed' | 'absent'.
+    """
+    waf = (cats or {}).get("waf", {}) or {}
+    name = waf.get("waf_name")
+    if waf.get("detected"):
+        return {
+            "state": "protected", "name": name,
+            "badge": "Detected",
+            "label": name or "Detected",
+            "headline": "Web application firewall in place",
+            "detail": ("Web application firewall is in place, providing "
+                       "protection against common web attacks."),
+        }
+    if waf.get("blocking_observed"):
+        ev = str(waf.get("blocking_evidence") or "").strip()
+        return {
+            "state": "unconfirmed", "name": None,
+            "badge": "Unconfirmed",
+            "label": "Present, vendor unidentified",
+            "headline": "Protective filtering present but unidentified",
+            "detail": ("Requests were actively refused during the scan, so a "
+                       "filtering layer of some kind is in front of this site, "
+                       "but no vendor could be fingerprinted from the response "
+                       "headers. This may be a web application firewall, a bot "
+                       "manager, a CDN rule or the hosting provider's own "
+                       "filtering. Protection status is UNCONFIRMED — it is not "
+                       "evidence that no protection exists."
+                       + (f" Evidence: {ev}." if ev else "")),
+        }
+    return {
+        "state": "absent", "name": None,
+        "badge": "Not detected",
+        "label": "Not detected",
+        "headline": "No web application firewall",
+        "detail": ("No web application firewall was detected and no request was "
+                   "refused during the scan, leaving the site directly exposed "
+                   "to automated attacks and traffic floods."),
+    }

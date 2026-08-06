@@ -64,13 +64,28 @@ export default function CoreSecurityPage({ r = getResults()! }: { r?: Results })
           <IssueList issues={headers?.issues as string[]} />
         </Panel>
 
-        {/* WAF */}
+        {/* WAF — three states. `detected` means a VENDOR was fingerprinted, so
+            reading it alone rendered a flat "No" on sites that had just refused
+            every probe. Blocking without a nameable vendor is UNCONFIRMED: we
+            may not certify protection, and may not allege its absence either. */}
         <Panel title="WAF / DDoS Protection" action={<CheckerHeader category={waf} />}>
           <KV rows={[
-            { label: 'WAF detected', value: waf?.detected ? 'Yes' : 'No', severity: waf?.detected ? 'positive' : 'medium' },
+            waf?.detected
+              ? { label: 'WAF detected', value: 'Yes', severity: 'positive' as const }
+              : waf?.blocking_observed
+                ? { label: 'WAF detected', value: 'Unconfirmed — blocking observed' }
+                : { label: 'WAF detected', value: 'No', severity: 'medium' as const },
             { label: 'Provider', value: (waf?.waf_name as string) ?? '—' },
             { label: 'All detected', value: ((waf?.all_detected as string[]) ?? []).join(', ') || '—' },
           ]} />
+          {!waf?.detected && (waf?.blocking_observed as boolean) && (
+            <div className={styles.note} style={{ marginTop: 8 }}>
+              Requests were actively refused during the scan, so a filtering layer sits in
+              front of this site, but no vendor could be fingerprinted from the response
+              headers. This is <strong>not</strong> evidence that no protection exists —
+              confirm the control with the client.
+            </div>
+          )}
           <IssueList issues={waf?.issues as string[]} />
         </Panel>
 

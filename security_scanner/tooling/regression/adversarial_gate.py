@@ -1236,6 +1236,75 @@ def _check_blocked_not_clean(failures):
                 "blocked contradicts the evidence on the same page")
         print(f"  [{'PASS' if ok else 'FAIL'}] waf_row:{label:<24} penalty={charged}")
 
+    # --- ...and every RENDERER must agree with the scorer -------------------
+    # The scorer learned the neutral position above; no renderer did. The PDF's
+    # plain-language summary, the WAF category card, the RSI recommendation list
+    # and the dashboard panel all read `detected` alone, so phishield.com --
+    # apex 20/20 = 403, every checker refused on every probe -- still printed
+    # "No web application firewall: the website has no protective filter,
+    # leaving it directly exposed to automated attacks and traffic floods."
+    # That is the worst sentence we can put in front of a client: confidently
+    # wrong, with the contradicting evidence on the same page.
+    import json
+    ph = importlib.import_module("pdf_helpers")
+    pr = importlib.import_module("pdf_report")
+
+    for label, wafcat, want_state in (
+        ("vendor detected",     {"detected": True, "waf_name": "Cloudflare"}, "protected"),
+        ("blocking observed",   {"detected": False, "blocking_observed": True}, "unconfirmed"),
+        ("nothing at all",      {"detected": False}, "absent"),
+    ):
+        got = ph.waf_posture({"waf": wafcat})["state"]
+        ok = got == want_state
+        if not ok:
+            failures.append(
+                f"waf_render[posture/{label}]: state={got!r} expected {want_state!r} — "
+                "'detected' means a VENDOR was fingerprinted, not that protection "
+                "exists; absence may only be claimed when nothing refused us either")
+        print(f"  [{'PASS' if ok else 'FAIL'}] waf_render:posture/{label:<18} {got}")
+
+    # The plain-language summary is the exact card in the screenshot.
+    # _assessment_top_findings feeds the "What This Means for the Organisation"
+    # slide -- the exact card that shipped the wrong sentence.
+    for label, wafcat, want_claim in (
+        ("blocking observed", {"detected": False, "blocking_observed": True}, False),
+        ("nothing at all",    {"detected": False}, True),
+    ):
+        cats = {"waf": wafcat}
+        out = pr._assessment_top_findings({"categories": cats})
+        txt = json.dumps(out, default=str)
+        claims = "No web application firewall" in txt
+        ok = claims == want_claim
+        if not ok:
+            failures.append(
+                f"waf_render[plain_language/{label}]: claims-no-WAF={claims}, expected "
+                f"{want_claim} — a site that refused every probe must not be told it "
+                "has 'no protective filter, leaving it directly exposed'")
+        print(f"  [{'PASS' if ok else 'FAIL'}] waf_render:plain/{label:<20} "
+              f"claims_absent={claims}")
+
+    # ...and we must not advise buying a control the site may already run.
+    for label, wafcat, want_rec in (
+        ("blocking observed", {"detected": False, "blocking_observed": True}, False),
+        ("nothing at all",    {"detected": False}, True),
+    ):
+        cats = {"waf": wafcat,
+                "breaches": {"status": "completed", "breach_count": 0, "issues": []},
+                "credential_risk": {"risk_level": "LOW"}}
+        rsi = sa.RansomwareIndex().calculate(cats, industry="technology")
+        fin = {"total": {"min": 0, "most_likely": 0, "max": 0}}
+        sim = sa.RemediationSimulator().calculate(cats, rsi, fin, 10_000_000,
+                                                  industry="technology")
+        recs = json.dumps(sim.get("steps", []), default=str)
+        advised = "Web Application Firewall" in recs
+        ok = advised == want_rec
+        if not ok:
+            failures.append(
+                f"waf_render[recommendation/{label}]: advises-deploy-WAF={advised}, "
+                f"expected {want_rec} — recommending a WAF to a site that blocked "
+                "every probe is advice the same report contradicts")
+        print(f"  [{'PASS' if ok else 'FAIL'}] waf_render:rec/{label:<22} advised={advised}")
+
     # --- scoring: unreachable must EXCLUDE, not fall back to a 100 default --
     ok_excl = "unreachable" in sa.RiskScorer._FAILED_STATUSES
     if not ok_excl:

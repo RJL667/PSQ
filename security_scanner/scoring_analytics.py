@@ -4001,7 +4001,10 @@ class RemediationSimulator:
          "Configure SPF record to authorise legitimate email senders — reduces phishing and BEC risk.", "R0–R3,600", 0.03),
         ("email_hardening", lambda c: not c.get("mta_sts"),
          "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.", "R3,600–R9,000", 0.02),
-        ("waf", lambda c: not c.get("detected"),
+        # Not recommended when something was observed refusing our requests:
+        # telling a client to "deploy a WAF" at a site that blocked 20 of 20
+        # probes is advice the evidence in the same report contradicts.
+        ("waf", lambda c: not c.get("detected") and not c.get("blocking_observed"),
          "Deploy a Web Application Firewall (Cloudflare, AWS WAF, etc.) — protects against OWASP Top 10 attacks and DDoS.", "R0–R9,000/mo", 0.05),
         ("http_headers", lambda c: c.get("score", 100) < 40,
          "Implement security headers: HSTS, Content-Security-Policy, X-Frame-Options, Permissions-Policy — prevents XSS, clickjacking, and data leakage.", "R0–R3,600", 0.03),
