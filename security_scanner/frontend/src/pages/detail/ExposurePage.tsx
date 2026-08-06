@@ -33,6 +33,11 @@ const LA_RISK: Record<string, { color: string; bg: string; label: string }> = {
   high: { color: 'var(--high)', bg: 'var(--high-soft)', label: 'High' },
   medium: { color: 'var(--warning)', bg: 'var(--warning-soft)', label: 'Medium' },
   low: { color: 'var(--text-muted)', bg: 'var(--panel-bg-elevated)', label: 'Low' },
+  // Scans taken before posture probing existed, and any domain beyond the
+  // per-scan probe cap, carry no verdict. Defaulting those to "Low" would
+  // assert a conclusion we never reached — the same absence-of-evidence error
+  // this release removes everywhere else.
+  unprobed: { color: 'var(--unknown)', bg: 'var(--panel-bg-elevated)', label: 'Not probed' },
 }
 
 /** Lookalikes ordered by what they can actually DO, not just how similar they
@@ -41,13 +46,17 @@ const LA_RISK: Record<string, { color: string; bg: string; label: string }> = {
  *  is what makes the panel actionable rather than a list of 20 strings. */
 function LookalikeList({ domains }: { domains?: Lookalike[] }) {
   if (!domains || domains.length === 0) return null
-  const rank = (d: Lookalike) => (d.risk === 'high' ? 0 : d.risk === 'medium' ? 1 : 2)
+  // Probed verdicts first (high → medium → low), then anything unprobed. An
+  // unprobed domain is not "safest", it is unknown, so it sits at the end
+  // rather than being ranked among conclusions.
+  const rank = (d: Lookalike) =>
+    d.risk === 'high' ? 0 : d.risk === 'medium' ? 1 : d.risk === 'low' ? 2 : 3
   const sorted = [...domains].sort((a, b) => rank(a) - rank(b) || (b.similarity ?? 0) - (a.similarity ?? 0))
   return (
     <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0,
       display: 'flex', flexDirection: 'column', gap: 9 }}>
       {sorted.map((d) => {
-        const rs = LA_RISK[d.risk ?? 'low'] ?? LA_RISK.low
+        const rs = LA_RISK[d.risk ?? 'unprobed'] ?? LA_RISK.unprobed
         const caps: string[] = []
         if (d.mail_capable) caps.push('sends mail')
         else if (d.null_mx) caps.push('no mail (null MX)')
@@ -73,9 +82,14 @@ function LookalikeList({ domains }: { domains?: Lookalike[] }) {
                 {caps.join(' · ')}
               </div>
             )}
-            {d.recommendation && (
+            {d.recommendation ? (
               <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)', marginTop: 3 }}>
                 {d.recommendation}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 3 }}>
+                Mail and hosting posture not probed for this domain — re-run the scan
+                to see whether it can send email as your brand. Not a clean result.
               </div>
             )}
           </li>
