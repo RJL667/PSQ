@@ -749,7 +749,18 @@ class RiskScorer:
     # reason "error" does: the estate was never searched, so the absence of
     # findings is absence of evidence. Leaving subscription_required out (as it
     # was) let a plan/credit failure score as a validated clean result.
-    _FAILED_STATUSES = {"error", "timeout", "quota_exhausted", "subscription_required"}
+    _FAILED_STATUSES = {"error", "timeout", "quota_exhausted", "subscription_required",
+                        # "unreachable" = a WAF/CDN refused every probe, so the
+                        # checker saw nothing. It MUST be excluded and its weight
+                        # redistributed, not merely left to a default: the
+                        # per-category defaults below are not neutral —
+                        # tech_stack and info_disclosure both fall back to
+                        # score=100, i.e. a PERFECT result. Dropping the score of
+                        # a blocked checker without excluding it therefore banks
+                        # the very clean sweep this is meant to remove. (Only
+                        # http_headers defaults to a neutral 50, which is why the
+                        # earlier fix there appeared to work.)
+                        "unreachable"}
     # Statuses that indicate a checker was intentionally skipped (no API key,
     # toggle off) — these should NOT count as failures in the completeness warning
     _SKIPPED_STATUSES = {"no_api_key", "auth_failed", "disabled", "skipped"}
@@ -1420,7 +1431,13 @@ class RansomwareIndex:
         # proxy, not a named ransomware vector, and WAF *detection* itself has
         # known false-positives (back-test Theme-1) - don't over-weight a noisy
         # input. Range 0.03-0.05.
-        if not categories.get("waf", {}).get("detected"):
+        # `detected` means a NAMED VENDOR was fingerprinted. When the scan was
+        # actively blocked but no vendor matched, we know something is
+        # intercepting and simply cannot name it — charging the "no WAF" penalty
+        # then contradicts the blocking evidence on the same page. Take neither
+        # side: no penalty, and no detected-WAF credit either.
+        _waf_cat = categories.get("waf", {}) or {}
+        if not _waf_cat.get("detected") and not _waf_cat.get("blocking_observed"):
             base += 0.04
             factors.append({"factor": "No WAF detected", "impact": 0.04, "priority": 3})
 
@@ -2296,7 +2313,11 @@ class FinancialImpactCalculator:
         tef = self.THREAT_EVENT_FREQUENCY.get(industry_key, self.THREAT_EVENT_FREQUENCY.get("Other", 1.0))
         p_breach = min(1.0, max(0.0, vulnerability * tef * 0.3))
 
-        waf_detected = categories.get("waf", {}).get("detected", False)
+        # Same reasoning as the RSI term: an unidentified-but-observed blocking
+        # layer is not "no WAF". Treat it as present for the availability
+        # increment rather than charging a control gap we cannot evidence.
+        _wafc = categories.get("waf", {}) or {}
+        waf_detected = bool(_wafc.get("detected") or _wafc.get("blocking_observed"))
         cdn_detected = categories.get("cloud_cdn", {}).get("cdn_detected", False)
         single_asn = categories.get("external_ips", {}).get("unique_asns", 2) <= 1
         # FAIR-anchored 2026-06-05. Base = Uptime Institute AOA serious/severe

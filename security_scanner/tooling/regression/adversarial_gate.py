@@ -891,6 +891,201 @@ def _check_table_headers(failures):
               f"headers={headers} repeatRows={repeats}")
 
 
+# (k) A BLOCKED CHECKER MUST NOT SCORE AS A CLEAN ONE. On the 2026-08-06
+# phishield.com scan a WAF answered 403 to 20 of 20 probes, and six checkers
+# were recorded as affected — yet info_disclosure and tech_stack both reported
+# status="completed" with a PERFECT 100/100. A block page carries none of the
+# signals they read (no Server / X-Powered-By, no EOL version string, no
+# retrievable path), so "nothing found" was indistinguishable from a tidy site.
+#
+# The subtle half is the scoring side. Dropping a blocked checker's score is NOT
+# enough: the per-category fallbacks are not neutral — tech_stack and
+# info_disclosure both default to score=100, i.e. a perfect result — so a
+# score-less blocked checker banks the exact clean sweep being removed. Only
+# http_headers defaults to a neutral 50, which is why the earlier fix there
+# appeared sufficient. "unreachable" therefore has to be an EXCLUDING status.
+class _Resp:
+    def __init__(self, code, text="", headers=None):
+        self.status_code = code
+        self.text = text
+        self.headers = headers or {}
+
+
+def _check_blocked_not_clean(failures):
+    import copy, importlib
+    ct_mod = importlib.import_module("checkers_threats")
+    sa = importlib.import_module("scoring_analytics")
+
+    # --- tech_stack -------------------------------------------------------
+    for label, resp, want_status, want_scored in (
+        ("waf 403 block page", _Resp(403, "<html>Forbidden</html>"), "unreachable", False),
+        ("healthy clean 200",  _Resp(200, "<html>hi</html>"),        "completed",   True),
+        ("healthy leaky 200",  _Resp(200, "<html>x</html>",
+                                     {"X-Powered-By": "PHP/5.6"}),   "completed",   True),
+    ):
+        with mock.patch.object(ct_mod, "HTTP") as H:
+            H.get.return_value = resp
+            out = ct_mod.TechStackChecker().check("example.com")
+        got, scored = out.get("status"), ("score" in out)
+        ok = (got == want_status) and (scored == want_scored)
+        if not ok:
+            failures.append(
+                f"blocked_clean[tech_stack/{label}]: status={got!r} scored={scored}, "
+                f"expected {want_status!r}/{want_scored} — a block page has no Server "
+                "header and no EOL string, so parsing it yields a perfect score for a "
+                "stack that was never seen")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:tech_stack/{label:<20} "
+              f"{got} scored={scored}")
+
+    # --- info_disclosure --------------------------------------------------
+    def run_id(code):
+        with mock.patch("http_client.HTTP") as H, mock.patch.object(ct_mod, "HTTP") as H2:
+            H.head.return_value = _Resp(code)
+            H.get.return_value = _Resp(code, "x" * 50)
+            H2.get.return_value = _Resp(code, "x" * 50)
+            H2.stop_probing.return_value = False
+            return ct_mod.InformationDisclosureChecker().check("example.com")
+
+    for label, code, want_status, want_scored in (
+        ("every probe 403 (WAF)",   403, "unreachable", False),
+        ("every probe 404 (clean)", 404, "completed",   True),
+    ):
+        out = run_id(code)
+        got, scored = out.get("status"), ("score" in out)
+        ok = (got == want_status) and (scored == want_scored)
+        if not ok:
+            failures.append(
+                f"blocked_clean[info_disclosure/{label}]: status={got!r} "
+                f"scored={scored}, expected {want_status!r}/{want_scored} — refusing "
+                "every probe is not the same as finding nothing exposed")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:info_disc/{label:<22} "
+              f"{got} scored={scored}")
+
+    # --- exposed_admin / vpn_remote / payment_security --------------------
+    # Same shape: each returns "nothing found" when a WAF refuses every probe.
+    # exposed_admin is the worst on screen (it renders a green "Passed"), and
+    # vpn_remote is the worst in words (it prints "No VPN/remote access gateway
+    # detected", an assertion of absence from a probe that never landed).
+    cc = importlib.import_module("checkers_core")
+    cn_mod = importlib.import_module("checkers_network")
+
+    def _admin(code):
+        with mock.patch("http_client.HTTP") as H:
+            H.discover.return_value = _Resp(code)
+            H.get.return_value = _Resp(code, "x" * 500)
+            H.stop_probing.return_value = False
+            return cc.ExposedAdminChecker().check("example.com")
+
+    def _simple(mod, cls, code):
+        with mock.patch.object(mod, "HTTP") as H:
+            H.get.return_value = _Resp(code, "nope")
+            H.stop_probing.return_value = False
+            return getattr(mod, cls)().check("example.com")
+
+    trio = [
+        ("exposed_admin",    lambda c: _admin(c)),
+        ("vpn_remote",       lambda c: _simple(cn_mod, "VPNRemoteAccessChecker", c)),
+        ("payment_security", lambda c: _simple(ct_mod, "PaymentSecurityChecker", c)),
+    ]
+    for name, run in trio:
+        blocked, clean = run(403), run(404)
+        ok = (blocked.get("status") == "unreachable"
+              and clean.get("status") == "completed")
+        if not ok:
+            failures.append(
+                f"blocked_clean[{name}]: blocked={blocked.get('status')!r} "
+                f"clean={clean.get('status')!r} — a blanket WAF deny must read as "
+                "unreachable, while an origin answering 404 must still read as a "
+                "genuine clean result")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:{name:<18} "
+              f"blocked={blocked.get('status')} clean={clean.get('status')}")
+
+    # vpn_remote must stop ASSERTING absence when it was blocked
+    v_blocked = _simple(cn_mod, "VPNRemoteAccessChecker", 403)
+    asserts = any("No VPN" in str(i) for i in v_blocked.get("issues", []))
+    if asserts:
+        failures.append(
+            "blocked_clean[vpn_remote/absence]: still prints 'No VPN/remote access "
+            "gateway detected' after every probe was refused — that reads to a broker "
+            "as 'they have no VPN', which a blanket 403 does not support")
+    print(f"  [{'PASS' if not asserts else 'FAIL'}] blocked_clean:vpn_absence_claim     "
+          f"asserts={asserts}")
+
+    # a REAL exposure must survive the guard (no suppression of true positives)
+    with mock.patch("http_client.HTTP") as H:
+        H.discover.side_effect = lambda url, **kw: _Resp(200) if "/admin" in url else _Resp(403)
+        H.get.return_value = _Resp(200, "admin login panel " * 40)
+        H.stop_probing.return_value = False
+        real = cc.ExposedAdminChecker().check("example.com")
+    kept = real.get("status") == "completed" and (real.get("high_count") or 0) > 0
+    if not kept:
+        failures.append(
+            f"blocked_clean[exposed_admin/true_positive]: status={real.get('status')!r} "
+            f"high_count={real.get('high_count')} — a genuine exposure found amid "
+            "blocking must still be reported, or the guard hides real findings")
+    print(f"  [{'PASS' if kept else 'FAIL'}] blocked_clean:true_positive_kept    "
+          f"high_count={real.get('high_count')}")
+
+    # --- the WAF row must not claim ABSENCE while blocking is observed ------
+    # The report said "No WAF detected" in red, charged RSI +0.04 and BI +0.015,
+    # and advised buying a WAF — on the same page as "20 of 20 probes returned
+    # 403, active blocking pattern". We cannot claim a WAF either (a 403 wall may
+    # be a bot-manager, a CDN rule or plain auth), so the correct position is
+    # neutral: no penalty, and no detected-WAF credit.
+    for label, wafcat, want_penalty in (
+        ("no waf, no blocking",      {"detected": False}, True),
+        ("blocking observed",        {"detected": False, "blocking_observed": True}, False),
+        ("vendor detected",          {"detected": True, "waf_name": "Cloudflare"}, False),
+    ):
+        cats = {"waf": wafcat,
+                "breaches": {"status": "completed", "breach_count": 0, "issues": []},
+                "credential_risk": {"risk_level": "LOW"}}
+        rsi = sa.RansomwareIndex().calculate(cats, industry="technology")
+        charged = any("No WAF detected" in f.get("factor", "")
+                      for f in rsi.get("contributing_factors", []))
+        ok = charged == want_penalty
+        if not ok:
+            failures.append(
+                f"waf_row[{label}]: RSI 'No WAF detected' charged={charged}, expected "
+                f"{want_penalty} — penalising absence while the scan reports being "
+                "blocked contradicts the evidence on the same page")
+        print(f"  [{'PASS' if ok else 'FAIL'}] waf_row:{label:<24} penalty={charged}")
+
+    # --- scoring: unreachable must EXCLUDE, not fall back to a 100 default --
+    ok_excl = "unreachable" in sa.RiskScorer._FAILED_STATUSES
+    if not ok_excl:
+        failures.append(
+            "blocked_clean[scoring]: 'unreachable' is not in _FAILED_STATUSES — "
+            "tech_stack and info_disclosure default to score=100, so a blocked "
+            "checker without an explicit score is scored as PERFECT")
+    print(f"  [{'PASS' if ok_excl else 'FAIL'}] blocked_clean:unreachable_excludes    {ok_excl}")
+
+    base = {
+        "ssl": {"status": "completed", "score": 90},
+        "email_security": {"status": "completed", "score": 8},
+        "breaches": {"status": "completed", "breach_count": 0, "issues": []},
+        "tech_stack": {"status": "completed", "score": 100, "eol_count": 0},
+        "info_disclosure": {"status": "completed", "score": 100, "exposed_paths": []},
+    }
+
+    def score(c):
+        out = sa.RiskScorer().calculate(c)
+        return out[0] if isinstance(out, tuple) else out
+
+    blocked = copy.deepcopy(base)
+    for k in ("tech_stack", "info_disclosure"):
+        blocked[k] = {"status": "unreachable", "unreachable_reason": "WAF refused all probes"}
+    clean_score, blocked_score = score(copy.deepcopy(base)), score(blocked)
+    ok_diff = clean_score != blocked_score
+    if not ok_diff:
+        failures.append(
+            f"blocked_clean[composite]: blocked scan scored {blocked_score}, identical "
+            f"to a genuinely clean {clean_score} — a scan that saw nothing must not "
+            "score the same as one that looked and found nothing")
+    print(f"  [{'PASS' if ok_diff else 'FAIL'}] blocked_clean:composite_differs      "
+          f"clean={clean_score} blocked={blocked_score}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -1024,6 +1219,7 @@ def main():
     _check_provider_budget(failures)
     _check_lookalike_posture(failures)
     _check_table_headers(failures)
+    _check_blocked_not_clean(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -1067,7 +1263,8 @@ def main():
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
           f"5 provider-budget + "
           f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
-          f"3 table-header "
+          f"3 table-header + "
+          f"15 blocked-not-clean "
           "ground-truth scenarios")
 
 

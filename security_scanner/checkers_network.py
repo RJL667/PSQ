@@ -504,6 +504,7 @@ class VPNRemoteAccessChecker:
         # before a token match counts. (`require_200` is kept in the table for
         # documentation but is now the universal default.)
         probed = 0
+        _codes: dict = {}   # status -> count, to tell "no gateway" from "no answer"
         for vpn_name, sigs in self.VPN_SIGNATURES.items():
             for path in sigs["paths"]:
                 # WAF-aware early-exit: once we've probed our own high-priority
@@ -517,6 +518,8 @@ class VPNRemoteAccessChecker:
                         allow_redirects=True
                     )
                     probed += 1
+                    if r is not None:
+                        _codes[r.status_code] = _codes.get(r.status_code, 0) + 1
                     # Gate 1: must be a real 200 (not a 3xx/4xx/5xx or soft-404).
                     if r is None or r.status_code != 200:
                         continue
@@ -536,7 +539,26 @@ class VPNRemoteAccessChecker:
             if result["vpn_detected"] or result.get("waf_truncated"):
                 break
 
-        if not result["vpn_detected"]:
+        result["probe_status_codes"] = dict(sorted(_codes.items()))
+        # "No VPN gateway detected" is an assertion of ABSENCE. It is only
+        # honest if the origin actually answered us: when a WAF refused every
+        # path, we learned nothing about their remote-access posture, and this
+        # line reads to a broker as "they have no VPN" — the opposite of what a
+        # blanket 403 implies. Same discriminator as the other blocked
+        # checkers: an honest 404/3xx means the site was talking to us.
+        _BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
+        _probed_n = sum(_codes.values())
+        _answered = sum(n for c, n in _codes.items() if c not in _BLOCKING)
+        if _probed_n and not result["vpn_detected"] and _answered == 0:
+            result["status"] = "unreachable"
+            result["http_status"] = max(_codes, key=_codes.get)
+            result["unreachable_reason"] = (
+                f"Remote-access posture could not be assessed — all {_probed_n} "
+                f"gateway probes were refused by a WAF/CDN (HTTP "
+                f"{', '.join(str(c) for c in sorted(_codes))}). No verdict on VPN "
+                f"or remote-access exposure is implied.")
+            result.pop("score", None)
+        elif not result["vpn_detected"]:
             result["issues"].append("No VPN/remote access gateway detected — remote access method unknown")
 
         return result

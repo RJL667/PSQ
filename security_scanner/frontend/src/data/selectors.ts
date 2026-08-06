@@ -487,10 +487,19 @@ export function getRiskSnapshot(r: Results | null): SnapshotRow[] {
   // WAF
   const waf = cat(r, 'waf')
   const detected = waf?.detected === true
+  // `detected` means a named vendor was fingerprinted. When the scan was
+  // actively blocked but no vendor matched, "Not detected" in red is a flat
+  // contradiction of the intervention alert on the same screen — and it is the
+  // damaging half, because it reads as "this client has no WAF". We cannot
+  // claim one either (a 403 wall may be a bot-manager, a CDN rule or auth), so
+  // report the observation at neutral severity and let the reader judge.
+  const blockingObserved = waf?.blocking_observed === true
   rows.push({
     id: 'waf', label: 'WAF',
-    value: detected ? `Detected${waf?.waf_name ? ` (${waf.waf_name})` : ''}` : 'Not detected',
-    severity: detected ? 'positive' : 'high',
+    value: detected
+      ? `Detected${waf?.waf_name ? ` (${waf.waf_name})` : ''}`
+      : blockingObserved ? 'Blocking observed — vendor unidentified' : 'Not detected',
+    severity: detected ? 'positive' : blockingObserved ? 'unknown' : 'high',
     state: waf ? 'passed' : 'not_assessed', drill: 'waf',
   })
 
