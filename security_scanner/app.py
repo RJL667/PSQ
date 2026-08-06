@@ -573,6 +573,17 @@ def dehashed_balance():
 
     try:
         import requests as req
+        # METER IT. This path bypasses the provider seam, which is why its spend
+        # was invisible: the usage ledger showed ~17 DeHashed calls over the same
+        # period the account billed 200+. Anything that can spend a credit must
+        # be countable, or the next leak is just as hard to find as this one was.
+        try:
+            import scanner_db
+            scanner_db.record_usage("dehashed")
+            from observability import record_provider_call
+            record_provider_call("dehashed", "balance_probe")
+        except Exception:
+            pass
         r = req.post("https://api.dehashed.com/v2/search",
                      json={"query": "domain:example.com", "page": 1, "size": 1},
                      headers={"Content-Type": "application/json",

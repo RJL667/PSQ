@@ -1357,13 +1357,41 @@ def _mask_identifier(value: str) -> str:
 # 200+). Every genuine search already returns the balance; this just keeps it.
 _DEHASHED_BALANCE: dict = {"balance": None, "at": 0.0}
 
+# The cache must OUTLIVE THE PROCESS. An in-memory-only cache is no cache here:
+# the service restarts on every deploy (10 starts on 2026-08-06 alone), and each
+# restart wiped it, so the next page load bought a fresh credit. Persist beside
+# the object store, which deploys preserve — unlike the app directory, which is
+# replaced wholesale.
+import os as _os
+import json as _json
+
+_BALANCE_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                              "scans", "_dehashed_balance.json")
+
 
 def record_dehashed_balance(balance: int, at: float) -> None:
-    if balance is not None:
-        _DEHASHED_BALANCE.update({"balance": int(balance), "at": float(at)})
+    if balance is None:
+        return
+    _DEHASHED_BALANCE.update({"balance": int(balance), "at": float(at)})
+    try:
+        _os.makedirs(_os.path.dirname(_BALANCE_FILE), exist_ok=True)
+        with open(_BALANCE_FILE, "w", encoding="utf-8") as f:
+            _json.dump(_DEHASHED_BALANCE, f)
+    except Exception:
+        pass          # persistence is best-effort; never break a scan for it
 
 
 def last_dehashed_balance() -> dict:
+    if _DEHASHED_BALANCE.get("balance") is not None:
+        return dict(_DEHASHED_BALANCE)
+    try:
+        with open(_BALANCE_FILE, encoding="utf-8") as f:
+            data = _json.load(f)
+        if data.get("balance") is not None:
+            _DEHASHED_BALANCE.update(data)      # warm the process cache
+            return dict(data)
+    except Exception:
+        pass
     return dict(_DEHASHED_BALANCE)
 
 

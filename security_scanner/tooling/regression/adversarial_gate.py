@@ -1170,6 +1170,26 @@ def _check_balance_not_metered(failures):
     print(f"  [{'PASS' if ok else 'FAIL'}] balance_metering:10_page_loads      "
           f"paid_searches={calls['n']}")
 
+    # THE CACHE MUST SURVIVE A RESTART. An in-memory-only cache is not a cache
+    # on a service that restarts with every deploy: 10 service starts on
+    # 2026-08-06 alone, each wiping it, so the next page load bought a credit.
+    import time as _t2
+    ct_m.record_dehashed_balance(309, _t2.time())
+    ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})   # the restart
+    recovered = ct_m.last_dehashed_balance().get("balance")
+    ok_persist = recovered == 309
+    if not ok_persist:
+        failures.append(
+            f"balance_metering[persistence]: after a simulated restart the balance "
+            f"read back as {recovered!r}, not 309 — an in-memory cache is wiped by "
+            "every deploy, so each one silently costs a credit")
+    print(f"  [{'PASS' if ok_persist else 'FAIL'}] balance_metering:survives_restart  "
+          f"recovered={recovered}")
+    try:
+        os.remove(ct_m._BALANCE_FILE)
+    except OSError:
+        pass
+
     # a balance captured from a real scan must be served for free
     ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})
     ct_m.record_dehashed_balance(228, time.time())
