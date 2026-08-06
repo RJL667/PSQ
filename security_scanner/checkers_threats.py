@@ -2446,8 +2446,20 @@ class FraudulentDomainChecker:
         """Generate domain permutations. Returns list of (domain, technique, similarity%)."""
         perms = []
         seen = set()
+        # The domain being scanned is never a lookalike of itself. Several
+        # techniques can regenerate it verbatim — most easily char-swap, where
+        # transposing two ADJACENT IDENTICAL letters is a no-op: "exce(ll)ent"
+        # swaps to "excellent". Found live on excellentmeat.co.za, which was
+        # reported as a HIGH-risk impersonator of itself, complete with advice to
+        # report it to its own registrar (it "sends mail" because it is their
+        # real mail server). Any domain with a doubled letter was affected;
+        # phishield.com has none, which is why it never showed up in testing.
+        # Guarding in add() covers every technique, including ones added later.
+        self_domain = (name + original_tld).lower()
 
         def add(d, tech, sim):
+            if d.lower() == self_domain:
+                return
             if d not in seen:
                 seen.add(d)
                 perms.append((d, tech, sim))
@@ -2680,6 +2692,13 @@ class FraudulentDomainChecker:
         try:
             name, tld = self._split_domain(domain)
             permutations = self._generate_permutations(name, tld)
+            # Belt and braces. add() already drops a self-match, but this is the
+            # last point before we spend DNS + HTTP probes and publish a verdict,
+            # and reporting the client's own domain as impersonating itself is
+            # the single most discrediting thing this checker could print.
+            _self = str(domain).lower().strip().strip(".")
+            permutations = [p for p in permutations
+                            if p[0].lower().strip(".") != _self]
             result["total_permutations"] = len(permutations)
 
             # Check DNS resolution in parallel (cap at 60 to keep memory low on free tier)

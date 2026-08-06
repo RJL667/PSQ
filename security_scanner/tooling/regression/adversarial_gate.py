@@ -775,6 +775,31 @@ def _check_lookalike_posture(failures):
     import importlib
     F = importlib.import_module("checkers_threats").FraudulentDomainChecker
 
+    # THE DOMAIN IS NEVER A LOOKALIKE OF ITSELF. Found live on
+    # excellentmeat.co.za (2026-08-06): char-swap transposing two ADJACENT
+    # IDENTICAL letters is a no-op — "exce(ll)ent" swaps to "excellent" — so the
+    # generator emitted the scanned domain, it "resolved" (it is their real
+    # domain), probed as mail-capable (their real mail server) and was published
+    # as a HIGH-risk impersonator with advice to report it to its own registrar.
+    # Every domain with a doubled letter was affected; phishield.com has none,
+    # which is exactly why testing missed it. Domains below all contain doubles.
+    c = F()
+    for dom in ("excellentmeat.co.za", "coffee.com", "williams.co.za",
+                "mattress.com", "aabb.com", "phishield.com"):
+        name, tld = c._split_domain(dom)
+        perms = c._generate_permutations(name, tld)
+        hits = [p[0] for p in perms if p[0].lower().strip(".") == dom.lower().strip(".")]
+        ok = not hits and len(perms) > 10      # and the generator still produces work
+        if not ok:
+            failures.append(
+                f"lookalike_self[{dom}]: generated itself {len(hits)} time(s) "
+                f"(perms={len(perms)}) — the scanned domain must never be reported as "
+                "impersonating itself; it resolves, probes as mail-capable, and gets "
+                "published as HIGH risk with a recommendation to report the client to "
+                "their own registrar")
+        print(f"  [{'PASS' if ok else 'FAIL'}] lookalike_self:{dom:<22} "
+              f"perms={len(perms)} self={len(hits)}")
+
     for label, raw, want_usable, want_null in MX_SCENARIOS:
         usable, null = F._usable_mx(raw)
         ok = (len(usable) == want_usable) and (null == want_null)
@@ -1041,7 +1066,7 @@ def main():
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
           f"5 provider-budget + "
-          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS)} lookalike-posture + "
+          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
           f"3 table-header "
           "ground-truth scenarios")
 
