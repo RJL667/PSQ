@@ -1086,6 +1086,47 @@ def _check_blocked_not_clean(failures):
           f"clean={clean_score} blocked={blocked_score}")
 
 
+# (l) THE DASHBOARD MUST NOT LINK OUT OF ITS OWN BASE PATH. The scanner is
+# mounted under /scanner on a shared host whose ROOT is the unrelated Command
+# Centre, so a bare absolute href leaves the product entirely. "Re-run
+# Assessment" carried href="/" and sent users to the Command Centre — in a file
+# that already imported withBase and used it correctly one line above. A static
+# check because the failure only shows on the sub-path deployment, never in a
+# root-mounted dev build.
+import re as _re
+
+
+def _check_base_path_links(failures):
+    src_dir = os.path.join(SEC, "frontend", "src")
+    # (?!/) excludes protocol-relative "//cdn.example.com" while still matching
+    # the exact root href="/" — the actual bug. An earlier [^/"'] class here
+    # rejected the closing quote and therefore missed href="/" entirely, so the
+    # check passed while the defect was present. Verified by reintroducing it.
+    pattern = _re.compile(
+        r"""href=["']/(?!/)|href=\{["']/(?!/)"""
+        r"""|location\.(?:href|assign|replace)\s*=\s*["']/(?!/)"""
+        r"""|window\.open\(["']/(?!/)""")
+    offenders = []
+    for root, _dirs, files in os.walk(src_dir):
+        for fn in files:
+            if not fn.endswith((".ts", ".tsx")):
+                continue
+            fp = os.path.join(root, fn)
+            for i, line in enumerate(open(fp, encoding="utf-8"), 1):
+                if "withBase" in line or line.lstrip().startswith(("//", "*")):
+                    continue
+                if pattern.search(line):
+                    offenders.append(f"{os.path.relpath(fp, src_dir)}:{i}")
+    ok = not offenders
+    if not ok:
+        failures.append(
+            "base_path[absolute_links]: " + ", ".join(offenders[:5]) +
+            " — an absolute href/navigation without withBase() escapes the /scanner "
+            "mount and lands on the Command Centre at the site root")
+    print(f"  [{'PASS' if ok else 'FAIL'}] base_path:no_bare_absolute_links   "
+          f"offenders={len(offenders)}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -1220,6 +1261,7 @@ def main():
     _check_lookalike_posture(failures)
     _check_table_headers(failures)
     _check_blocked_not_clean(failures)
+    _check_base_path_links(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -1264,7 +1306,7 @@ def main():
           f"5 provider-budget + "
           f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
           f"3 table-header + "
-          f"15 blocked-not-clean "
+          f"15 blocked-not-clean + 1 base-path "
           "ground-truth scenarios")
 
 

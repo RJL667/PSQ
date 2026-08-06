@@ -93,7 +93,10 @@ export default function CommandBar() {
           <Share2 size={14} /> {copied ? 'Link copied' : 'Share'}
         </button>
 
-        <a className={styles.primary} href="/" title="Start a new assessment for this domain">
+        {/* withBase, not a bare "/": the app is mounted under /scanner on the
+            shared host, so an absolute root href leaves the scanner entirely
+            and lands on the Command Centre at the site root. */}
+        <a className={styles.primary} href={withBase('/')} title="Start a new assessment for this domain">
           <RefreshCw size={14} /> Re-run Assessment
         </a>
       </div>

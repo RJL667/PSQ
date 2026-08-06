@@ -86,7 +86,7 @@ export default function ScanProgress({ scanId, domain }: { scanId: string; domai
           <span className={`${styles.logo} ${styles.logoErr}`}><AlertTriangle size={24} /></span>
           <h1>Assessment failed</h1>
           <p className={styles.sub}>{error}</p>
-          <a className={styles.retry} href="/">Start a new assessment</a>
+          <a className={styles.retry} href={withBase('/')}>Start a new assessment</a>
         </div>
       </div>
     )
