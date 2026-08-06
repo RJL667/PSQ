@@ -559,6 +559,22 @@ def build(doc):
     # ── 4.2.3 WAF / DDoS Protection ────────────────────────────────
     add_h2(doc, "4.2.3  WAF / DDoS Protection")
 
+    add_note(
+        doc,
+        "Detected means a named VENDOR was fingerprinted from response "
+        "headers, cookies or the Server token. Body-text matching is "
+        "deliberately not used, because vendor names appearing incidentally "
+        "in page content produced phantom positives. An unbranded or "
+        "self-hosted blocking layer therefore fingerprints as nothing, which "
+        "is not the same as being absent. Where the scan is actively refused "
+        "but no vendor matches, the card reads \"Blocking observed - vendor "
+        "unidentified\" at neutral severity: the no-WAF penalty is withheld "
+        "because absence cannot be asserted, and the detected-WAF credit is "
+        "withheld too because nothing was confirmed. A wall of refusals may "
+        "equally be a bot manager, a CDN rule or plain authentication."
+    )
+
+
     add_bold_body(
         doc,
         "What it checks:  ",

@@ -70,6 +70,21 @@ def build(doc):
     # ══════════════════════════════════════════════════════════════════════
     add_h2(doc, "4.6.1  Credential Exposure (HIBP)")
 
+    add_note(
+        doc,
+        "HIBP is a supplementary source, not the primary one. Its breach API "
+        "requires a paid key, and for most South African domains it returns "
+        "nothing even when a breach is a matter of public record. The "
+        "researched breach-history checker (section 4.6.2) is the authority "
+        "for whether an organisation has been breached. Two consequences "
+        "follow. Without an API key this card reports NOT ASSESSED rather "
+        "than zero breaches - it cannot have looked. And a missing HIBP key "
+        "does NOT by itself make the breach picture unknown: if the research "
+        "reached a verdict, including a verdict of no breach found, that "
+        "verdict stands and is scored on its own merits."
+    )
+
+
     add_bold_body(
         doc,
         "What it checks: ",
@@ -709,6 +724,20 @@ def build(doc):
     # ══════════════════════════════════════════════════════════════════════
     add_h2(doc, "4.6.6  Dehashed Credential Leaks")
 
+    add_warning(
+        doc,
+        "Fail-closed behaviour. If the Dehashed lookup cannot run - no API "
+        "key, rejected credentials, exhausted credits, a subscription problem "
+        "or a transport failure - the card reports NOT ASSESSED and is "
+        "excluded from scoring. It does NOT report zero exposed credentials. "
+        "Previously an unusable provider produced an empty result that was "
+        "indistinguishable from a genuinely clean estate and scored as one; "
+        "the credential-risk classifier likewise now returns UNKNOWN rather "
+        "than the reassuring \"LOW - exposure is historical and/or "
+        "email-only\" summary. See section 6.0."
+    )
+
+
     add_bold_body(
         doc,
         "What it checks: ",
@@ -898,6 +927,18 @@ def build(doc):
     # 4.6.8  Dark Web Monitoring (IntelX)
     # ══════════════════════════════════════════════════════════════════════
     add_h2(doc, "4.6.8  Dark Web Monitoring (IntelX)")
+
+    add_warning(
+        doc,
+        "Fail-closed behaviour. IntelX signals an exhausted daily search "
+        "allowance by returning a success response with no search identifier, "
+        "which earlier read as \"searched, nothing circulating\" - identical "
+        "to a genuinely clean domain. That state, a refused result poll, and a "
+        "search that never concludes are now all reported as NOT ASSESSED and "
+        "excluded from scoring. The free tier allows 50 searches per day, "
+        "resetting at midnight UTC, and one scan consumes one search."
+    )
+
 
     add_bold_body(
         doc,
@@ -1267,7 +1308,60 @@ def build(doc):
         "active. Resolved domains are further checked for SSL certificates, "
         "which indicate the lookalike is actively being used (possibly for "
         "phishing with a convincing HTTPS connection). Each permutation "
-        "includes a visual similarity percentage."
+        "includes a visual similarity percentage. Every generated technique "
+        "is probed - the probe list is assembled round-robin across "
+        "techniques rather than truncated, so a per-scan cap can never "
+        "silently drop an entire attack class such as the TLD variants."
+    )
+
+    add_bold_body(
+        doc,
+        "Posture probing (what each lookalike can actually DO): ",
+        "A count of resolving lookalikes is a finding, not an instruction. "
+        "What determines whether a lookalike is dangerous is its CAPABILITY, "
+        "so each resolved domain is additionally profiled: MX records (can it "
+        "send and receive email as your brand?), SPF policy, nameservers "
+        "(is it parked or listed for sale at a domain broker?), and a single "
+        "cautious page fetch recording the HTTP status, response size and the "
+        "page's own title. From these the scanner assigns a risk band and a "
+        "specific recommendation, and orders the list by capability rather "
+        "than by resemblance."
+    )
+
+    add_bold_body(
+        doc,
+        "The distinction that matters: ",
+        "A near-typo with working mail and NO website is the classic "
+        "credential-phishing setup - the domain exists in order to send. A "
+        "domain publishing a null MX record (RFC 7505) with an SPF policy of "
+        "-all can neither send nor receive and is usually a defensive or "
+        "speculative registration. Both resolve; only the first can phish "
+        "your staff, brokers and clients today. Ranking them identically "
+        "overstates one and understates the other."
+    )
+
+    add_warning(
+        doc,
+        "A similar name is not impersonation. A lookalike that is mail-capable "
+        "AND serves a live, branded website is as often an unrelated business "
+        "as an impersonator - phishield.io, for example, is PHIShield, a "
+        "healthcare de-identification product (PHI = Protected Health "
+        "Information), entirely unconnected to Phishield. The report therefore "
+        "quotes each live site's own page title and frames these as VERIFY "
+        "FIRST rather than recommending action. Confirm that a domain actually "
+        "copies your branding or claims to be you before reporting it to a "
+        "registrar; an abuse complaint against a legitimate business is both "
+        "ineffective and reputationally damaging."
+    )
+
+    add_note(
+        doc,
+        "Detection is resolution-based: a permutation is reported only if it "
+        "resolves in DNS. A domain that is registered but publishes no A "
+        "record will not appear, even though it may still be quoted on a "
+        "social-media profile or in an email signature. If a client reports "
+        "seeing a lookalike that the scan does not list, check whether it "
+        "resolves at all - a name can be circulated without ever being hosted."
     )
 
     add_bold_body(

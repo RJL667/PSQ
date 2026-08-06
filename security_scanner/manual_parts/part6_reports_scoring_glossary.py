@@ -33,6 +33,75 @@ def build(doc):
         "the results screen or emailed directly to the intended recipient.",
     )
 
+    # 6.0 Reading a report: assessed vs unassessed ---------------------- #
+    add_h2(doc, "6.0 Reading a report: \"not assessed\" is not \"clean\"")
+
+    add_body(
+        doc,
+        "Before any individual card, one distinction governs how every report "
+        "in this manual should be read. A checker can end a scan in one of "
+        "three states, and only two of them are verdicts:",
+    )
+
+    add_bullet(
+        doc,
+        "ASSESSED, nothing found - the checker reached the target, looked, and "
+        "found no issue. This is a genuine clean result and is scored as one.",
+    )
+    add_bullet(
+        doc,
+        "ASSESSED, issue found - the checker looked and found something. "
+        "Scored on the finding.",
+    )
+    add_bullet(
+        doc,
+        "NOT ASSESSED - the checker could not look at all. A web application "
+        "firewall refused every probe, an API key was absent or out of credit, "
+        "or the host did not answer. No verdict is possible, so none is given.",
+    )
+
+    add_body(
+        doc,
+        "The third state is the one that matters commercially, because the raw "
+        "data of a blocked check and a clean check are identical: both produce "
+        "zero findings. A checker that cannot distinguish them will report a "
+        "wall as an all-clear. Every card that could be blinded therefore now "
+        "states its own status, and the report says \"Not assessed\" in place "
+        "of a score, with the reason (blocked by a WAF or CDN, no API key, "
+        "credit exhausted, host unreachable).",
+    )
+
+    add_warning(
+        doc,
+        "An unassessed area is an open question, not a pass. It should be "
+        "raised in the client conversation and, where the cause is fixable "
+        "(a missing API key, an exhausted credit balance), the scan should be "
+        "re-run before the report is relied upon for a placement decision.",
+    )
+
+    add_body(
+        doc,
+        "Scoring follows the same rule. An unassessed checker is EXCLUDED from "
+        "the composite and its weight is redistributed across the checkers that "
+        "did return data, rather than being filled in with an assumed value. "
+        "The practical consequence is that a heavily blocked scan tends to "
+        "score WORSE, not better: the organisation no longer receives credit "
+        "for checks that never ran. A score produced at reduced coverage is "
+        "therefore not directly comparable with one produced at full coverage, "
+        "and the coverage percentage shown alongside it should be quoted "
+        "whenever the score is.",
+    )
+
+    add_note(
+        doc,
+        "Partial coverage is normal and is not a fault of the target. Many "
+        "well-defended organisations block automated probing precisely because "
+        "they are well defended - the same WAF that protects them also limits "
+        "what an external assessment can observe. The report distinguishes "
+        "\"we could not see\" from \"there is nothing to see\" so that this is "
+        "never read as a weakness where it is not one.",
+    )
+
     # 6.1 Full Technical Report ---------------------------------------- #
     add_h2(doc, "6.1 Full Technical Report")
 
