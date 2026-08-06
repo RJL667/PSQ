@@ -119,13 +119,36 @@ def save_quote():
         data.get("renewalCoverLimit", ""), data.get("renewalPremium", 0),
         pdf_filename, "final", data.get("createdBy", ""), now, now,
     )
+    # UPSERT on quote_ref. Every output action (download / print / copy) saves the
+    # quote, so the same quote_ref is POSTed repeatedly as the broker re-exports or
+    # tweaks it — a plain INSERT would fail on the UNIQUE constraint the second
+    # time. On conflict we refresh the quote in place: the original id and
+    # created_at are preserved, updated_at moves, and pdf_filename is only
+    # overwritten when this request actually carried a new PDF.
+    updatable = [c for c in _COLUMNS if c not in ("id", "quote_ref", "created_at", "pdf_filename")]
+    set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in updatable)
     placeholders = ", ".join(["%s"] * len(_COLUMNS))
+    sql = (
+        f"INSERT INTO quotes ({', '.join(_COLUMNS)}) VALUES ({placeholders}) "
+        f"ON CONFLICT (quote_ref) DO UPDATE SET {set_clause}, "
+        f"pdf_filename = COALESCE(EXCLUDED.pdf_filename, quotes.pdf_filename) "
+        f"RETURNING id, (xmax = 0) AS inserted"
+    )
     with sme_db.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"INSERT INTO quotes ({', '.join(_COLUMNS)}) VALUES ({placeholders})", row)
+            cur.execute(sql, row)
+            result = cur.fetchone()
         conn.commit()
 
-    return jsonify({"id": quote_id, "quoteRef": quote_ref, "pdfPath": pdf_filename, "message": "Quote saved successfully"}), 201
+    saved_id = result["id"] if result else quote_id
+    created = bool(result["inserted"]) if result else True
+    return jsonify({
+        "id": saved_id,
+        "quoteRef": quote_ref,
+        "pdfPath": pdf_filename,
+        "created": created,
+        "message": "Quote saved successfully" if created else "Quote updated successfully",
+    }), (201 if created else 200)
 
 
 @app.route("/api/quotes/<quote_id>", methods=["GET"])

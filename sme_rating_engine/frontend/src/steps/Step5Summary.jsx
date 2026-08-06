@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { INDUSTRIES, COVER_LIMITS, getAvailableFPOptions } from '../rating-data.js';
 import { formatR, getItooBenchmark } from '../rating-engine.js';
 import { parseCurrency } from '../lib/format.js';
@@ -36,6 +36,7 @@ function optionRef(baseRef, o) {
 export default function Step5Summary({ state, patch, derived, goToStep }) {
   const quoteRef = useMemo(() => state.quoteRef || genQuoteRef(), [state.quoteRef]);
   const [saveStatus, setSaveStatus] = useState(null);
+  const persistInFlight = useRef(false);
   const options = state.quoteOptions;
   const industry = state.industryIndex >= 0 ? INDUSTRIES[state.industryIndex] : null;
   const uw = derived.uw;
@@ -64,6 +65,12 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
     const { doc, filename } = buildQuotePdf({ state, derived, quoteRef: optionRef(quoteRef, o), option: pdfOption(o) });
     doc.save(filename);
   }
+  // Output actions: perform the user-visible action FIRST so the download stays
+  // inside the click gesture, then persist() in the background (not awaited).
+  function downloadOne(o) {
+    downloadPdf(o);
+    persist();
+  }
   function downloadAll() {
     // Browsers collapse/block multiple downloads fired together. Trigger the
     // first inside the click gesture (always allowed), then stagger the rest ~1s
@@ -72,6 +79,13 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
       if (i === 0) downloadPdf(o);
       else setTimeout(() => downloadPdf(o), i * 1000);
     });
+    persist();   // once for the whole quote — all options live on the one row
+  }
+  function printQuote() {
+    // persist() first here: window.print() blocks the JS thread until the print
+    // dialog is dismissed, so the request must be dispatched before that.
+    persist();
+    window.print();
   }
   function buildPayload() {
     const first = options[0];
@@ -101,11 +115,31 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
       createdBy: state.createdBy || '', pdfBase64: pdfB64,
     };
   }
-  async function saveNow() {
+  // Every output action (download / print / copy) also persists the quote, so a
+  // quote that was actually used is never lost just because "Save Quote" was
+  // missed. Deliberately NOT auto-saved on merely reaching Step 5 — that would
+  // fill the table with half-tweaked drafts. The POST upserts on quote_ref, so
+  // repeated exports refresh one row instead of creating duplicates.
+  //
+  // Never awaited by the caller and never allowed to throw: a database problem
+  // must not cost the broker their PDF. Failures surface on the Save button.
+  async function persist() {
+    if (persistInFlight.current) return;      // ignore double-clicks / rapid re-exports
+    persistInFlight.current = true;
     setSaveStatus('saving');
-    try { await saveQuote(buildPayload()); if (!state.quoteRef) patch({ quoteRef }); setSaveStatus('saved'); }
-    catch { setSaveStatus('error'); }
+    try {
+      await saveQuote(buildPayload());
+      // Lock the generated ref into state so leaving and re-entering Step 5
+      // reuses it (a fresh ref would upsert to a second row for the same quote).
+      if (!state.quoteRef) patch({ quoteRef });
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    } finally {
+      persistInFlight.current = false;
+    }
   }
+  const saveNow = persist;
   function copyClipboard() {
     const lines = [`Phishield SME Cyber Quote — ${quoteRef}`, `Company: ${state.companyName}`,
       `Industry: ${industry ? industry.sub : '—'}`, `Turnover: ${formatR(derived.actualTurnover)} (${derived.bandLabel})`, `UW: ${uw.outcome}`, ''];
@@ -114,6 +148,7 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
       lines.push(`${optionLabel(o.coverIndex, o.fpIndex)}: R${c.annual.toLocaleString('en-ZA')}/yr · R${c.monthly.toLocaleString('en-ZA')}/mo`);
     });
     navigator.clipboard?.writeText(lines.join('\n'));
+    persist();
   }
 
   const isMulti = options.length >= 2;
@@ -238,7 +273,7 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
                 </div>
                 {isMulti && (
                   <div className="btn-row" style={{ marginTop: 8 }}>
-                    <button type="button" className="btn btn-ghost" onClick={() => downloadPdf(o)}>Download this PDF</button>
+                    <button type="button" className="btn btn-ghost" onClick={() => downloadOne(o)}>Download this PDF</button>
                   </div>
                 )}
               </div>
@@ -254,7 +289,7 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
         </div>
 
         <div className="btn-row">
-          <button type="button" className="btn btn-primary btn-print" id="btn-print" aria-label="Print quote" onClick={() => window.print()}>
+          <button type="button" className="btn btn-primary btn-print" id="btn-print" aria-label="Print quote" onClick={printQuote}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
             Print Quote
           </button>
@@ -263,7 +298,7 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
             Copy to Clipboard
           </button>
           {!isMulti && (
-            <button type="button" className="btn btn-primary btn-download-pdf" id="btn-download-pdf" aria-label="Download PDF" disabled={!options[0]} onClick={() => downloadPdf(options[0])}>
+            <button type="button" className="btn btn-primary btn-download-pdf" id="btn-download-pdf" aria-label="Download PDF" disabled={!options[0]} onClick={() => downloadOne(options[0])}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               Download PDF
             </button>
@@ -278,6 +313,21 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
             {saveStatus === 'saved' ? 'Saved ✓' : saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed — retry' : 'Save Quote'}
           </button>
         </div>
+
+        {/* Saves are now triggered by the output buttons too, so the outcome must be
+            visible without looking at the Save button — a silent failure is exactly
+            the quote-loss this change exists to prevent. */}
+        {saveStatus && (
+          <p className={'quote-save-status' + (saveStatus === 'error' ? ' error' : '')} aria-live="polite"
+            style={{
+              margin: '10px 0 0', fontSize: '0.78rem', fontWeight: 600,
+              color: saveStatus === 'error' ? 'var(--danger, #e63946)' : 'var(--text-muted)',
+            }}>
+            {saveStatus === 'saving' && 'Saving quote to the database…'}
+            {saveStatus === 'saved' && `Quote ${quoteRef} saved to the database.`}
+            {saveStatus === 'error' && `NOT SAVED — ${quoteRef} could not be written to the database. Your PDF is fine; click "Save failed — retry" to store the quote.`}
+          </p>
+        )}
 
         <p className="footer-note-internal">Internal use only. Premiums are indicative and subject to final underwriting approval.</p>
       </div>
