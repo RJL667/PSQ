@@ -1026,6 +1026,41 @@ def _check_blocked_not_clean(failures):
     print(f"  [{'PASS' if kept else 'FAIL'}] blocked_clean:true_positive_kept    "
           f"high_count={real.get('high_count')}")
 
+    # --- round 2: website_security + dependency_manifest -------------------
+    # Found by the smoke harness once it patched provider clients, not just
+    # HTTP. WebsiteSecurityChecker is the sharpest of the two: EVERY default in
+    # its result is optimistic (cookies secure/httponly/samesite all True,
+    # mixed_content False), so a block page yields "no cookie problems, no mixed
+    # content, no CMS exposure" and a top score for a site never inspected.
+    cs_m = importlib.import_module("checkers_supply_chain")
+
+    def _ws(code):
+        with mock.patch.object(ct_mod, "HTTP") as H:
+            H.get.return_value = _Resp(code, "<html>x</html>")
+            H.stop_probing.return_value = False
+            return ct_mod.WebsiteSecurityChecker().check("example.com")
+
+    def _dm(code):
+        with mock.patch("http_client.HTTP") as H:
+            H.head.return_value = _Resp(code)
+            H.get.return_value = _Resp(code, "x" * 50)
+            H.stop_probing.return_value = False
+            return cs_m.DependencyManifestChecker().check("example.com")
+
+    for label, fn in (("website_security", _ws), ("dependency_manifest", _dm)):
+        blocked, clean = fn(403), fn(404 if label == "dependency_manifest" else 200)
+        ok = (blocked.get("status") == "unreachable"
+              and "score" not in blocked
+              and clean.get("status") == "completed")
+        if not ok:
+            failures.append(
+                f"blocked_clean[{label}]: blocked={blocked.get('status')!r} "
+                f"scored={'score' in blocked} clean={clean.get('status')!r} — a "
+                "checker whose defaults are all optimistic must not score a block "
+                "page as a well-configured site")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:{label:<20} "
+              f"blocked={blocked.get('status')} clean={clean.get('status')}")
+
     # --- the WAF row must not claim ABSENCE while blocking is observed ------
     # The report said "No WAF detected" in red, charged RSI +0.04 and BI +0.015,
     # and advised buying a WAF — on the same page as "20 of 20 probes returned

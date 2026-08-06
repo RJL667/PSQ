@@ -326,7 +326,31 @@ class WebsiteSecurityChecker:
         if not REQUESTS_AVAILABLE:
             result["status"] = "error"; result["error"] = "requests not installed"; return result
         try:
+            # The https-redirect test stays valid whatever the final status: a
+            # 403 served over https still proves http redirected to https.
             result["https_enforced"] = self._check_https_redirect(domain)
+
+            # Everything else needs the real page. Every default in `result` is
+            # OPTIMISTIC — cookies secure/httponly/samesite all True, mixed
+            # content False — so a WAF block page yields no cookies, no mixed
+            # content, no CMS, and scores as a perfectly configured site. Gate
+            # the content-derived findings on a genuine 2xx.
+            probe = HTTP.get(f"https://{domain}", timeout=DEFAULT_TIMEOUT,
+                             allow_redirects=True)
+            if probe is None or not (200 <= probe.status_code < 300):
+                code = probe.status_code if probe is not None else None
+                result["status"] = "unreachable"
+                result["http_status"] = code
+                result["unreachable_reason"] = (
+                    f"Cookie flags, mixed content and CMS exposure could not be "
+                    f"assessed — the site returned "
+                    f"{('HTTP ' + str(code)) if code else 'no response'} to the "
+                    f"scanner. No verdict on website security configuration is "
+                    f"implied; the defaults here are optimistic, so scoring this "
+                    f"would report a perfectly configured site.")
+                result.pop("score", None)
+                return result
+
             result["cookies"] = self._check_cookies(domain)
             result["mixed_content"] = self._check_mixed_content(domain)
             result["cms"] = self._detect_cms(domain)
