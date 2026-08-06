@@ -1185,6 +1185,14 @@ def _check_hibp_and_waf_evidence(failures):
         r = sa_m.DataBreachIndex().calculate(cats)
         return r["components"]["breach_count"]["points"]
 
+    def _dbi_bi(status, bi):
+        cats = {"breaches": {"status": status, "breach_count": 0, "issues": []},
+                "dehashed": {"status": "completed", "total_entries": 0}}
+        if bi:
+            cats["breach_intel"] = bi
+        r = sa_m.DataBreachIndex().calculate(cats)
+        return r["components"]["breach_count"]["points"]
+
     full, unknown = _dbi("completed"), _dbi("no_api_key")
     ok2 = unknown < full
     if not ok2:
@@ -1194,6 +1202,25 @@ def _check_hibp_and_waf_evidence(failures):
             "check that never happened")
     print(f"  [{'PASS' if ok2 else 'FAIL'}] hibp:dbi_no_full_marks          "
           f"unknown={unknown} real_clean={full}")
+
+    # RESEARCH IS THE AUTHORITY, NOT HIBP. HIBP finds almost nothing for SA
+    # domains and has no key on this deployment; the researched breach-history
+    # checker is the real source. So a missing HIBP key must NOT by itself make
+    # the picture unknown when the research reached a verdict — including a
+    # verdict of NONE, which is a genuine, earned clean.
+    researched_clean = _dbi_bi("no_api_key",
+                               {"status": "completed", "verdict": "none"})
+    researched_hit = _dbi_bi("no_api_key",
+                             {"status": "completed", "verdict": "confirmed",
+                              "incident_count": 1, "most_recent_breach": "2026-06-26"})
+    ok3 = researched_clean == full and researched_hit < full
+    if not ok3:
+        failures.append(
+            f"hibp[research_authority]: researched-clean scored {researched_clean}/30 "
+            f"(expected {full}) and researched-breach {researched_hit}/30 — a missing "
+            "HIBP key must not downgrade a verdict the web research actually reached")
+    print(f"  [{'PASS' if ok3 else 'FAIL'}] hibp:research_is_authority      "
+          f"researched_clean={researched_clean} researched_hit={researched_hit}")
 
 def _check_base_path_links(failures):
     src_dir = os.path.join(SEC, "frontend", "src")

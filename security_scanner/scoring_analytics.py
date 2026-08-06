@@ -3845,8 +3845,20 @@ class DataBreachIndex:
         # component already uses for unknowns. The researched breach-history
         # checker (merged above) is what genuinely covers this, and when IT is
         # conclusive the merged count is used and this branch is not reached.
+        # WHO IS THE AUTHORITY HERE. HIBP is no longer the primary source: the
+        # researched breach-history checker is, and it is the only one that
+        # finds anything for most SA domains. So a missing HIBP key must not by
+        # itself make the picture "unknown" — if the research ran and reached a
+        # verdict, including a verdict of NONE, the estate WAS assessed and the
+        # result is earned either way. Only when neither source concluded is
+        # this genuinely unknown.
+        _bi_conclusive = (
+            BREACH_INTEL_SCORING_ENABLED
+            and _bi.get("status") == "completed"
+            and _bi.get("verdict") in ("confirmed", "reported", "none")
+            and _bi.get("researched") is not False)
         _b_status = breaches.get("status")
-        _b_conclusive = _b_status in (None, "completed")
+        _b_conclusive = _b_status in (None, "completed") or _bi_conclusive
         if not _b_conclusive:
             bc_pts = 15          # unknown — neither credit nor penalty
         elif breach_count == 0:
