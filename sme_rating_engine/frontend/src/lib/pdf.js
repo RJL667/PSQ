@@ -4,6 +4,7 @@ import {
   INDUSTRIES, REVENUE_BANDS, COVER_LIMITS, MARKET_CONDITION_LABEL, getAvailableFPOptions,
 } from '../rating-data.js';
 import { parseCurrency } from './format.js';
+import { UW_QUESTION_GROUPS, answerLabel } from './uwQuestions.js';
 
 // Client quote PDF — layout ported VERBATIM from the legacy vanilla
 // `generatePDF` (sme-rating.js). Coordinates, colours, fonts, boxes, and text
@@ -317,6 +318,118 @@ export function buildQuotePdf({ state, derived, quoteRef, option }) {
   doc.text('Internal use only. Premiums are indicative and subject to final underwriting approval.', margin, y);
   y += 4;
   doc.text('Phishield SME Rating Engine © 2026. Not for distribution.', margin, y);
+
+  // ── Annexure A — underwriting questionnaire responses ──────────────────────
+  // Added 2026-08-06 (owner request): underwriters and capturers need to audit
+  // what was actually answered without opening the database. Interim measure
+  // until the ERP absorbs the quote store and the data can be queried directly.
+  // Rendered on its OWN page so the quote itself is untouched — the PDF-parity
+  // gate compares only the pages before this annexure.
+  doc.addPage();
+  y = 15;
+
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 40, 80);
+  doc.text('ANNEXURE A', margin, y);
+  y += 6;
+  doc.setFontSize(10);
+  doc.text('Underwriting Questionnaire — Captured Responses', margin, y);
+  y += 6;
+
+  // Identify the page on its own, in case it is detached from the quote.
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(90, 90, 90);
+  const annexCover = option
+    ? COVER_LIMITS[option.coverIndex].label + ' / FP '
+      + ((getAvailableFPOptions(COVER_LIMITS[option.coverIndex].key)[option.fpIndex] || {}).label || 'Base')
+    : '--';
+  doc.text(`${state.companyName || '--'}   |   Quote ref: ${quoteRef}   |   Cover: ${annexCover}`, margin, y);
+  y += 5;
+  addRule();
+
+  const answers = state.uwAnswers || {};
+  for (const group of UW_QUESTION_GROUPS) {
+    // FP questions are only put to the client when cover exceeds R250k.
+    const fpSkipped = group.fpDependent && !state.fpOver250k;
+
+    checkPage(16);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 40, 80);
+    doc.text(group.heading, margin, y);
+    y += 5;
+
+    if (group.intro) {
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(120, 120, 120);
+      const introLines = doc.splitTextToSize(group.intro, contentW - 4);
+      doc.text(introLines, margin + 2, y);
+      y += introLines.length * 3.6 + 2;
+    }
+
+    if (fpSkipped) {
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(120, 120, 120);
+      doc.text('Not applicable — Funds Protect cover does not exceed R250 000.', margin + 2, y);
+      y += lineH + 2;
+      continue;
+    }
+
+    for (const q of group.questions) {
+      const label = answerLabel(answers[q.key]);
+      checkPage(10);
+      // Question number + wrapped text, leaving room for the answer column.
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(60, 60, 60);
+      doc.text(q.num, margin + 2, y);
+      const qLines = doc.splitTextToSize(q.text, contentW - 34);
+      doc.text(qLines, margin + 12, y);
+      // Answer, colour-coded so a "No" is easy to spot when checking.
+      doc.setFont('helvetica', 'bold');
+      if (label === 'Yes') doc.setTextColor(0, 130, 70);
+      else if (label === 'No') doc.setTextColor(200, 90, 0);
+      else doc.setTextColor(150, 150, 150);
+      doc.text(label, pageW - margin - 2, y, { align: 'right' });
+      y += Math.max(qLines.length * 3.8, 4) + 2.5;
+    }
+    addSpacer(2);
+  }
+
+  // Supporting free-text captured alongside the questionnaire.
+  addSpacer(1);
+  addRule();
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(120, 120, 120);
+  const extras = [
+    ['Endpoint security vendor / product', state.uwEndpointVendor || '--'],
+    ['Prior claim flagged', state.priorClaim ? 'Yes' : 'No'],
+  ];
+  if (answers['q8'] === true) {
+    extras.push(['Prior insurer', state.uwPriorInsurer || '--']);
+    extras.push(['Prior inception date', state.uwPriorInceptionDate || '--']);
+  }
+  for (const [k, v] of extras) {
+    checkPage(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(120, 120, 120);
+    doc.text(k, margin + 2, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text(String(v), margin + 70, y);
+    y += lineH + 1;
+  }
+
+  addSpacer(3);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(150, 150, 150);
+  doc.text('Responses as captured at the time of quoting. "Not answered" means the question was not put to the client.', margin, y);
 
   // Filename (legacy optionOverride: companySlug_Cover_FPxxx.pdf)
   const companySlug = (state.companyName || 'quote').replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_');

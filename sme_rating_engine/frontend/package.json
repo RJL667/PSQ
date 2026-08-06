@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "gen:data": "node tools/gen_rating_data.mjs",
-    "parity": "node tools/parity.mjs"
+    "parity": "node tools/parity.mjs",
+    "check:uw": "node tools/check_uw_question_sync.mjs"
   },
   "dependencies": {
     "jspdf": "^2.5.2",

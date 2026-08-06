@@ -14,22 +14,41 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(__file__)
 scenarios = sorted({os.path.basename(p)[len("legacy_"):-4]
                     for p in glob.glob(os.path.join(OUT, "legacy_*.pdf"))})
 
-def words(path):
+# The new PDF carries an extra final page the legacy never had: "ANNEXURE A —
+# Underwriting Questionnaire — Captured Responses" (added 2026-08-06 so
+# underwriters can audit the captured answers until the ERP absorbs the quote
+# store). It is deliberately rendered on its OWN page, so the QUOTE ITSELF must
+# still be word-and-position identical to the legacy. We therefore strip the
+# annexure page before comparing, and separately assert it is present and is a
+# pure addition — the guarantee stays "the quote is unchanged", not "anything
+# goes".
+ANNEXURE_MARKER = "ANNEXURE"
+
+def words(path, drop_annexure=False):
     out = []
+    annexure_pages = 0
     with pdfplumber.open(path) as pdf:
         for pi, page in enumerate(pdf.pages):
-            for w in page.extract_words(use_text_flow=True, keep_blank_chars=False):
-                out.append((pi, round(w["x0"]), round(w["top"]), w["text"]))
-    return out
+            pw = [(pi, round(w["x0"]), round(w["top"]), w["text"])
+                  for w in page.extract_words(use_text_flow=True, keep_blank_chars=False)]
+            if drop_annexure and any(w[3] == ANNEXURE_MARKER for w in pw[:4]):
+                annexure_pages += 1
+                continue
+            out.extend(pw)
+    return out, annexure_pages
 
 overall_ok = True
 for name in scenarios:
-    lw = words(os.path.join(OUT, f"legacy_{name}.pdf"))
-    nw = words(os.path.join(OUT, f"new_{name}.pdf"))
+    lw, _ = words(os.path.join(OUT, f"legacy_{name}.pdf"))
+    nw, annex_pages = words(os.path.join(OUT, f"new_{name}.pdf"), drop_annexure=True)
+    if annex_pages != 1:
+        overall_ok = False
+        print(f"[DIFF] {name}: expected exactly 1 Annexure A page in the new PDF, found {annex_pages}")
+        continue
     lt = [w[3] for w in lw]
     nt = [w[3] for w in nw]
     if lw == nw:
-        print(f"[IDENTICAL] {name}: {len(lw)} words, same text + positions")
+        print(f"[IDENTICAL] {name}: {len(lw)} quote words, same text + positions (+1 annexure page)")
         continue
     if lt == nt:
         shifts = [(abs(a[1]-b[1]), abs(a[2]-b[2])) for a, b in zip(lw, nw)]
