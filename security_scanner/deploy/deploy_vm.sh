@@ -55,10 +55,20 @@ if tar -tzf "$TARBALL" | grep -qE '(^|/)security_scanner/(\.env|secrets\.env)'; 
   echo "   !! WARNING: tarball contains a .env / secrets.env -- IGNORING it."
   echo "   !! Rebuild with --exclude=.env (see the Usage header) to silence this."
 fi
+# Server-owned RUNTIME state, excluded for the same reason as .env: it is written
+# by the running app and a dev machine's copy must never replace it. gitignore
+# does NOT protect a tarball -- a local test run recreates the file and `tar`
+# happily includes it -- so the guarantee has to live here, at extract time.
+#   scans/_objstore        generated PDFs + one-time export blobs
+#   _dehashed_balance.json cached credit balance; a stale copy would rewind the
+#                          displayed count and trigger a needless paid refresh
 tar -xzf "$TARBALL" -C "$APP_ROOT" \
     --exclude='security_scanner/.env' \
     --exclude='security_scanner/.env.*' \
-    --exclude='security_scanner/secrets.env'   # -> $APP_ROOT/security_scanner
+    --exclude='security_scanner/secrets.env' \
+    --exclude='security_scanner/scans/_dehashed_balance.json' \
+    --exclude='security_scanner/scans/_objstore' \
+    --exclude='security_scanner/scans/_objstore/*'   # -> $APP_ROOT/security_scanner
 echo "   code at $APP_DIR"
 
 echo "== [2/7] secrets (generate once, reuse after) =="
