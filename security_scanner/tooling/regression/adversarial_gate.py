@@ -891,6 +891,111 @@ def _check_table_headers(failures):
               f"headers={headers} repeatRows={repeats}")
 
 
+# (k) A BLOCKED CHECKER MUST NOT SCORE AS A CLEAN ONE. On the 2026-08-06
+# phishield.com scan a WAF answered 403 to 20 of 20 probes, and six checkers
+# were recorded as affected — yet info_disclosure and tech_stack both reported
+# status="completed" with a PERFECT 100/100. A block page carries none of the
+# signals they read (no Server / X-Powered-By, no EOL version string, no
+# retrievable path), so "nothing found" was indistinguishable from a tidy site.
+#
+# The subtle half is the scoring side. Dropping a blocked checker's score is NOT
+# enough: the per-category fallbacks are not neutral — tech_stack and
+# info_disclosure both default to score=100, i.e. a perfect result — so a
+# score-less blocked checker banks the exact clean sweep being removed. Only
+# http_headers defaults to a neutral 50, which is why the earlier fix there
+# appeared sufficient. "unreachable" therefore has to be an EXCLUDING status.
+class _Resp:
+    def __init__(self, code, text="", headers=None):
+        self.status_code = code
+        self.text = text
+        self.headers = headers or {}
+
+
+def _check_blocked_not_clean(failures):
+    import copy, importlib
+    ct_mod = importlib.import_module("checkers_threats")
+    sa = importlib.import_module("scoring_analytics")
+
+    # --- tech_stack -------------------------------------------------------
+    for label, resp, want_status, want_scored in (
+        ("waf 403 block page", _Resp(403, "<html>Forbidden</html>"), "unreachable", False),
+        ("healthy clean 200",  _Resp(200, "<html>hi</html>"),        "completed",   True),
+        ("healthy leaky 200",  _Resp(200, "<html>x</html>",
+                                     {"X-Powered-By": "PHP/5.6"}),   "completed",   True),
+    ):
+        with mock.patch.object(ct_mod, "HTTP") as H:
+            H.get.return_value = resp
+            out = ct_mod.TechStackChecker().check("example.com")
+        got, scored = out.get("status"), ("score" in out)
+        ok = (got == want_status) and (scored == want_scored)
+        if not ok:
+            failures.append(
+                f"blocked_clean[tech_stack/{label}]: status={got!r} scored={scored}, "
+                f"expected {want_status!r}/{want_scored} — a block page has no Server "
+                "header and no EOL string, so parsing it yields a perfect score for a "
+                "stack that was never seen")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:tech_stack/{label:<20} "
+              f"{got} scored={scored}")
+
+    # --- info_disclosure --------------------------------------------------
+    def run_id(code):
+        with mock.patch("http_client.HTTP") as H, mock.patch.object(ct_mod, "HTTP") as H2:
+            H.head.return_value = _Resp(code)
+            H.get.return_value = _Resp(code, "x" * 50)
+            H2.get.return_value = _Resp(code, "x" * 50)
+            H2.stop_probing.return_value = False
+            return ct_mod.InformationDisclosureChecker().check("example.com")
+
+    for label, code, want_status, want_scored in (
+        ("every probe 403 (WAF)",   403, "unreachable", False),
+        ("every probe 404 (clean)", 404, "completed",   True),
+    ):
+        out = run_id(code)
+        got, scored = out.get("status"), ("score" in out)
+        ok = (got == want_status) and (scored == want_scored)
+        if not ok:
+            failures.append(
+                f"blocked_clean[info_disclosure/{label}]: status={got!r} "
+                f"scored={scored}, expected {want_status!r}/{want_scored} — refusing "
+                "every probe is not the same as finding nothing exposed")
+        print(f"  [{'PASS' if ok else 'FAIL'}] blocked_clean:info_disc/{label:<22} "
+              f"{got} scored={scored}")
+
+    # --- scoring: unreachable must EXCLUDE, not fall back to a 100 default --
+    ok_excl = "unreachable" in sa.RiskScorer._FAILED_STATUSES
+    if not ok_excl:
+        failures.append(
+            "blocked_clean[scoring]: 'unreachable' is not in _FAILED_STATUSES — "
+            "tech_stack and info_disclosure default to score=100, so a blocked "
+            "checker without an explicit score is scored as PERFECT")
+    print(f"  [{'PASS' if ok_excl else 'FAIL'}] blocked_clean:unreachable_excludes    {ok_excl}")
+
+    base = {
+        "ssl": {"status": "completed", "score": 90},
+        "email_security": {"status": "completed", "score": 8},
+        "breaches": {"status": "completed", "breach_count": 0, "issues": []},
+        "tech_stack": {"status": "completed", "score": 100, "eol_count": 0},
+        "info_disclosure": {"status": "completed", "score": 100, "exposed_paths": []},
+    }
+
+    def score(c):
+        out = sa.RiskScorer().calculate(c)
+        return out[0] if isinstance(out, tuple) else out
+
+    blocked = copy.deepcopy(base)
+    for k in ("tech_stack", "info_disclosure"):
+        blocked[k] = {"status": "unreachable", "unreachable_reason": "WAF refused all probes"}
+    clean_score, blocked_score = score(copy.deepcopy(base)), score(blocked)
+    ok_diff = clean_score != blocked_score
+    if not ok_diff:
+        failures.append(
+            f"blocked_clean[composite]: blocked scan scored {blocked_score}, identical "
+            f"to a genuinely clean {clean_score} — a scan that saw nothing must not "
+            "score the same as one that looked and found nothing")
+    print(f"  [{'PASS' if ok_diff else 'FAIL'}] blocked_clean:composite_differs      "
+          f"clean={clean_score} blocked={blocked_score}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -1024,6 +1129,7 @@ def main():
     _check_provider_budget(failures)
     _check_lookalike_posture(failures)
     _check_table_headers(failures)
+    _check_blocked_not_clean(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -1067,7 +1173,8 @@ def main():
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
           f"5 provider-budget + "
           f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
-          f"3 table-header "
+          f"3 table-header + "
+          f"7 blocked-not-clean "
           "ground-truth scenarios")
 
 

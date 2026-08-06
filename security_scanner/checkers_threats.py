@@ -108,6 +108,28 @@ class TechStackChecker:
                          allow_redirects=True)
             if r is None:
                 raise RuntimeError("HTTP egress returned no response")
+
+            # A WAF/CDN block page (403/406/451/503) carries none of the
+            # signals this checker reads: no Server / X-Powered-By disclosure,
+            # no EOL version strings, no CMS fingerprint. Parsing it anyway
+            # yields "no disclosure, no end-of-life software" and a PERFECT
+            # 100/100 — a clean bill of health for a stack we never saw. On the
+            # 2026-08-06 phishield.com scan (20/20 probes 403) that is exactly
+            # what happened, and it inflated the composite.
+            # Same 200-only gate the header checker already applies; drop the
+            # score so the scoring layer falls back to its neutral default
+            # instead of banking a perfect one.
+            if not (200 <= r.status_code < 300):
+                result["status"] = "unreachable"
+                result["http_status"] = r.status_code
+                result["unreachable_reason"] = (
+                    f"Technology stack could not be assessed — the site returned "
+                    f"HTTP {r.status_code} (WAF/CDN block or unreachable) to the "
+                    f"scanner. No end-of-life or version-disclosure verdict is "
+                    f"implied; this is not evidence of a patched stack.")
+                result.pop("score", None)
+                return result
+
             body = r.text[:100000]
             all_headers_str = str(r.headers)
 
@@ -3284,6 +3306,7 @@ class InformationDisclosureChecker:
             import threading as _threading
             _probed = {"n": 0}
             _plock = _threading.Lock()
+            _codes: dict = {}       # HTTP status -> count, across all probes
 
             def _probe_guarded(url, risk):
                 if risk == "medium":
@@ -3309,6 +3332,12 @@ class InformationDisclosureChecker:
                             found, status, size = fut.result(timeout=2)
                         except Exception:
                             continue
+                        # Track what the probes actually met. A WAF answering
+                        # 403/406/451 to EVERY path produces found=False across
+                        # the board, which is arithmetically identical to a
+                        # genuinely tidy site and banks a perfect 100/100 — for
+                        # paths we were never allowed to request.
+                        _codes[status] = _codes.get(status, 0) + 1
                         if not found:
                             continue
                         exposed.append({
@@ -3350,6 +3379,26 @@ class InformationDisclosureChecker:
                 exposed,
                 key=lambda e: (0 if e["risk_level"] == "critical" else 1, e["path"])
             )
+            result["probe_status_codes"] = dict(sorted(_codes.items()))
+
+            # If EVERY probe was refused by an edge and nothing was ever
+            # retrieved, we did not assess this domain — we were turned away at
+            # the door. Reporting 100/100 in that state certifies files we were
+            # never allowed to request. Only when there are no findings AND no
+            # successful probe: a single 200 (or any real 404) means the origin
+            # was answering us and the empty result is genuine.
+            BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
+            probed = sum(_codes.values())
+            blocked = sum(n for c, n in _codes.items() if c in BLOCKING)
+            if probed and not exposed and blocked == probed:
+                result["status"] = "unreachable"
+                result["http_status"] = max(_codes, key=_codes.get)
+                result["unreachable_reason"] = (
+                    f"Sensitive-file exposure could not be assessed — all {probed} "
+                    f"probes were refused by a WAF/CDN (HTTP "
+                    f"{', '.join(str(c) for c in sorted(_codes))}). No verdict on "
+                    f"exposed files is implied; this is not evidence that none exist.")
+                result.pop("score", None)
 
         except Exception as e:
             result["status"] = "error"

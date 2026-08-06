@@ -749,7 +749,18 @@ class RiskScorer:
     # reason "error" does: the estate was never searched, so the absence of
     # findings is absence of evidence. Leaving subscription_required out (as it
     # was) let a plan/credit failure score as a validated clean result.
-    _FAILED_STATUSES = {"error", "timeout", "quota_exhausted", "subscription_required"}
+    _FAILED_STATUSES = {"error", "timeout", "quota_exhausted", "subscription_required",
+                        # "unreachable" = a WAF/CDN refused every probe, so the
+                        # checker saw nothing. It MUST be excluded and its weight
+                        # redistributed, not merely left to a default: the
+                        # per-category defaults below are not neutral —
+                        # tech_stack and info_disclosure both fall back to
+                        # score=100, i.e. a PERFECT result. Dropping the score of
+                        # a blocked checker without excluding it therefore banks
+                        # the very clean sweep this is meant to remove. (Only
+                        # http_headers defaults to a neutral 50, which is why the
+                        # earlier fix there appeared to work.)
+                        "unreachable"}
     # Statuses that indicate a checker was intentionally skipped (no API key,
     # toggle off) — these should NOT count as failures in the completeness warning
     _SKIPPED_STATUSES = {"no_api_key", "auth_failed", "disabled", "skipped"}
