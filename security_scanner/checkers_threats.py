@@ -2836,8 +2836,41 @@ class FraudulentDomainChecker:
                             if p[0].lower().strip(".") != _self]
             result["total_permutations"] = len(permutations)
 
-            # Check DNS resolution in parallel (cap at 60 to keep memory low on free tier)
-            to_check = permutations[:60]
+            # Coverage. The old `permutations[:60]` was a flat truncation of a
+            # list built technique-by-technique, so it did not sample the space —
+            # it amputated whole ATTACK CLASSES. On phishield.com that meant
+            # 0 of 16 tld-variants, 0 of 8 dot-insertions, 0 of 8
+            # hyphen-insertions and 0 of 6 IDN homoglyphs were ever probed, and
+            # three live lookalikes went unreported (phishield.io,
+            # phi-shield.com, phish.ield.com). The cap's stated reason — "keep
+            # memory low on free tier" — no longer applies; this runs on an
+            # 8-core VM and these are cheap parallel DNS lookups.
+            #
+            # Raised, and made technique-fair: round-robin across techniques so
+            # that IF a cap ever bites it degrades evenly instead of silently
+            # deleting a class. Env-tunable for a pathological generator.
+            cap = int(_os.environ.get("LOOKALIKE_PROBE_CAP", "250"))
+            by_tech: dict = {}
+            for p in permutations:
+                by_tech.setdefault(p[1], []).append(p)
+            to_check, _i = [], 0
+            while len(to_check) < min(cap, len(permutations)):
+                took = False
+                for tech in sorted(by_tech):
+                    bucket = by_tech[tech]
+                    if _i < len(bucket) and len(to_check) < cap:
+                        to_check.append(bucket[_i])
+                        took = True
+                if not took:
+                    break
+                _i += 1
+            # Report what was ACTUALLY probed. total_permutations previously
+            # reported the GENERATED count (115) while only 60 were tested, so
+            # the panel overstated coverage by nearly half.
+            result["total_permutations"] = len(to_check)
+            result["permutations_generated"] = len(permutations)
+            if len(to_check) < len(permutations):
+                result["probe_cap_applied"] = len(permutations) - len(to_check)
             resolved = []
 
             with ThreadPoolExecutor(max_workers=10) as ex:
