@@ -82,6 +82,15 @@ function LookalikeList({ domains }: { domains?: Lookalike[] }) {
                 {caps.join(' · ')}
               </div>
             )}
+            {/* The site's own title, verbatim. A live lookalike is as often an
+                unrelated business with a similar name as an impersonator, and
+                one line of its own words settles which — far faster than any
+                heuristic we could apply. */}
+            {d.page_title && (
+              <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--text-secondary)' }}>
+                page says: <i>&ldquo;{d.page_title}&rdquo;</i>
+              </div>
+            )}
             {d.recommendation ? (
               <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)', marginTop: 3 }}>
                 {d.recommendation}

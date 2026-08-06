@@ -1886,6 +1886,13 @@ def cat_fraudulent_domains(d, S):
             caps.append("live site")
         if dom.get("listed_for_sale"):
             caps.append("for sale")
+        # The site's own title, verbatim. A live lookalike is as often an
+        # unrelated business with a similar name as an impersonator, and one
+        # line of its own words settles which — quoting it stops a broker
+        # escalating against a legitimate company.
+        title = (dom.get("page_title") or "").strip()
+        if title:
+            caps.append(f'says "{title[:48]}"')
         cap_str = f" — {', '.join(caps)}" if caps else ""
         label = dom.get("technique", "lookalike")
         if dom.get("risk"):
@@ -1913,14 +1920,31 @@ def cat_fraudulent_domains(d, S):
         # finding and an instruction.
         probed = [x for x in doms if x.get("recommendation")]
         if probed:
-            mailers = [x for x in probed if x.get("mail_capable")]
+            # Mail + NO website is the phishing profile. Mail + a live branded
+            # site is as often an unrelated business with a similar name, so it
+            # gets a verify-first line rather than an accusation — otherwise the
+            # report tells a client to report a legitimate company.
+            mailers = [x for x in probed
+                       if x.get("mail_capable") and not x.get("serves_content")]
+            live = [x for x in probed
+                    if x.get("mail_capable") and x.get("serves_content")]
             if mailers:
                 parts.append(Paragraph(
-                    f"<b>{len(mailers)} of these can send email as your brand</b> "
+                    f"<b>{len(mailers)} of these can send email as your brand while "
+                    f"publishing no website</b> "
                     f"({', '.join(x['domain'] for x in mailers[:4])}). That is the "
                     "capability that turns a lookalike into a working phishing "
                     "campaign against your staff, clients and brokers — treat these "
                     "first.", S["body"]))
+                parts.append(Spacer(1, 2 * mm))
+            if live:
+                _named = ", ".join(
+                    f"{x['domain']} (“{(x.get('page_title') or '?')[:40]}”)"
+                    for x in live[:3])
+                parts.append(Paragraph(
+                    f"<b>{len(live)} run a live site as well as mail:</b> {_named}. "
+                    "Verify before acting — a similar name is not impersonation, and "
+                    "some of these are unrelated businesses.", S["body"]))
                 parts.append(Spacer(1, 2 * mm))
             for x in probed[:5]:
                 parts.append(Paragraph(
