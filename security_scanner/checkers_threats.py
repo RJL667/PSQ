@@ -2794,10 +2794,21 @@ class FraudulentDomainChecker:
                     "and brokers. Verify ownership; if it is not yours, report it to "
                     "the registrar and add it to your mail-gateway block list.")
         if mail and serves:
+            # A live, branded site is as likely to be an UNRELATED BUSINESS with
+            # a similar name as an impersonator. phishield.io is exactly that:
+            # "PHIShield — HIPAA-Safe X12 De-Identification", where PHI is
+            # Protected Health Information, nothing to do with PhiShield. Leading
+            # with "report it to the registrar" invites a client to file an abuse
+            # complaint against a legitimate company. Lead with identification,
+            # and quote the site's own title so the reader settles it instantly.
+            title = (e.get("page_title") or "").strip()
+            who = f' The site identifies itself as "{title}".' if title else ""
             return ("high",
-                    "Mail-capable AND serving a live page — check the page for "
-                    "cloned branding. Report to the registrar if it impersonates "
-                    "you, and block the domain at your mail gateway.")
+                    "Mail-capable and serving a live site." + who +
+                    " Check first whether this is an unrelated business that "
+                    "happens to have a similar name — many are. Act only if the "
+                    "page copies your branding or claims to be you: then report "
+                    "it to the registrar and block it at your mail gateway.")
         if e.get("listed_for_sale"):
             return ("medium",
                     "Parked and listed for sale. Cannot currently email, but anyone "
@@ -2914,15 +2925,36 @@ class FraudulentDomainChecker:
             # they are called out separately from the raw count. REPORTING ONLY —
             # the score below is unchanged (still per-resolved-domain), so this
             # adds no second scoring channel for the same signal.
+            # Split mail-capable domains by whether they also run a real site.
+            # Mail + NO website is the classic phishing setup. Mail + a live
+            # branded site is as often an unrelated business with a similar
+            # name — phishield.io is "PHIShield, HIPAA de-identification", where
+            # PHI is Protected Health Information. Lumping them together tells a
+            # broker to report a legitimate company to its registrar.
             mail_capable = [d["domain"] for d in to_enrich if d.get("mail_capable")]
+            mail_no_site = [d["domain"] for d in to_enrich
+                            if d.get("mail_capable") and not d.get("serves_content")]
+            mail_and_site = [d for d in to_enrich
+                             if d.get("mail_capable") and d.get("serves_content")]
             if mail_capable:
                 result["mail_capable_domains"] = mail_capable
+            if mail_no_site:
                 result["issues"].append(
-                    f"{len(mail_capable)} lookalike domain(s) can send email as your "
-                    f"brand ({', '.join(mail_capable[:3])}"
-                    + (", …" if len(mail_capable) > 3 else "")
-                    + ") — highest phishing risk; report to the registrar and block "
-                      "at your mail gateway.")
+                    f"{len(mail_no_site)} lookalike domain(s) can send email as your "
+                    f"brand while publishing no website "
+                    f"({', '.join(mail_no_site[:3])}"
+                    + (", …" if len(mail_no_site) > 3 else "")
+                    + ") — the classic phishing setup; report to the registrar and "
+                      "block at your mail gateway.")
+            if mail_and_site:
+                _named = ", ".join(
+                    f"{d['domain']} (\"{(d.get('page_title') or '?')[:40]}\")"
+                    for d in mail_and_site[:3])
+                result["issues"].append(
+                    f"{len(mail_and_site)} lookalike domain(s) are mail-capable AND "
+                    f"run a live site: {_named}. VERIFY before acting — a similar "
+                    "name is not impersonation, and several of these turn out to be "
+                    "unrelated businesses.")
 
             if len(resolved) > 5:
                 result["issues"].append(

@@ -852,6 +852,27 @@ def _check_lookalike_posture(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] lookalike_mx:{label:<12} "
               f"usable={len(usable)} null_mx={null}")
 
+    # A SIMILAR NAME IS NOT IMPERSONATION. phishield.io resolves, is
+    # mail-capable, and is a completely unrelated company: "PHIShield —
+    # HIPAA-Safe X12 De-Identification" (PHI = Protected Health Information).
+    # The first cut told the reader to report it to its registrar. A live,
+    # branded site must therefore be framed verify-first, and the page's own
+    # title quoted so a human settles it in one second.
+    live = {"mail_capable": True, "serves_content": True, "similarity": 85,
+            "page_title": "PHIShield - HIPAA-Safe X12 De-Identification"}
+    _risk, rec = F._verdict(dict(live))
+    quotes_title = "PHIShield" in rec
+    verify_first = rec.lower().find("verify") < rec.lower().find("report")         if "report" in rec.lower() else True
+    ok_live = quotes_title and verify_first
+    if not ok_live:
+        failures.append(
+            f"lookalike_identity: recommendation for a live branded lookalike does "
+            f"not quote its title ({quotes_title}) or leads with 'report' rather "
+            f"than 'verify' ({verify_first}) — that tells a client to file an abuse "
+            "complaint against what may be a legitimate unrelated business")
+    print(f"  [{'PASS' if ok_live else 'FAIL'}] lookalike_identity:verify_first   "
+          f"quotes_title={quotes_title} verify_before_report={verify_first}")
+
     for label, entry, want in VERDICT_SCENARIOS:
         risk, rec = F._verdict(dict(entry))
         ok = (risk == want) and bool(rec)
@@ -1527,7 +1548,7 @@ def main():
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
           f"5 provider-budget + "
-          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 8} lookalike-posture + "
+          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 9} lookalike-posture + "
           f"3 table-header + "
           f"15 blocked-not-clean + 1 base-path + 2 balance-metering "
           "ground-truth scenarios")
