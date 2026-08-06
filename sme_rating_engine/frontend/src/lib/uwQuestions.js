@@ -5,11 +5,13 @@
  * printed in the PDF audit annexure — the two must never drift, or the annexure
  * would misstate the question a client answered.
  *
- * NOTE: `UNDERWRITING_QUESTIONS` in rating-data.js is NOT this list. It is a
- * verbatim copy of the legacy array, still on the pre-April-2026 numbering
- * (FP procedures at Q7.x, prior cover at Q9), unused for rendering and frozen
- * because the parity gate compares it against the legacy. Do not use it for
- * display and do not "fix" it.
+ * HISTORY: the legacy data layer had an `UNDERWRITING_QUESTIONS` array that was
+ * two renumberings out of date (Q1 as a single question, FP at Q7.x, prior cover
+ * at Q9) and was never referenced by the legacy app either. It used to be copied
+ * into rating-data.js and was an easy thing to mistake for the live list, so it
+ * is now excluded at generation time (tools/gen_rating_data.mjs EXCLUDE). It
+ * still exists in the frozen legacy `SME Rating Engine/sme-data.js`; do not
+ * resurrect it.
  *
  * `key` matches the uwAnswers key persisted to Postgres (quotes.uw_answers).
  */

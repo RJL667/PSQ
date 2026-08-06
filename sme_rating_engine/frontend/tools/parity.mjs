@@ -76,8 +76,12 @@ globalThis.__ENGINE__ = { state, calculatePremium, evaluateUW,
 globalThis.__DATA__ = { MARKET_CONDITION, MARKET_CONDITION_YEAR, MARKET_CONDITION_LABEL,
   REVENUE_BANDS, COVER_LIMITS, SME_PREMIUMS, PREMIUM_FORMULAS, MICRO_PREMIUMS,
   BASE_FP_BY_COVER, FP_COSTS, INDUSTRY_MODIFIERS, FINANCE_SUB_INDUSTRIES,
-  ITOO_BENCHMARKS, INDUSTRIES, COVER_AVAILABILITY, UNDERWRITING_QUESTIONS,
+  ITOO_BENCHMARKS, INDUSTRIES, COVER_AVAILABILITY,
   UNDERWRITING_LOADINGS, BROKER_COMMISSION, ADMIN_FEE_RATE };
+// UNDERWRITING_QUESTIONS is deliberately absent: it is dead in the legacy app
+// too and is no longer carried into rating-data.js (see tools/gen_rating_data.mjs
+// EXCLUDE). The live questionnaire wording lives in src/lib/uwQuestions.js and is
+// guarded by tools/check_uw_question_sync.mjs.
 globalThis.__FPFN__ = { getAvailableFPOptions, getBaseFPCost };
 `;
 vm.runInContext(dataSrc + '\n' + ratingSrc + '\n' + shim, sandbox, { filename: 'legacy.js' });

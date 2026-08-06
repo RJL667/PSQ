@@ -291,73 +291,8 @@ export const COVER_AVAILABILITY = [
 ];
 
 // ─── Underwriting Questions ────────────────────────────────────────────────────
-export const UNDERWRITING_QUESTIONS = [
-  {
-    id: "Q1",
-    text: "Does Your Business have an active, comprehensive, paid for internet security software installed on all computer systems?",
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-  {
-    id: "Q2",
-    text: "Data Back-Up",
-    isCompound: true,
-    subQuestions: [
-      { id: "Q2.1", text: "Do you back up your data on a weekly basis?" },
-      { id: "Q2.2", text: "Do you perform recovery testing at least once per year?" },
-    ],
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-  {
-    id: "Q3",
-    text: "Is your data stored separately from your main computer e.g. via the cloud or on an offline hard disk?",
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-  {
-    id: "Q4",
-    text: "Do you regularly update and patch your computers so that they always have the latest security patches installed?",
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-  {
-    id: "Q5",
-    text: "Are all the emails received and sent by your workplace computers and network checked for viruses/malware via an email filter?",
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-  {
-    id: "Q6",
-    text: "Are your employees regularly advised about the secure use of their workplace computer, especially regarding the dangers of using the internet/email?",
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-  {
-    id: "Q7",
-    text: "Do you have documented procedures in place for the following:",
-    isCompound: true,
-    subQuestions: [
-      { id: "Q7.1", text: "vetting of new vendors/customers/payees?" },
-      { id: "Q7.2", text: "to verify new beneficiaries loaded onto your business\u2019s banking profiles for funds transfers?" },
-      { id: "Q7.3", text: "to verify requests to amend existing beneficiary payment details?" },
-    ],
-    alwaysVisible: false,
-    fpDependent: true,  // Only active when FP > R250,000
-  },
-  {
-    id: "Q8",
-    text: "Do you utilise account verification services offered by your bank or third-party provider?",
-    alwaysVisible: false,
-    fpDependent: true,  // Only active when FP > R250,000
-  },
-  {
-    id: "Q9",
-    text: "Have you been covered for cyber liability risks in the last 12 months prior to the inception date of this policy?",
-    alwaysVisible: true,
-    fpDependent: false,
-  },
-];
+// UNDERWRITING_QUESTIONS intentionally NOT exported — dead in the legacy app,
+// superseded by src/lib/uwQuestions.js. See tools/gen_rating_data.mjs.
 
 // ─── Underwriting Loading Rules ────────────────────────────────────────────────
 // April 2026: scoreable pool is now Q2.1, Q2.2, Q3, Q4, Q5 — FIVE INDEPENDENT
