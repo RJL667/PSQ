@@ -285,7 +285,7 @@ doc.add_paragraph()
 
 ver = doc.add_paragraph()
 ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = ver.add_run("Version 2.1  |  August 2026\nConfidential \u2014 Internal Use Only")
+run = ver.add_run("Version 2.2  |  August 2026\nConfidential \u2014 Internal Use Only")
 run.font.size = Pt(10)
 run.font.color.rgb = PHISHIELD_GREY
 
@@ -1377,13 +1377,14 @@ doc.add_paragraph(
 )
 
 add_heading("7.5 Export Options", level=2)
-doc.add_paragraph("Three export options are available:")
+doc.add_paragraph("The following export options are available:")
 
-add_bold_para("Download PDF")
+add_bold_para("Download PDF / Download this PDF / Download All PDFs")
 doc.add_paragraph(
     "Generates a professional PDF document for each cover option. The PDF includes all client details, "
-    "underwriting summary, premium breakdown, conditions of cover, and Phishield branding. PDFs are "
-    "also saved to the backend database for record-keeping."
+    "underwriting summary, premium breakdown, conditions of cover, Phishield branding, and Annexure A "
+    "(see 7.6). In multi-cover mode each option has its own ‘Download this PDF’ button, and "
+    "‘Download All PDFs’ downloads every option in turn."
 )
 
 add_bold_para("Copy to Clipboard")
@@ -1398,10 +1399,67 @@ doc.add_paragraph(
     "as a PDF using the browser's built-in PDF printer."
 )
 
+add_bold_para("Save Quote")
+doc.add_paragraph(
+    "Writes the quote to the database explicitly. You rarely need this button, because every export "
+    "action above saves the quote as well (see below) — it is there for when you want to record "
+    "the quote without exporting anything."
+)
+
+add_heading("7.5.1 When a Quote Is Saved", level=3)
+doc.add_paragraph(
+    "August 2026 change. Previously a quote only reached the database when the user clicked "
+    "‘Save Quote’, so quotes that were downloaded and sent to a client were not always "
+    "recorded. Now ANY output action — Download PDF, Download this PDF, Download All PDFs, "
+    "Print Quote, or Copy to Clipboard — saves the quote as well as performing its own action."
+)
+make_table(
+    ["Action", "Saves the quote?"],
+    [
+        ["Reaching Step 5", "No — deliberate, so quotes still being adjusted do not clutter the records"],
+        ["Download PDF / Download this PDF / Download All PDFs", "Yes"],
+        ["Print Quote", "Yes"],
+        ["Copy to Clipboard", "Yes"],
+        ["Save Quote", "Yes"],
+    ]
+)
 add_tip_box(
-    "All quotes are automatically saved to the backend database when you reach Step 5. You do not need "
-    "to manually save. The quote reference number is your key for retrieving the quote later.",
-    "tip"
+    "Re-exporting the same quote does NOT create a duplicate. The quote reference is the key: exporting "
+    "again updates the existing record rather than adding a second one. So you can tweak and re-download "
+    "freely — the database keeps one current record per quote reference.",
+    "note"
+)
+add_tip_box(
+    "If a save fails (for example a network problem), a red message appears beneath the export buttons "
+    "reading ‘NOT SAVED’. Your PDF is still fine — click ‘Save failed — retry’ "
+    "to store the quote. If you do not see that message, the quote was saved.",
+    "important"
+)
+
+add_heading("7.6 Annexure A — Captured Underwriting Responses", level=2)
+doc.add_paragraph(
+    "August 2026 addition. Every quote PDF ends with an annexure page listing all fourteen underwriting "
+    "questions in the wording they were asked, together with the response captured for each. It exists so "
+    "underwriters and capturers can audit a quote without opening the database, and is an interim measure "
+    "until the quote store is merged into the ERP."
+)
+doc.add_paragraph("Each question shows one of three states:", style='List Bullet')
+doc.add_paragraph("Yes — the control is in place / the answer was affirmative", style='List Bullet')
+doc.add_paragraph("No — the answer was negative (highlighted so it is easy to spot when checking)", style='List Bullet')
+doc.add_paragraph(
+    "Not answered — the question was never put to the client. This is deliberately distinct from "
+    "‘No’: do not treat an unanswered question as a negative answer.", style='List Bullet')
+doc.add_paragraph(
+    "The annexure also records the endpoint security vendor / product, whether a prior claim was flagged, "
+    "and (where question 8 was answered Yes) the prior insurer and inception date. Where Funds Protect "
+    "cover does not exceed R250,000, questions 6 and 7 are shown as ‘Not applicable’ rather than "
+    "being omitted, so a reader can tell the difference between a question that was not asked and one that "
+    "is missing."
+)
+add_tip_box(
+    "The annexure is printed on its own page and repeats the company name, quote reference and cover "
+    "limit, so it remains identifiable if it is separated from the quote.",
+    "note"
 )
 
 doc.add_page_break()
@@ -1814,9 +1872,12 @@ faqs = [
     ),
     (
         "Where are my saved quotes stored?",
-        "All quotes are saved to a backend SQLite database automatically. Each quote has a unique reference "
-        "number (CPB-YYYYMMDD-NNNN). PDFs are stored in the quote_pdfs directory on the server, organised "
-        "by year, month, and company name."
+        "In a PostgreSQL database on the Phishield VM. A quote is written whenever you perform any export "
+        "action on Step 5 — download a PDF, print, copy to clipboard — or click ‘Save Quote’ "
+        "(see 7.5.1). Each quote has a unique reference number (CPB-YYYYMMDD-NNNN), and exporting the same "
+        "quote again updates that record rather than creating a duplicate. The full questionnaire responses, "
+        "premium breakdown and cover options are stored as data, not only inside the PDF. PDFs themselves "
+        "are kept in the quote_pdfs directory on the server, organised by year, month and company name."
     ),
     (
         "The page is not loading or looks broken.",
@@ -2125,6 +2186,18 @@ make_table(
          "The Step 1 ‘Condition of Cover’ banner now lists the Q1 baseline-control conditions as well "
          "as the Funds Protect ones, so the underwriter sees them at the point of answering; they also "
          "appear in the Step 4 underwriting panel, the Step 5 summary, and the quote-output PDF."],
+        ["2.2", "August 2026",
+         "Quote capture and audit. (1) A quote is now saved to the database by ANY export action on "
+         "Step 5 - Download PDF, Download this PDF, Download All PDFs, Print Quote or Copy to "
+         "Clipboard - in addition to the 'Save Quote' button. Previously only 'Save Quote' wrote to the "
+         "database, so quotes that were downloaded and issued to a client were not always recorded. "
+         "Reaching Step 5 does NOT save, by design, so quotes still being adjusted do not clutter the "
+         "records. Re-exporting the same quote updates the existing record instead of creating a "
+         "duplicate, and a failed save is now reported on screen rather than failing silently. (2) Every "
+         "quote PDF now ends with 'Annexure A - Underwriting Questionnaire - Captured Responses', "
+         "listing all fourteen questions and the captured Yes / No / Not answered, for underwriter and "
+         "capturer audit until the quote store is merged into the ERP. See sections 7.5.1 and 7.6. "
+         "No change to any rating logic, premium or underwriting rule."],
     ]
 )
 
