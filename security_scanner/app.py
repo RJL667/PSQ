@@ -545,9 +545,32 @@ def preflight():
 @require_api_key
 @rate_limited(_light_limiter)
 def dehashed_balance():
-    """Check Dehashed API credit balance without using a credit."""
+    """Dehashed credit balance, WITHOUT spending a credit to fetch it.
+
+    The docstring used to claim this was free. It was not: DeHashed publishes no
+    zero-cost balance endpoint, so this ran a real /v2/search — and the scan form
+    calls it on EVERY PAGE LOAD. With several testers refreshing, that quietly
+    became the largest consumer of the credit pool, and because it used raw
+    `requests` instead of the metered provider seam the spend never appeared in
+    the usage ledger (ledger ~17 vs 200+ actually billed).
+
+    Every genuine scan search already returns the balance, so serve that instead.
+    A live probe happens only when we have never seen one, and then at most once
+    per DEHASHED_BALANCE_TTL_S (default 12h) — so a page-refresh storm costs
+    nothing.
+    """
     if not DEHASHED_API_KEY:
         return jsonify({"status": "no_api_key", "balance": None})
+
+    import time as _t
+    from checkers_threats import last_dehashed_balance
+    _ttl = float(os.environ.get("DEHASHED_BALANCE_TTL_S", "43200"))
+    cached = last_dehashed_balance()
+    if cached.get("balance") is not None and (_t.time() - cached["at"]) < _ttl:
+        return jsonify({"status": "active", "balance": cached["balance"],
+                        "cached": True,
+                        "as_of_seconds_ago": int(_t.time() - cached["at"])})
+
     try:
         import requests as req
         r = req.post("https://api.dehashed.com/v2/search",
@@ -557,7 +580,13 @@ def dehashed_balance():
                      timeout=10)
         if r.status_code == 200:
             data = r.json()
-            return jsonify({"status": "active", "balance": data.get("balance")})
+            # We just paid for this one — cache it so the next page load, and
+            # every refresh for the next TTL, is free.
+            if data.get("balance") is not None:
+                from checkers_threats import record_dehashed_balance
+                record_dehashed_balance(int(data["balance"]), _t.time())
+            return jsonify({"status": "active", "balance": data.get("balance"),
+                            "cached": False})
         elif r.status_code == 401:
             return jsonify({"status": "inactive", "balance": None,
                             "error": r.json().get("error", "Auth failed")})

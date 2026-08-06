@@ -1096,6 +1096,61 @@ def _check_blocked_not_clean(failures):
 import re as _re
 
 
+def _check_balance_not_metered(failures):
+    """The credit indicator must not BE the biggest credit consumer.
+
+    DeHashed publishes no free balance endpoint, so /api/dehashed/balance ran a
+    real /v2/search — and the scan form calls it on every page load. With several
+    testers refreshing it quietly outspent the scans themselves, and because it
+    used raw requests instead of the provider seam the spend never reached the
+    usage ledger (ledger ~17 vs 200+ actually billed over the same period).
+    """
+    import importlib, time
+    os.environ["DEHASHED_API_KEY"] = os.environ.get("DEHASHED_API_KEY") or "x"
+    os.environ.setdefault("SCANNER_ALLOW_SQLITE", "1")
+    A = importlib.import_module("app")
+    ct_m = importlib.import_module("checkers_threats")
+
+    calls = {"n": 0}
+
+    class _Bal:
+        status_code = 200
+        def json(self):
+            return {"balance": 231, "entries": [], "total": 0}
+
+    def _post(*a, **kw):
+        calls["n"] += 1
+        return _Bal()
+
+    ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})
+    with mock.patch("requests.post", side_effect=_post), A.app.test_client() as c:
+        for _ in range(10):
+            c.get("/api/dehashed/balance")
+    ok = calls["n"] <= 1
+    if not ok:
+        failures.append(
+            f"balance_metering[page_loads]: 10 loads of the scan form performed "
+            f"{calls['n']} live DeHashed searches — the credit indicator must serve a "
+            "cached balance, not buy one per page view")
+    print(f"  [{'PASS' if ok else 'FAIL'}] balance_metering:10_page_loads      "
+          f"paid_searches={calls['n']}")
+
+    # a balance captured from a real scan must be served for free
+    ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})
+    ct_m.record_dehashed_balance(228, time.time())
+    before = calls["n"]
+    with mock.patch("requests.post", side_effect=_post), A.app.test_client() as c:
+        got = (c.get("/api/dehashed/balance").get_json() or {}).get("balance")
+    ok2 = (calls["n"] == before) and got == 228
+    if not ok2:
+        failures.append(
+            f"balance_metering[from_scan]: balance={got} extra_calls="
+            f"{calls['n'] - before} — a balance already returned by a real scan "
+            "search must be reused, not re-purchased")
+    print(f"  [{'PASS' if ok2 else 'FAIL'}] balance_metering:reuse_scan_balance "
+          f"balance={got} extra_paid={calls['n'] - before}")
+
+
 def _check_base_path_links(failures):
     src_dir = os.path.join(SEC, "frontend", "src")
     # (?!/) excludes protocol-relative "//cdn.example.com" while still matching
@@ -1262,6 +1317,7 @@ def main():
     _check_table_headers(failures)
     _check_blocked_not_clean(failures)
     _check_base_path_links(failures)
+    _check_balance_not_metered(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -1306,7 +1362,7 @@ def main():
           f"5 provider-budget + "
           f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS) + 6} lookalike-posture + "
           f"3 table-header + "
-          f"15 blocked-not-clean + 1 base-path "
+          f"15 blocked-not-clean + 1 base-path + 2 balance-metering "
           "ground-truth scenarios")
 
 

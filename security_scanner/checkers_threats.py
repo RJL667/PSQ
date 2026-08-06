@@ -1314,6 +1314,24 @@ def _mask_identifier(value: str) -> str:
     return (value[:2] + "***" + value[-1]) if len(value) > 2 else (value[0] + "***")
 
 
+# Last DeHashed balance seen on a REAL search, so the scan form's credit
+# indicator can be rendered for free. DeHashed publishes no zero-cost balance
+# endpoint — every /v2/search costs a credit — so the indicator used to burn one
+# per page load, and because it bypassed the provider seam those calls never
+# reached the usage ledger either (ledger showed ~17 while the account showed
+# 200+). Every genuine search already returns the balance; this just keeps it.
+_DEHASHED_BALANCE: dict = {"balance": None, "at": 0.0}
+
+
+def record_dehashed_balance(balance: int, at: float) -> None:
+    if balance is not None:
+        _DEHASHED_BALANCE.update({"balance": int(balance), "at": float(at)})
+
+
+def last_dehashed_balance() -> dict:
+    return dict(_DEHASHED_BALANCE)
+
+
 class DehashedChecker:
     """
     Queries Dehashed for credential leaks associated with the domain.
@@ -1431,6 +1449,17 @@ class DehashedChecker:
             data = r.json()
             entries = data.get("entries") or []
             total   = data.get("total", len(entries))
+
+            # Every real search response carries the remaining balance. Record
+            # it so the scan form can DISPLAY the balance without spending a
+            # credit to ask: DeHashed has no free balance endpoint, so the
+            # credit-indicator used to run a live search on every page load.
+            try:
+                if data.get("balance") is not None:
+                    import time as _t
+                    record_dehashed_balance(int(data["balance"]), _t.time())
+            except Exception:
+                pass
 
             result["total_entries"] = total
 
