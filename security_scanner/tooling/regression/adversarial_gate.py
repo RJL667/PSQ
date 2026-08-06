@@ -799,6 +799,73 @@ def _check_lookalike_posture(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] lookalike_verdict:{label[:30]:<32} {risk}")
 
 
+# (j) TABLE HEADERS MUST NOT BE ORPHANED. Reported from a real broker report:
+# the Regulatory Flag Audit header row sat alone at the foot of page 5 with its
+# body on page 6. ReportLab will happily split a table after row 0 unless
+# repeatRows is set; with it, a split that would leave only the repeat-rows is
+# refused outright, so the table moves whole to the next page AND the header
+# repeats on continuation pages. No table in the report set repeatRows.
+#
+# This asserts the LIBRARY behaviour we depend on (filler=39 reproduces the
+# split exactly on A4 with these margins) plus the fact that every header table
+# in the report actually sets it — the second half is what stops a new table
+# being added without it.
+def _check_table_headers(failures):
+    import io, re
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from pypdf import PdfReader
+
+    SS = getSampleStyleSheet()
+    ROWS = [["Flag", "BrokerInput", "AutoDetected", "Evidence"]] + \
+           [[f"rowmarker{i}", "No", "No", "evidence"] for i in range(1, 8)]
+
+    def orphans(repeat):
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm)
+        story = [Paragraph(f"Filler {i} " * 8, SS["BodyText"]) for i in range(39)]
+        t = Table(ROWS, colWidths=[45 * mm, 25 * mm, 28 * mm, 50 * mm],
+                  **({"repeatRows": 1} if repeat else {}))
+        t.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                               ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey)]))
+        story.append(t)
+        doc.build(story)
+        buf.seek(0)
+        pages = [p.extract_text() or "" for p in PdfReader(buf).pages]
+        h = next((i for i, p in enumerate(pages) if "AutoDetected" in p), None)
+        r = next((i for i, p in enumerate(pages) if "rowmarker1" in p), None)
+        return h is not None and r is not None and h != r
+
+    without, with_ = orphans(False), orphans(True)
+    ok = without and not with_
+    if not ok:
+        failures.append(
+            f"table_header[reportlab_behaviour]: orphan without repeatRows={without}, "
+            f"with={with_} — the fix depends on ReportLab refusing a split that "
+            "leaves only the header; if this stops reproducing, the guard below is "
+            "no longer sufficient")
+    print(f"  [{'PASS' if ok else 'FAIL'}] table_header:repeatRows_prevents_orphan  "
+          f"without={without} with={with_}")
+
+    # Every table styled with a bold row-0 header must set repeatRows.
+    for fn in ("pdf_cards.py", "pdf_report.py"):
+        src = open(os.path.join(SEC, fn), encoding="utf-8").read()
+        headers = len(re.findall(
+            r'"FONTNAME"\s*,\s*\(0,\s*0\)\s*,\s*\(-1,\s*0\)\s*,\s*"Helvetica-Bold"', src))
+        repeats = len(re.findall(r"repeatRows\s*=\s*1", src))
+        ok2 = repeats >= headers
+        if not ok2:
+            failures.append(
+                f"table_header[{fn}]: {headers} table(s) have a bold row-0 header but "
+                f"only {repeats} set repeatRows=1 — a header table without it can be "
+                "split after row 0, stranding the header at a page foot")
+        print(f"  [{'PASS' if ok2 else 'FAIL'}] table_header:{fn:<16} "
+              f"headers={headers} repeatRows={repeats}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -931,6 +998,7 @@ def main():
     _check_credential_failclosed(failures)
     _check_provider_budget(failures)
     _check_lookalike_posture(failures)
+    _check_table_headers(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -973,7 +1041,8 @@ def main():
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
           f"5 provider-budget + "
-          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS)} lookalike-posture "
+          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS)} lookalike-posture + "
+          f"3 table-header "
           "ground-truth scenarios")
 
 

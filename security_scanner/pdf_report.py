@@ -2376,7 +2376,7 @@ def generate_invoice_pdf(invoice: dict, line_items: list, client: dict) -> bytes
         ])
 
     col_widths = [INNER_W * 0.50, INNER_W * 0.12, INNER_W * 0.19, INNER_W * 0.19]
-    items_table = Table(rows, colWidths=col_widths)
+    items_table = Table(rows, colWidths=col_widths, repeatRows=1)
     items_style = [
         ("BACKGROUND", (0, 0), (-1, 0), C_NAVY),
         ("TEXTCOLOR", (0, 0), (-1, 0), C_WHITE),

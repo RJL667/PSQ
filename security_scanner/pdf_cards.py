@@ -2852,7 +2852,7 @@ def loss_exposure_scenarios_block(d, S):
                 prob_text = f"{prob_pct:.1f}%"
         table_data.append([label, f"{cur}{loss:,.0f}", prob_text])
 
-    table = Table(table_data, colWidths=col_widths)
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1, 0),   "Helvetica-Bold"),
         ("FONTSIZE",      (0, 0), (-1, -1),  9),
@@ -2947,7 +2947,7 @@ def risk_probability_block(d, S):
         ["Availability resilience (indicative)",
          f"{av.get('indicator_pct', 0):.0f}%", "Indicative"],
     ]
-    table = Table(table_data, colWidths=col_widths)
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
         ("FONTSIZE",      (0, 0), (-1, -1), 9),
@@ -3032,7 +3032,7 @@ def cover_ladder_block(d, S):
         ["Bad breach",            f"{cur}{bad.get('loss_zar', 0):,.0f}", "P95 severity"],
         ["Catastrophic breach",   f"{cur}{cat.get('loss_zar', 0):,.0f}", "1-in-250 / P99.6"],
     ]
-    table = Table(table_data, colWidths=col_widths)
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
         ("FONTSIZE",      (0, 0), (-1, -1), 9),
@@ -3293,7 +3293,7 @@ def peer_benchmark_card(results, S):
         ["SSL Grade",
             _fmt(own_ssl), "-", _fmt(ssl_mode), "-"],
     ]
-    comp_tbl = Table(comparison_data, colWidths=[60 * mm, 25 * mm, 25 * mm, 25 * mm, 25 * mm])
+    comp_tbl = Table(comparison_data, colWidths=[60 * mm, 25 * mm, 25 * mm, 25 * mm, 25 * mm], repeatRows=1)
     comp_tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
@@ -3492,7 +3492,7 @@ def flag_audit_panel(d, S):
     for r in table_data[1:]:
         wrapped_rows.append([r[0], r[1], r[2], Paragraph(r[3], evidence_style)])
 
-    table = Table(wrapped_rows, colWidths=col_widths)
+    table = Table(wrapped_rows, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1, 0),   "Helvetica-Bold"),
         ("FONTSIZE",      (0, 0), (-1, 0),   8),
@@ -3516,13 +3516,20 @@ def flag_audit_panel(d, S):
         "they reflect broker knowledge of context the scanner cannot observe "
         "(contractual exposures, EU customer relationships, etc.)."
     )
+    # KeepTogether on the whole panel: repeatRows alone stops the HEADER being
+    # orphaned, but the title and intro could still sit alone at a page foot
+    # with the table overleaf — which is how this was first reported. The panel
+    # is a fixed ~8 rows, so it always fits a page and KeepTogether cannot
+    # degrade into a blank page here.
     return [
         Spacer(1, 4 * mm),
-        Paragraph(title, S["cat_title"]),
-        Spacer(1, 2 * mm),
-        Paragraph(intro, S["body"]),
-        Spacer(1, 2 * mm),
-        table,
+        KeepTogether([
+            Paragraph(title, S["cat_title"]),
+            Spacer(1, 2 * mm),
+            Paragraph(intro, S["body"]),
+            Spacer(1, 2 * mm),
+            table,
+        ]),
         Spacer(1, 4 * mm),
     ]
 
@@ -3552,7 +3559,7 @@ def scan_duration_profile(results, S):
     table_data.append(["Sum (concurrent overlap)", f"{total:.1f}"])
     # Column widths: 130mm for checker name (atomic for "shodan_vulns:192.168.0.1"),
     # 30mm for seconds (atomic for "1234.56"). Rule #6 / #12 minimums.
-    table = Table(table_data, colWidths=[130 * mm, 30 * mm])
+    table = Table(table_data, colWidths=[130 * mm, 30 * mm], repeatRows=1)
     table.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1, 0),   "Helvetica-Bold"),
         ("FONTSIZE",      (0, 0), (-1, -1),  8),
