@@ -1,0 +1,15 @@
+# Built dashboard bundle — never line-ending-converted.
+#
+# The VM consumes static/dashboard/ byte-for-byte, and the deploy runbook
+# verifies "VM == brafter" by comparing sha256 against the committed blob.
+# With core.autocrlf=true on a Windows checkout and no .gitattributes, git
+# classified the minified bundle as text and rewrote LF -> CRLF during
+# `git archive`, so the artefact that reached the VM silently differed from
+# the one that was committed and reviewed — on every deploy, not just one.
+#
+# The 7 rewrites landed inside JavaScript template literals in React's
+# internals (component-stack splitting, `.replace(re, "\n")` normalisation),
+# which is exactly the kind of damage that stays invisible until it isn't.
+# -text disables both directions of conversion, so what is committed is what
+# ships and the sha256 check means something again.
+security_scanner/static/dashboard/** -text
