@@ -2534,6 +2534,139 @@ class FraudulentDomainChecker:
         except (socket.gaierror, socket.timeout, OSError):
             return False
 
+    # --- posture enrichment (SCN-042) ----------------------------------------
+    # "4 lookalikes resolve" is not actionable. What decides whether a
+    # lookalike is dangerous is whether it can SEND MAIL as you: a near-typo
+    # with working MX and no website is the classic credential-phishing setup,
+    # while a parked-for-sale domain with a null MX cannot email anyone.
+    # Ranking them lets a broker act on the one that matters instead of all of
+    # them equally.
+
+    # Nameservers that mean "this domain is parked / listed for sale".
+    _PARKING_NS = ("afternic", "sedoparking", "sedo.com", "dan.com", "bodis",
+                   "parkingcrew", "above.com", "undeveloped", "hugedomains",
+                   "namecheapparking", "parklogic")
+
+    @staticmethod
+    def _usable_mx(mx_raw):
+        """Split MX answers into (deliverable hosts, is_null_mx).
+
+        RFC 7505: a single ``0 .`` is a NULL MX — the domain declares it accepts
+        NO mail. Treating any non-empty MX list as "mail capable" labels such a
+        domain a phishing risk when it is explicitly the opposite. A first pass
+        at this made exactly that call on phshield.com, which publishes a null MX
+        AND ``v=spf1 -all``; it can neither receive nor send.
+        """
+        usable = []
+        for m in mx_raw:
+            parts = m.strip().split()          # "0 ." -> ["0", "."]
+            host = (parts[-1] if parts else "").rstrip(".")   # "." -> ""
+            if host:
+                usable.append(m)
+        return usable, (bool(mx_raw) and not usable)
+
+    @staticmethod
+    def _txt_spf(records) -> str:
+        for t in records:
+            s = t.strip().strip('"')
+            if s.lower().startswith("v=spf1"):
+                if s.endswith("-all"):
+                    return "hard-fail (-all)"
+                if s.endswith("~all"):
+                    return "soft-fail (~all)"
+                if s.endswith("?all"):
+                    return "neutral (?all)"
+                return "present"
+        return ""
+
+    def _enrich(self, entry: dict) -> dict:
+        """Add mail / hosting / content posture to one resolved lookalike."""
+        dom = entry["domain"]
+        try:
+            import dns.resolver
+            res = dns.resolver.Resolver()
+            res.lifetime = res.timeout = 5.0
+
+            def q(rtype):
+                try:
+                    return [r.to_text() for r in res.resolve(dom, rtype)]
+                except Exception:
+                    return []
+
+            mx_raw = q("MX")
+            mx, null_mx = self._usable_mx(mx_raw)
+            spf = self._txt_spf(q("TXT"))
+            ns = [n.lower() for n in q("NS")]
+            parked_ns = any(p in n for n in ns for p in self._PARKING_NS)
+
+            entry["mx_hosts"] = [m.split()[-1].rstrip(".") for m in mx][:4]
+            entry["mail_capable"] = bool(mx)
+            entry["null_mx"] = null_mx
+            entry["spf"] = spf
+            entry["nameservers"] = [n.rstrip(".") for n in ns][:2]
+            entry["listed_for_sale"] = parked_ns
+        except Exception:
+            entry["mail_capable"] = None      # unknown, not "no"
+
+        # One cautious HTTP look. Content is DATA: recorded for the reader,
+        # never followed or executed. Small timeout so a tarpit cannot stall
+        # the scan, and the body is only measured + title-extracted.
+        try:
+            r = HTTP.get(f"http://{dom}/", timeout=8, allow_redirects=True)
+            if r is not None:
+                body = (r.text or "")[:4000]
+                entry["http_status"] = r.status_code
+                low = body.lower()
+                title = ""
+                if "<title" in low:
+                    i = low.index("<title"); j = low.index(">", i) + 1
+                    k = low.find("</title>", j)
+                    title = body[j:k].strip()[:80] if k > j else ""
+                entry["page_title"] = title
+                entry["page_bytes"] = len(r.text or "")
+                entry["serves_content"] = (r.status_code < 400
+                                           and len(r.text or "") > 800)
+        except Exception:
+            pass
+
+        entry["risk"], entry["recommendation"] = self._verdict(entry)
+        return entry
+
+    @staticmethod
+    def _verdict(e: dict):
+        """Rank a lookalike and say what to do about it."""
+        sim = e.get("similarity", 0) or 0
+        mail = e.get("mail_capable")
+        serves = e.get("serves_content")
+        if mail and not serves:
+            # Mail configured but nothing published: the domain exists to send,
+            # not to be visited. Nearest-typo + this pattern is the one to act on.
+            return ("high",
+                    "Can send and receive email as this domain while publishing no "
+                    "website — the classic setup for phishing your staff, clients "
+                    "and brokers. Verify ownership; if it is not yours, report it to "
+                    "the registrar and add it to your mail-gateway block list.")
+        if mail and serves:
+            return ("high",
+                    "Mail-capable AND serving a live page — check the page for "
+                    "cloned branding. Report to the registrar if it impersonates "
+                    "you, and block the domain at your mail gateway.")
+        if e.get("listed_for_sale"):
+            return ("medium",
+                    "Parked and listed for sale. Cannot currently email, but anyone "
+                    "may buy it. Consider a defensive registration if the string is "
+                    "close to yours.")
+        if e.get("null_mx") or (mail is False and not serves):
+            return ("low",
+                    "Registered but cannot send or receive mail and publishes no "
+                    "real content. Monitor only.")
+        if serves:
+            return ("medium",
+                    "Serving content — review for cloned branding or misuse of your "
+                    "name.")
+        return ("low" if sim < 85 else "medium",
+                "Resolves but shows no mail or content capability. Monitor.")
+
     def check(self, domain: str) -> dict:
         result = {
             "status": "completed",
@@ -2573,7 +2706,36 @@ class FraudulentDomainChecker:
             # Sort by similarity descending
             resolved.sort(key=lambda x: x["similarity"], reverse=True)
             result["resolved_count"] = len(resolved)
-            result["fraudulent_domains"] = resolved[:20]  # cap display at 20
+            shown = resolved[:20]  # cap display at 20
+
+            # Enrich the closest ones with mail / hosting / content posture.
+            # Bounded deliberately: DNS is cheap but each domain also gets one
+            # HTTP fetch, and a target with dozens of lookalikes would otherwise
+            # add minutes. The top 8 by similarity are the ones anyone acts on.
+            ENRICH_CAP = 8
+            to_enrich = shown[:ENRICH_CAP]
+            if to_enrich:
+                with ThreadPoolExecutor(max_workers=4) as ex2:
+                    list(ex2.map(self._enrich, to_enrich))
+                result["enriched_count"] = len(to_enrich)
+                if len(shown) > ENRICH_CAP:
+                    # Never let a silent cap read as "the rest are fine".
+                    result["enrichment_capped"] = len(shown) - ENRICH_CAP
+            result["fraudulent_domains"] = shown
+
+            # Mail-capable lookalikes are the ones that can actually phish, so
+            # they are called out separately from the raw count. REPORTING ONLY —
+            # the score below is unchanged (still per-resolved-domain), so this
+            # adds no second scoring channel for the same signal.
+            mail_capable = [d["domain"] for d in to_enrich if d.get("mail_capable")]
+            if mail_capable:
+                result["mail_capable_domains"] = mail_capable
+                result["issues"].append(
+                    f"{len(mail_capable)} lookalike domain(s) can send email as your "
+                    f"brand ({', '.join(mail_capable[:3])}"
+                    + (", …" if len(mail_capable) > 3 else "")
+                    + ") — highest phishing risk; report to the registrar and block "
+                      "at your mail gateway.")
 
             if len(resolved) > 5:
                 result["issues"].append(

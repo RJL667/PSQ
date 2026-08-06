@@ -740,6 +740,65 @@ def _check_provider_budget(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] provider_budget:{label:<24} {ok}")
 
 
+# (i) LOOKALIKE POSTURE. "4 lookalikes resolve" is not actionable; what decides
+# danger is whether a domain can SEND MAIL as the client. Ground truth from the
+# real phishield.com self-scan (2026-08-06):
+#   phisheild.com  Namecheap PrivateEmail + 5 forwarders, Cloudflare  -> HIGH
+#   hishield.com   GoDaddy secureserver MX, 411-byte parking page     -> HIGH
+#   phshield.com   NULL MX ("0 .") + SPF -all, Afternic for-sale      -> NOT high
+#   pishield.com   no MX, 114-byte parking page                       -> LOW
+# The null-MX case is the trap: a first pass treated any non-empty MX answer as
+# mail-capable and labelled phshield.com a phishing risk, when RFC 7505 "0 ."
+# declares the exact opposite. Asserted offline so no scan or DNS is needed.
+MX_SCENARIOS = [
+    ("null mx",        ["0 ."],                        0, True),
+    ("real mx",        ["10 mx1.privateemail.com."],   1, False),
+    ("mixed",          ["0 .", "10 mx1.example.com."], 1, False),
+    ("absent",         [],                             0, False),
+]
+# (label, entry, expected risk)
+VERDICT_SCENARIOS = [
+    ("mail, no site (phisheild profile)",
+     {"mail_capable": True, "serves_content": False, "similarity": 89}, "high"),
+    ("mail + live site",
+     {"mail_capable": True, "serves_content": True, "similarity": 89}, "high"),
+    ("null mx, parked for sale (phshield profile)",
+     {"mail_capable": False, "null_mx": True, "listed_for_sale": True,
+      "serves_content": False, "similarity": 89}, "medium"),
+    ("no mail, parked (pishield profile)",
+     {"mail_capable": False, "null_mx": False, "serves_content": False,
+      "similarity": 89}, "low"),
+]
+
+
+def _check_lookalike_posture(failures):
+    import importlib
+    F = importlib.import_module("checkers_threats").FraudulentDomainChecker
+
+    for label, raw, want_usable, want_null in MX_SCENARIOS:
+        usable, null = F._usable_mx(raw)
+        ok = (len(usable) == want_usable) and (null == want_null)
+        if not ok:
+            failures.append(
+                f"lookalike_mx[{label}]: usable={len(usable)} null={null}, expected "
+                f"{want_usable}/{want_null} — RFC 7505 '0 .' means the domain accepts "
+                "NO mail; counting it as an MX host labels a harmless parked domain "
+                "a phishing risk")
+        print(f"  [{'PASS' if ok else 'FAIL'}] lookalike_mx:{label:<12} "
+              f"usable={len(usable)} null_mx={null}")
+
+    for label, entry, want in VERDICT_SCENARIOS:
+        risk, rec = F._verdict(dict(entry))
+        ok = (risk == want) and bool(rec)
+        if not ok:
+            failures.append(
+                f"lookalike_verdict[{label}]: risk={risk!r} expected {want!r} "
+                f"(recommendation present={bool(rec)}) — a mail-capable near-typo must "
+                "outrank a parked one, or the panel ranks by resemblance instead of "
+                "by what the domain can actually do")
+        print(f"  [{'PASS' if ok else 'FAIL'}] lookalike_verdict:{label[:30]:<32} {risk}")
+
+
 class _FakeKeyResp:                 # distinct from the techstack _FakeResp above
     def __init__(self, code):
         self.status_code = code
@@ -871,6 +930,7 @@ def main():
     _check_export_switch(failures)
     _check_credential_failclosed(failures)
     _check_provider_budget(failures)
+    _check_lookalike_posture(failures)
     _check_classification(failures)
     _check_cve_gating(failures)
     _check_techstack_eol(failures)
@@ -912,7 +972,8 @@ def main():
           f"{len(DATASTORE_SCENARIOS)} datastore-readiness + "
           f"{len(EXPORT_SWITCH_SCENARIOS)} export-switch + "
           f"{len(NON_CONCLUSIVE) * 2 + 11} credential-failclosed + "
-          f"5 provider-budget "
+          f"5 provider-budget + "
+          f"{len(MX_SCENARIOS) + len(VERDICT_SCENARIOS)} lookalike-posture "
           "ground-truth scenarios")
 
 
