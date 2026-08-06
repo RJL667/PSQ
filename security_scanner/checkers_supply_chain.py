@@ -193,9 +193,17 @@ class DependencyManifestChecker:
     def _probe(self, url: str):
         from http_client import HTTP
         head = HTTP.head(url, timeout=8, allow_redirects=False)
+        # Record what each probe met. Returning None for every non-200 is right
+        # for avoiding false positives, but it makes a WAF that refuses
+        # everything indistinguishable from a site with no exposed manifests —
+        # which then scores 100/100 for a dependency surface never examined.
+        if head is not None:
+            self._codes[head.status_code] = self._codes.get(head.status_code, 0) + 1
         if head is None or head.status_code != 200:
             return None
         r = HTTP.get(url, timeout=8, allow_redirects=False)
+        if r is not None and r.status_code != 200:
+            self._codes[r.status_code] = self._codes.get(r.status_code, 0) + 1
         if r is None or r.status_code != 200 or len(r.text) < 10:
             return None
         text_head = r.text.lower()[:300]
@@ -433,6 +441,7 @@ class DependencyManifestChecker:
             "issues": [],
         }
         base = f"https://{domain}"
+        self._codes = {}     # HTTP status -> count, across every manifest probe
 
         def _check_one(entry):
             path, ecosystem, parser_key, severity = entry
@@ -523,6 +532,24 @@ class DependencyManifestChecker:
                     "via OSV.dev across the leaked dependency map "
                     "(medium / low severity)"
                 )
+
+        result["probe_status_codes"] = dict(sorted(self._codes.items()))
+        # Every manifest path refused and nothing retrieved => we never looked at
+        # the dependency surface, so "no exposed manifests, 100/100" is a
+        # statement about the WAF. A real origin answers 404 for paths it does
+        # not host, so any non-blocking status proves it was talking to us.
+        _BLOCKING = {401, 403, 406, 409, 418, 429, 451, 503}
+        _n = sum(self._codes.values())
+        _answered = sum(k for c, k in self._codes.items() if c not in _BLOCKING)
+        if _n and not result["exposed_manifests"] and _answered == 0:
+            result["status"] = "unreachable"
+            result["http_status"] = max(self._codes, key=self._codes.get)
+            result["unreachable_reason"] = (
+                f"Exposed dependency manifests could not be assessed — all {_n} "
+                f"probes were refused by a WAF/CDN (HTTP "
+                f"{', '.join(str(c) for c in sorted(self._codes))}). No verdict on "
+                f"a leaked dependency map is implied.")
+            result.pop("score", None)
 
         return result
 

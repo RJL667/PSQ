@@ -60,7 +60,19 @@ for mod in MODULES:
         if len(required) != 1:
             results.append((mod.__name__, name, "n/a", f"needs {len(required)} args"))
             continue
-        patches = [mock.patch.object(m, "HTTP", create=True) for m in MODULES]
+        # Patch EVERY provider client the checker modules import, not just HTTP.
+        # Patching HTTP alone produced false BLIND verdicts for checkers that go
+        # through CRTSH / INTERNETDB / TRANCO etc. — the real calls went out, and
+        # the empty result looked like blindness when the checker actually
+        # handles refusal correctly (SubdomainChecker sets low_coverage,
+        # ShodanVulnChecker sets error). Verified against those two.
+        import providers as _prov
+        _names = [n for n in dir(_prov) if n.isupper() and not n.startswith("_")]
+        patches = []
+        for m in MODULES:
+            for n in ["HTTP"] + _names:
+                if hasattr(m, n) or n == "HTTP":
+                    patches.append(mock.patch.object(m, n, create=True))
         try:
             with mock.patch("http_client.HTTP") as H, \
                  mock.patch("requests.get", side_effect=fake), \
