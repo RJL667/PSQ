@@ -229,14 +229,36 @@ class WAFTracker:
                           evidence=f"Challenge page detected ({challenges[0]})")
             return result
         blocked_count = sum(codes.get(c, 0) for c in (403, 406, 451))
-        rate_limited = sum(codes.get(c, 0) for c in (429, 503))
+        # 429 and 503 both stop us seeing the site, but they are NOT the same
+        # claim. 429 Too Many Requests is a deliberate policy refusing us. 503
+        # Service Unavailable is far more often an origin out of capacity --
+        # PHP-FPM pool exhausted, MaxRequestWorkers hit, queue saturated -- and
+        # our own concurrent probing is a common cause of it.
+        #
+        # excellentmeat.co.za, 2026-08-06: 7x503 + 13x200 on the 4th scan of the
+        # day, against 19/20 = 200 with zero 503s ninety minutes earlier. A WAF
+        # rate-limiting rule is persistent configuration; it does not appear and
+        # disappear between scans. Lumping the two under one "waf_" kind asserted
+        # a control that is not in evidence.
+        throttled = codes.get(429, 0)          # deliberate: a policy said no
+        overloaded = codes.get(503, 0)         # ambiguous: capacity, or a control
+        rate_limited = throttled + overloaded
         if blocked_count / n >= 0.40:
             result.update(blocked=True, kind="waf_blocked",
                           evidence=f"{blocked_count} of {n} probes returned 403/406/451")
             return result
         if rate_limited / n >= 0.25:
-            result.update(blocked=True, kind="waf_rate_limited",
-                          evidence=f"{rate_limited} of {n} probes rate-limited (429/503)")
+            # Coverage is degraded either way, so `blocked` still fires and the
+            # affected checkers still report honestly. Only the KIND differs, and
+            # only the deliberate one may be offered as evidence of a control.
+            deliberate = throttled >= overloaded
+            result.update(
+                blocked=True,
+                kind="waf_rate_limited" if deliberate else "origin_overloaded",
+                evidence=(f"{throttled} of {n} probes rate-limited (429)"
+                          if deliberate else
+                          f"{overloaded} of {n} probes returned 503 — the origin ran "
+                          f"out of capacity, which is not evidence of a security control"))
             return result
         if timeouts / n >= 0.50:
             result.update(blocked=True, kind="waf_timeout",
@@ -523,9 +545,31 @@ class HttpClient:
         None  = no response at all — treat as blind
         """
         r = self.get(f"https://{domain}/", timeout=timeout)
-        if r is None:
-            return None
-        return r.status_code not in self.REFUSAL_CODES
+        if r is not None:
+            return r.status_code not in self.REFUSAL_CODES
+        # No response at all. That is NOT a refusal: a timeout under our own
+        # scan load says nothing about whether the origin talks to us, and
+        # defaulting to "walled off" here re-creates the very false-blindness
+        # this control was added to remove. excellentmeat.co.za scan f0313b6a
+        # hit exactly this -- the root probe timed out while the same scan
+        # collected 13x200, 25x404 and a 301 from the same host.
+        return True if self.apex_answered(domain) else None
+
+    def apex_answered(self, domain: str) -> bool:
+        """Did this apex return ANY non-refusal status so far in this scan?
+
+        Read from the WAF tracker, which every request already feeds, so it
+        costs nothing and reflects the whole scan rather than one probe.
+        """
+        st = self.waf_tracker.status(_apex_of(f"https://{domain}/"))
+        for code, count in (st.get("codes") or {}).items():
+            try:
+                code = int(code)
+            except (TypeError, ValueError):
+                continue
+            if code not in self.REFUSAL_CODES and count:
+                return True
+        return False
 
     def hard_blocked(self, apex_or_url: str, min_samples: int = 8) -> bool:
         """True when an apex shows SUSTAINED WAF blocking. Conservative: requires at

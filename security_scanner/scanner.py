@@ -1393,7 +1393,17 @@ class SecurityScanner:
         )
         results["_scan_completeness"]["refusal_blinded_checkers"] = _refused_blind
 
-        if waf_apex_status.get("blocked") or _refused_blind:
+        # ...but an origin that ran OUT OF CAPACITY is not a security control.
+        # `blocked` fires for 503 too (coverage really is degraded, and the
+        # affected checkers must still say so), yet 503 is what a server does
+        # when its worker pool is exhausted — frequently by our own concurrent
+        # probing. Offering that as evidence of protective filtering invents a
+        # control from a symptom we caused. Deliberate refusals (403/406/451,
+        # 429, a challenge page) are evidence; capacity exhaustion is not.
+        _apex_kind = waf_apex_status.get("kind")
+        _deliberate_block = (bool(waf_apex_status.get("blocked"))
+                             and _apex_kind != "origin_overloaded")
+        if _deliberate_block or _refused_blind:
             # The WAF card itself contradicted this page. WAFChecker decides
             # `detected` purely from VENDOR SIGNATURES (headers, cookies, Server
             # token) — body matching was removed because it produced phantom

@@ -3584,7 +3584,13 @@ class InformationDisclosureChecker:
             probed = sum(_codes.values())
             blocked = sum(n for c, n in _codes.items() if c in BLOCKING)
             ctl = result.get("control_status")
-            origin_answering = ctl is not None and ctl not in BLOCKING
+            if ctl is not None:
+                origin_answering = ctl not in BLOCKING
+            else:
+                # The root fetch got no response. A failed probe is not a
+                # refusal, so fall back to what the rest of the scan already
+                # proved about this host rather than assuming the worst.
+                origin_answering = HTTP.apex_answered(domain)
             if origin_answering and probed and blocked == probed:
                 result["sensitive_paths_denied"] = probed
                 result["issues"].append(

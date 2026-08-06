@@ -1191,6 +1191,64 @@ def _check_blocked_not_clean(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] denied_not_blind:{name:<16} "
               f"ordinary={got['ordinary']} denied={got['denied']} walled={got['walled']}")
 
+    # --- round 4: a failed probe is not a refusal; 503 is not a control -----
+    # Two defects in round 3, both found on live traffic (excellentmeat.co.za
+    # scan f0313b6a, 4th scan of that domain in one day):
+    #
+    #  (a) the control probe TIMED OUT under our own scan load, and returning
+    #      None for that meant "walled off" -- re-creating the exact false
+    #      blindness the control was added to remove, on a scan where the same
+    #      host answered 13x200, 25x404 and a 301.
+    #  (b) the apex went blocked=True kind=waf_rate_limited on 7x503, so the
+    #      WAF card announced "protective filtering present". 503 is what a
+    #      server returns when its worker pool is exhausted, frequently because
+    #      of us. 429 is a policy refusing us; 503 is a symptom we caused.
+    hc = importlib.import_module("http_client")
+
+    def _apex(code, n_bad, n_ok=13, total_dom="x.co"):
+        t = hc.WAFTracker()
+        for _ in range(n_bad):
+            t.record(total_dom, code)
+        for _ in range(n_ok):
+            t.record(total_dom, 200)
+        return t
+
+    for label, code, want_kind, want_control in (
+        ("429 policy throttle", 429, "waf_rate_limited",  True),
+        ("503 capacity",        503, "origin_overloaded", False),
+    ):
+        st = _apex(code, 7).status("x.co")
+        kind = st.get("kind")
+        deliberate = bool(st.get("blocked")) and kind != "origin_overloaded"
+        ok = (kind == want_kind) and (deliberate == want_control)
+        if not ok:
+            failures.append(
+                f"rate_limit_kind[{label}]: kind={kind!r} counts_as_control={deliberate}, "
+                f"expected {want_kind!r}/{want_control} — 503 is capacity exhaustion, "
+                "not evidence of a security control, and must not put 'protective "
+                "filtering present' on the WAF card")
+        print(f"  [{'PASS' if ok else 'FAIL'}] rate_limit_kind:{label:<21} "
+              f"kind={kind} control={deliberate}")
+
+    # A control probe that got NO RESPONSE must consult the rest of the scan.
+    for label, apex_code, want in (
+        ("apex answered 200s", 200, True),
+        ("apex all refused",   403, None),
+    ):
+        t = hc.WAFTracker()
+        for _ in range(20):
+            t.record("y.co", apex_code)
+        c = hc.HttpClient(waf_tracker=t)
+        with mock.patch.object(c, "get", return_value=None):
+            got = c.origin_answering("y.co")
+        ok = got is want
+        if not ok:
+            failures.append(
+                f"control_fallback[{label}]: origin_answering={got!r} expected {want!r} "
+                "— a timed-out control probe is not a refusal; when the apex tracker "
+                "already shows the origin answering, the clean result is still earned")
+        print(f"  [{'PASS' if ok else 'FAIL'}] control_fallback:{label:<19} {got}")
+
     # ...and the phantom WAF that the false blindness produced. With no checker
     # left blinded and an apex that never blocked, nothing may claim blocking.
     _wafc = {"detected": False, "waf_name": None}

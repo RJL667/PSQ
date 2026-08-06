@@ -142,6 +142,39 @@ def build(doc):
         "is credited, and a genuine absence of a WAF is still charged for.",
     )
 
+    add_bold_body(doc, "Rate limiting is not a web application firewall", "")
+
+    add_body(
+        doc,
+        "A related question comes up whenever a scan slows down: the target "
+        "started refusing requests part-way through, so does it have a firewall? "
+        "Usually not. Rate limiting is available from an ordinary web server "
+        "(nginx and Apache both ship it), from the application framework, from "
+        "shared-hosting defaults, and from any load balancer. It is a protection, "
+        "but it is not evidence of a web application firewall specifically, and "
+        "the report does not treat it as one.",
+    )
+
+    add_body(
+        doc,
+        "The response code separates the two cases, and the scanner now "
+        "distinguishes them. HTTP 429, Too Many Requests, is a deliberate policy "
+        "declining to serve us and is recorded as such. HTTP 503, Service "
+        "Unavailable, usually means the origin ran out of capacity - its worker "
+        "pool was exhausted - and a busy assessment is itself a common cause. "
+        "The second is a symptom, frequently one the scan provoked, so it "
+        "reduces coverage and is reported honestly as reduced coverage, but it "
+        "is never offered as evidence that a security control exists.",
+    )
+
+    add_warning(
+        doc,
+        "Repeated scans of the same domain in quick succession can provoke this "
+        "on smaller sites and will degrade the result. Where several assessments "
+        "of one target are needed, space them out rather than running them "
+        "back to back.",
+    )
+
     # 6.1 Full Technical Report ---------------------------------------- #
     add_h2(doc, "6.1 Full Technical Report")
 
