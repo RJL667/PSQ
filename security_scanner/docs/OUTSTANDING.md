@@ -210,6 +210,68 @@ fixture (`test_fixtures/takealot_baseline.json`) from a fresh scan, then re-run
 | 5k | **Fresh-dump content-fetch (credit-gated tier)** | **Partial — done 2026-06-02:** the encrypted export now includes IntelX stealer-log postings as date-ordered `leak_reference` rows with a `match_type`→`confidence` label (`credential_export.py`; Manual §6.4). **Still open:** the **content-fetch tier** — on explicit client request, pull the named dump BODY (IntelX selector/view, costs credits) to confirm whether a real credential was exposed vs just a `History/` visit. The free listing classifies by path but cannot read the contents. |
 | 5L | **Confidence-gate the p(breach) / RSI input (scoring decision — NOT done)** | Open, **calibration-gated** (scoring-change rule). The export/dashboard now expose a `match_type`→`confidence` model, but the *score* does not yet use it: a recent LOW-confidence reference (aggregated index, browser-History visit) can still pull credential signals the same as a HIGH-confidence password capture. Decision to make: gate any p(breach)/RSI uplift on HIGH-confidence (or content-fetch-confirmed) evidence, so low-confidence freshness alone does not inflate the probability. Builds on the §6 "Credential-risk scoring calibration" ticket. **Cat model is unaffected — this is purely the p(breach) input.** Until decided, the disclaimer + content-fetch prompt (5k) is the interim control. **Design pre-read for the 2026-06-03 FIN-9 calibration session: `docs/credential_confidence_pbreach_design.md`** (current wiring, the model, the K1-K7 calibration knobs, and the empirical anchors that set them). |
 
+### 5m. UI screening test — validate every dashboard display against the PDF/scoring path (NEW, 2026-08-06)
+
+**The gap.** The React dashboard is a SECOND rendering path over the same scan
+results, and it has never been validated against the first. The PDF/scoring path
+is well gated: `pdf_snapshot.py` (byte-level render baseline), `golden.py`
+(scoring regression), `adversarial_gate.py` (now 100+ ground-truth scenarios),
+plus the financial-wiring verifiers. The dashboard has almost none of that —
+`tsc --noEmit`, a base-path link check, and the recently added built-bundle
+prefix check. Nothing asserts that what the dashboard SAYS about a scan matches
+what the PDF says about the same scan.
+
+**Why this is now a named gap.** Three separate defects in ~36 hours, all of the
+same shape — a rule taught to one layer and not the others:
+
+1. **WAF `blocking_observed` (fixed `583dcca`).** Added to the scorer in
+   `ba6b380`; NO renderer learned it. The PDF plain-language summary, the PDF
+   category card, the RemediationSimulator recommendation list and the dashboard
+   panel all still read `waf.detected` alone, so a site that refused 20 of 20
+   probes was told it had "no protective filter, leaving it directly exposed".
+2. **Risk Factors roll-up (`selectors.ts` `getRiskFactors`, OPEN).** Each
+   dimension averages the `score` field of its categories, but several checkers
+   (`exposed_admin`, `payment_security`, `vpn_remote`, `dns_infrastructure`,
+   `high_risk_protocols`, `cloud_cdn`, `security_policy`, `waf`) never emit a
+   per-category `score` at all — their contribution is computed downstream in
+   `scoring_analytics`. The roll-up silently averages whatever subset happens to
+   carry the field, while the label still claims the full dimension. Observed on
+   excellentmeat.co.za `f0313b6a`: **Data Protection ran on 1 of 4 categories**
+   (privacy_compliance=0, i.e. "no compliant privacy policy page found") and
+   rendered "Critical +100"; **Network Exposure ran on 1 of 4** (shodan_vulns=100)
+   and rendered **green "Low"**. A green verdict resting on one signal is the
+   dangerous direction — nobody challenges green.
+3. **Base-path build (fixed `5cdbaa9`).** The bundle shipped without
+   `SCANNER_BASE_PATH`, so every dashboard API call missed the Caddy mount. The
+   page still rendered and the timer still ticked, so a completed scan sat at
+   "0 / 39 Scanning" indefinitely.
+
+**Deferred deliberately, not overlooked.** The dashboard sits behind the demo
+edge auth (§0) and the PDF is the client deliverable, so the exposure is
+currently internal. That is what makes this schedulable rather than urgent.
+
+**What the screening test should do** — for every display element in the
+dashboard, trace what drives it and assert it agrees with the PDF/scoring path
+for the same scan:
+
+- Enumerate each panel/field and record its data source (category, derived
+  selector, or computed-in-frontend), so "computed in the frontend" is a visible
+  category rather than an accident. `getRiskFactors` and `getAttackPath` are
+  known frontend-side derivations; there may be others.
+- For a fixture scan, diff every dashboard-rendered verdict against the
+  corresponding PDF statement. Any divergence is either a bug or a documented
+  deliberate difference — currently there is no record of which.
+- Assert coverage honesty per dimension: show the denominator ("1 of 4
+  assessed"), and do not render green where the underlying coverage is thin.
+- Add whatever survives as gate scenarios, so the dashboard gets the same
+  "does not silently degrade" guarantee the PDF has.
+
+**Also open from the same review:** the `+xx` impact figure reads as an additive
+contribution to a score but is only `100 - dimension_score` (a display-only
+inversion; the five values summed to 326 on a scan whose overall risk score was
+251). Relabel. And "Data Protection" is currently driven by privacy-policy
+presence, which the name does not convey.
+
 ## 6. Architectural follow-ups (low priority)
 
 | Item | Status |
