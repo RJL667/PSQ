@@ -647,13 +647,93 @@ export interface RiskFactorRow {
   total: number
 }
 
-const FACTOR_MAP: Array<{ key: string; label: string; categories: string[] }> = [
+/** A dimension may take its verdict from the SAME field the PDF card reads,
+ *  instead of averaging category scores.
+ *
+ *  The PDF is the scrutinised artefact; this panel has no counterpart in it.
+ *  So where the PDF already states a verdict, the dashboard must show THAT
+ *  verdict rather than compute a parallel one — otherwise the two can, and do,
+ *  disagree about the same scan. */
+type VerdictSource = (r: Results) => Pick<
+  RiskFactorRow, 'score' | 'severity' | 'riskLabel' | 'topContributor' | 'impact' | 'assessed' | 'total'
+> | null
+
+const FACTOR_MAP: Array<{
+  key: string; label: string; categories: string[]; verdictFrom?: VerdictSource
+}> = [
   { key: 'network', label: 'Network Exposure', categories: ['dns_infrastructure', 'high_risk_protocols', 'shodan_vulns', 'cloud_cdn'] },
   { key: 'appsec', label: 'Application Security', categories: ['website_security', 'http_headers', 'waf'] },
   { key: 'data', label: 'Data Protection', categories: ['privacy_compliance', 'payment_security', 'exposed_admin', 'info_disclosure'] },
-  { key: 'cred', label: 'Credential Security', categories: ['dehashed', 'breaches', 'email_security'] },
+  {
+    key: 'cred', label: 'Credential Security',
+    categories: ['dehashed', 'breaches', 'email_security'],
+    verdictFrom: credentialVerdict,
+  },
   { key: 'hardening', label: 'System Hardening', categories: ['ssl', 'email_hardening', 'security_policy', 'vpn_remote'] },
 ]
+
+/** Credential Security, read from `credential_risk` — the field the PDF's
+ *  Credential Risk card uses (`risk_level`, `risk_score`/100,
+ *  `active_compromise`, `factors`).
+ *
+ *  Averaging dehashed + breaches + email_security was wrong twice over:
+ *
+ *  1. `dehashed.score` has NO validated consumer. RiskScorer reads
+ *     `credential_risk.pbreach_contribution`; the PDF reads `credential_risk`.
+ *     Nothing else in the product reads `dehashed.score` at all — it is a raw
+ *     volume penalty that caps at 0 for any domain with a large corpus,
+ *     regardless of whose accounts they are.
+ *  2. It averaged an unrelated signal in. Email authentication posture is not
+ *     credential exposure; it sits in the same dimension only by grouping.
+ *
+ *  takealot.com is the demonstration. The PDF says CRITICAL, backed by
+ *  33 infected employee devices and an active compromise. The roll-up said
+ *  avg(dehashed 0, email_security 9) = 4 "Critical" — the right answer for
+ *  entirely the wrong reason — and once the 0..10 scale bug was fixed it became
+ *  avg(0, 90) = 45 "High", contradicting the PDF for the same scan.
+ *
+ *  Reading the PDF's own field makes that class of disagreement unrepresentable,
+ *  and inherits its fail-closed handling of an unassessed credential estate. */
+function credentialVerdict(r: Results): ReturnType<VerdictSource> {
+  const cr = cat(r, 'credential_risk')
+  if (!cr) return null
+
+  const level = String(cr.risk_level ?? '').toUpperCase()
+  // Same gate as the PDF card: UNKNOWN or assessed:false is NOT a verdict.
+  if (!level || level === 'UNKNOWN' || cr.assessed === false) {
+    return {
+      score: null, severity: 'unknown', riskLabel: 'Not assessed',
+      topContributor: '—', impact: null, assessed: 0, total: 1,
+    }
+  }
+
+  const BANDS: Record<string, { severity: Severity; label: string }> = {
+    CRITICAL: { severity: 'critical', label: 'Critical' },
+    HIGH: { severity: 'high', label: 'High' },
+    MEDIUM: { severity: 'medium', label: 'Moderate' },
+    LOW: { severity: 'positive', label: 'Low' },
+    NONE: { severity: 'positive', label: 'Low' },
+  }
+  const band = BANDS[level] ?? BANDS.LOW
+  const score = typeof cr.risk_score === 'number' ? cr.risk_score : null
+
+  // An active compromise is the single most consequential thing the classifier
+  // reports, and the PDF gives it its own row. Surface it rather than letting
+  // the band label carry it alone.
+  const factors = (cr.factors as string[] | undefined) ?? []
+  const contributor = cr.active_compromise
+    ? 'Active compromise — immediate action'
+    : (factors[0] ?? 'Credential risk assessment')
+
+  return {
+    score, severity: band.severity, riskLabel: band.label,
+    topContributor: contributor,
+    impact: score != null ? 100 - score : null,
+    // One authoritative source, so there is no partial-coverage question here:
+    // the classifier already fails closed when its own inputs are unavailable.
+    assessed: 1, total: 1,
+  }
+}
 
 /** Categories whose `score` is 0..10, not 0..100.
  *
@@ -676,7 +756,12 @@ const toPercent = (id: string, score: number): number =>
 
 export function getRiskFactors(r: Results | null): RiskFactorRow[] {
   if (!r) return []
-  return FACTOR_MAP.map(({ key, label, categories }) => {
+  return FACTOR_MAP.map(({ key, label, categories, verdictFrom }) => {
+    // Where the PDF already states a verdict for this dimension, show THAT.
+    // Computing a parallel one is how the two ended up disagreeing.
+    const authoritative = verdictFrom?.(r)
+    if (authoritative) return { key, label, ...authoritative }
+
     const scored: Array<{ id: string; score: number }> = []
     for (const id of categories) {
       const c = cat(r, id)

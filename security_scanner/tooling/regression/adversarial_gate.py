@@ -1704,6 +1704,35 @@ def _check_score_scale_agreement(failures):
     print(f"  [{'PASS' if ok else 'FAIL'}] score_scale:frontend_matches_checkers  "
           f"declared={sorted(declared)} actual={sorted(actual)}")
 
+    # --- the dashboard must not invent a verdict the PDF already states -----
+    # The PDF is the scrutinised artefact and this panel has no counterpart in
+    # it, so where the PDF states a verdict the dashboard must show THAT one.
+    # Credential Security used to average dehashed + breaches + email_security;
+    # `dehashed.score` has no validated consumer anywhere (RiskScorer reads
+    # credential_risk.pbreach_contribution, the PDF card reads credential_risk),
+    # and email authentication posture is not credential exposure at all.
+    #
+    # Measured across the 14 most recent scans: agreement with the PDF card went
+    # 8/14 -> 14/14. The one that mattered most was phishield.com on 2026-08-06,
+    # where credentials were never assessed (dehashed: no_api_key) and the panel
+    # rendered a green "Low / 100%".
+    reads_cr = "credentialVerdict" in sel and "credential_risk" in sel
+    if not reads_cr:
+        failures.append(
+            "score_scale[cred_source]: Credential Security no longer reads "
+            "credential_risk — the dashboard is computing a parallel verdict to the "
+            "one the PDF card states, which is how the two came to disagree")
+    print(f"  [{'PASS' if reads_cr else 'FAIL'}] score_scale:cred_reads_pdf_field   {reads_cr}")
+
+    # ...and it must fail closed exactly as the PDF card does.
+    fails_closed = "'UNKNOWN'" in sel and "assessed === false" in sel
+    if not fails_closed:
+        failures.append(
+            "score_scale[cred_failclosed]: the credential verdict does not gate on "
+            "UNKNOWN / assessed:false, so an unassessed credential estate can render "
+            "as a verdict — the PDF card refuses to")
+    print(f"  [{'PASS' if fails_closed else 'FAIL'}] score_scale:cred_fails_closed     {fails_closed}")
+
     # ...and the roll-up must actually apply it.
     applies = "toPercent" in sel and "TEN_POINT_CATEGORIES.has" in sel
     if not applies:
