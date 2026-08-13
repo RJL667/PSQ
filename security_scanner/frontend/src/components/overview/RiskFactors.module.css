@@ -23,7 +23,11 @@
 .barFill { height: 100%; border-radius: 4px; transition: width .5s ease; }
 
 .riskLabel { font-size: 11.5px; font-weight: 600; white-space: nowrap; text-align: right; min-width: 56px; }
-.impact, .score { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; min-width: 44px; }
+/* Deliberately quiet: it qualifies the verdict rather than competing with it,
+   but it has to be visible enough that a one-of-four dimension cannot pass for
+   a full one. */
+.coverage { font-size: 10.5px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.impact, .score { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; }
 .contributor {
   font-size: 11.5px; color: var(--text-secondary); text-align: right;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;

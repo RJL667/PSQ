@@ -33,7 +33,19 @@ export default function RiskFactors({ r }: { r: Results }) {
       <div className={styles.list}>
         {factors.map((f) => (
           <div className={styles.row} key={f.key}>
-            <div className={styles.label}>{f.label}</div>
+            {/* Show the denominator. A dimension is defined over up to four
+                categories but only conclusive ones are averaged, so
+                "Network Exposure — Low" can rest on a single checker while
+                reading as a verdict on all four. Green on thin coverage is the
+                dangerous direction: nobody challenges green. */}
+            <div className={styles.label}>
+              {f.label}
+              {f.assessed < f.total && (
+                <span className={styles.coverage} title={`${f.assessed} of ${f.total} categories in this dimension produced a verdict`}>
+                  {' '}{f.assessed}/{f.total} assessed
+                </span>
+              )}
+            </div>
             <div className={styles.barWrap}>
               <div className={styles.barTrack}>
                 <div className={styles.barFill} style={{
@@ -45,7 +57,14 @@ export default function RiskFactors({ r }: { r: Results }) {
             {view === 'impact' && (
               <>
                 <span className={styles.riskLabel} style={{ color: SEVERITY_COLOR[f.severity] }}>{f.riskLabel}</span>
-                <span className={styles.impact}>{f.impact != null ? `+${f.impact}` : '—'}</span>
+                {/* NOT a "+N" contribution to any score. It is 100 - the bar
+                    beside it, i.e. the remaining risk in this dimension. The
+                    leading plus read as additive: on one scan the five values
+                    summed to 326 while the overall score was 251, which relates
+                    to nothing. */}
+                <span className={styles.impact} title="Remaining risk in this dimension (100 minus the score shown by the bar). Not added to the overall score.">
+                  {f.impact != null ? `${f.impact} left` : '—'}
+                </span>
               </>
             )}
             {view === 'underwriting' && (
@@ -63,7 +82,7 @@ export default function RiskFactors({ r }: { r: Results }) {
       <div className={styles.footnote}>
         {view === 'technical'
           ? 'Top contributor per dimension, from completed checkers.'
-          : 'Dimension scores are a deterministic roll-up of category scores (higher = safer); impact = remaining risk.'}
+          : 'Dimension scores are a deterministic roll-up of category scores (higher = safer). "N left" is the remaining risk in that dimension (100 minus the bar), not a contribution to the overall score. Where fewer categories produced a verdict than the dimension covers, the count is shown.'}
       </div>
     </Panel>
   )

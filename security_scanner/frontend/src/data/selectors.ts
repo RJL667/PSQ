@@ -641,6 +641,10 @@ export interface RiskFactorRow {
   topContributor: string
   /** 0..100 share of remaining risk this dimension represents */
   impact: number | null
+  /** categories in this dimension that produced a verdict */
+  assessed: number
+  /** categories the dimension is defined over */
+  total: number
 }
 
 const FACTOR_MAP: Array<{ key: string; label: string; categories: string[] }> = [
@@ -651,16 +655,40 @@ const FACTOR_MAP: Array<{ key: string; label: string; categories: string[] }> = 
   { key: 'hardening', label: 'System Hardening', categories: ['ssl', 'email_hardening', 'security_policy', 'vpn_remote'] },
 ]
 
+/** Categories whose `score` is 0..10, not 0..100.
+ *
+ *  EmailSecurityChecker._calculate_score starts at 10 and deducts;
+ *  EmailHardeningChecker returns min(score, 10). Both land in the same
+ *  `score` field as every other category, which is 0..100.
+ *
+ *  RiskScorer knows this and rescales explicitly
+ *  (`inv((score / 10) * 100)`), so the overall risk score and the PDF are
+ *  correct. This roll-up did not, and averaged the two scales together: a
+ *  9-out-of-10 email posture counted as 9-out-of-100. On takealot.com that
+ *  rendered Credential Security as avg(dehashed 0, email_security 9) = 4
+ *  "Critical" instead of avg(0, 90) = 45 "High", and System Hardening as
+ *  avg(ssl 95, email_hardening 5) = 50 "High" instead of 73 "Moderate".
+ *  It understated those two dimensions for every client. */
+const TEN_POINT_CATEGORIES = new Set(['email_security', 'email_hardening'])
+
+const toPercent = (id: string, score: number): number =>
+  TEN_POINT_CATEGORIES.has(id) ? score * 10 : score
+
 export function getRiskFactors(r: Results | null): RiskFactorRow[] {
   if (!r) return []
   return FACTOR_MAP.map(({ key, label, categories }) => {
     const scored: Array<{ id: string; score: number }> = []
     for (const id of categories) {
       const c = cat(r, id)
-      if (c && typeof c.score === 'number' && isConclusive(c)) scored.push({ id, score: c.score })
+      if (c && typeof c.score === 'number' && isConclusive(c)) {
+        scored.push({ id, score: toPercent(id, c.score) })
+      }
     }
     if (!scored.length) {
-      return { key, label, score: null, severity: 'unknown', riskLabel: 'Not assessed', topContributor: '—', impact: null }
+      return {
+        key, label, score: null, severity: 'unknown', riskLabel: 'Not assessed',
+        topContributor: '—', impact: null, assessed: 0, total: categories.length,
+      }
     }
     const avg = Math.round(scored.reduce((n, s) => n + s.score, 0) / scored.length)
     const worst = scored.slice().sort((a, b) => a.score - b.score)[0]
@@ -670,6 +698,11 @@ export function getRiskFactors(r: Results | null): RiskFactorRow[] {
       key, label, score: avg, severity: sev, riskLabel,
       topContributor: CATEGORY_LABELS[worst.id] ?? worst.id,
       impact: 100 - avg,
+      // How much of the dimension actually produced a verdict. A dimension
+      // resting on one of four categories is not the same claim as one resting
+      // on all four, and the label alone cannot tell them apart.
+      assessed: scored.length,
+      total: categories.length,
     }
   })
 }

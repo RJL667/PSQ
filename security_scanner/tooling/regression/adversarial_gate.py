@@ -1642,6 +1642,89 @@ def _check_dehashed_credit_guards(failures):
         import shutil as _sh; _sh.rmtree(_tmp, ignore_errors=True)
 
 
+def _check_score_scale_agreement(failures):
+    """The dashboard must know which category scores are 0..10, not 0..100.
+
+    EmailSecurityChecker._calculate_score starts at 10 and deducts;
+    EmailHardeningChecker returns min(score, 10). Both write to the same
+    `score` field as every other category, which is 0..100. RiskScorer knows
+    and rescales explicitly (`inv((score / 10) * 100)`), so the overall score
+    and the PDF are right. getRiskFactors did not, and averaged the two scales
+    together -- a 9-out-of-10 email posture counted as 9-out-of-100.
+
+    Measured on takealot.com (score 144, 100% coverage):
+        Credential Security  avg(dehashed 0, email_security 9)  = 4  Critical
+                        vs   avg(0, 90)                         = 45 High
+        System Hardening     avg(ssl 95, email_hardening 5)     = 50 High
+                        vs   avg(95, 50)                        = 72 Moderate
+
+    This asserts the two sides AGREE. A third 0..10 checker added later must be
+    declared in the frontend set, or this fails -- which is the whole point,
+    because the failure mode is silent and understates a client's posture.
+    """
+    import re as _re3, importlib as _il3
+    sel = open(os.path.join(SEC, "frontend", "src", "data", "selectors.ts"),
+               encoding="utf-8").read()
+    m = _re3.search(r"TEN_POINT_CATEGORIES\s*=\s*new Set\(\[([^\]]*)\]", sel)
+    declared = set(_re3.findall(r"'([^']+)'", m.group(1))) if m else set()
+
+    # Ground truth from the checkers themselves: score them with PERFECT input
+    # and see what the maximum actually is.
+    cc3 = _il3.import_module("checkers_core")
+    actual = set()
+    try:
+        good_spf = {"present": True, "valid": True, "all_qualifier": "-all",
+                    "dangerous": False, "dns_lookups": 3, "exceeds_lookup_limit": False,
+                    "has_redirect": False, "record": "v=spf1 -all"}
+        good_dmarc = {"present": True, "policy": "reject", "pct": 100,
+                      "partial_enforcement": False, "subdomain_policy": "reject",
+                      "has_reporting": True, "record": "v=DMARC1; p=reject"}
+        good_dkim = {"selectors_found": ["default"]}
+        sc, _ = cc3.EmailSecurityChecker()._calculate_score(good_spf, good_dmarc, good_dkim)
+        if sc <= 10:
+            actual.add("email_security")
+    except Exception as e:
+        print(f"  [WARN] could not score EmailSecurityChecker: {e}")
+    try:
+        sc, _ = cc3.EmailHardeningChecker()._calculate_score(
+            {"present": True, "mode": "enforce"}, {"present": True, "has_vmc": True},
+            {"present": True}, {"present": True, "rua": "x"})
+        if sc <= 10:
+            actual.add("email_hardening")
+    except Exception as e:
+        print(f"  [WARN] could not score EmailHardeningChecker: {e}")
+
+    ok = declared == actual and bool(actual)
+    if not ok:
+        failures.append(
+            f"score_scale[agreement]: frontend declares {sorted(declared)} as 0..10 but the "
+            f"checkers actually max at 10 for {sorted(actual)} — the roll-up will average a "
+            "0..10 score against 0..100 ones and silently understate that dimension for "
+            "every client")
+    print(f"  [{'PASS' if ok else 'FAIL'}] score_scale:frontend_matches_checkers  "
+          f"declared={sorted(declared)} actual={sorted(actual)}")
+
+    # ...and the roll-up must actually apply it.
+    applies = "toPercent" in sel and "TEN_POINT_CATEGORIES.has" in sel
+    if not applies:
+        failures.append(
+            "score_scale[applied]: TEN_POINT_CATEGORIES is declared but getRiskFactors "
+            "does not rescale with it")
+    print(f"  [{'PASS' if applies else 'FAIL'}] score_scale:rollup_applies_it        {applies}")
+
+    # The coverage denominator must reach the row, or a 1-of-4 dimension still
+    # renders as a full verdict -- and green on thin coverage is never questioned.
+    rf = open(os.path.join(SEC, "frontend", "src", "components", "overview",
+                           "RiskFactors.tsx"), encoding="utf-8").read()
+    shows = "assessed" in rf and "f.total" in rf
+    if not shows:
+        failures.append(
+            "score_scale[coverage_shown]: the Risk Factors row does not show how many "
+            "categories produced a verdict, so a dimension resting on one checker reads "
+            "as a verdict on all of them")
+    print(f"  [{'PASS' if shows else 'FAIL'}] score_scale:coverage_denominator     {shows}")
+
+
 def _check_scan_target_input(failures):
     """Two ways the scan target goes wrong before a single checker runs.
 
@@ -1935,6 +2018,7 @@ def main():
     _check_base_path_links(failures)
     _check_scan_target_input(failures)
     _check_dehashed_credit_guards(failures)
+    _check_score_scale_agreement(failures)
     _check_balance_not_metered(failures)
     _check_hibp_and_waf_evidence(failures)
     _check_classification(failures)
