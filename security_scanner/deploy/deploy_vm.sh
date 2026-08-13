@@ -64,12 +64,20 @@ fi
 #                          would overwrite the server's real history
 #   _dehashed_balance.json cached credit balance; a stale copy would rewind the
 #                          displayed count and trigger a needless paid refresh
+#   _dehashed_cache/       per-domain DeHashed results. A dev machine's copy would
+#                          POISON the server cache: a local smoke run against
+#                          takealot.com cached a 5-record answer, which would then
+#                          have served as a hit in place of the real 263,469. It
+#                          also carries real breached email addresses, so it must
+#                          never travel in a tarball or a commit.
 tar -xzf "$TARBALL" -C "$APP_ROOT" \
     --exclude='security_scanner/.env' \
     --exclude='security_scanner/.env.*' \
     --exclude='security_scanner/secrets.env' \
     --exclude='security_scanner/scans/_dehashed_balance.json' \
     --exclude='security_scanner/scans/_dehashed_balance_history.jsonl' \
+    --exclude='security_scanner/scans/_dehashed_cache' \
+    --exclude='security_scanner/scans/_dehashed_cache/*' \
     --exclude='security_scanner/scans/_objstore' \
     --exclude='security_scanner/scans/_objstore/*'   # -> $APP_ROOT/security_scanner
 echo "   code at $APP_DIR"

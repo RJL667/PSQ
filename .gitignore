@@ -51,3 +51,4 @@ security_scanner/preview_scans.db
 # stale one from a dev machine or a test run.
 security_scanner/scans/_dehashed_balance.json
 security_scanner/scans/_dehashed_balance_history.jsonl
+security_scanner/scans/_dehashed_cache/
