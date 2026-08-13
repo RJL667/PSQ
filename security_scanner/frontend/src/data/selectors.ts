@@ -710,7 +710,7 @@ function credentialVerdict(r: Results): ReturnType<VerdictSource> {
   const BANDS: Record<string, { severity: Severity; label: string }> = {
     CRITICAL: { severity: 'critical', label: 'Critical' },
     HIGH: { severity: 'high', label: 'High' },
-    MEDIUM: { severity: 'medium', label: 'Moderate' },
+    MEDIUM: { severity: 'medium', label: 'Medium' },
     LOW: { severity: 'positive', label: 'Low' },
     NONE: { severity: 'positive', label: 'Low' },
   }
@@ -751,6 +751,15 @@ function credentialVerdict(r: Results): ReturnType<VerdictSource> {
  *  It understated those two dimensions for every client. */
 const TEN_POINT_CATEGORIES = new Set(['email_security', 'email_hardening'])
 
+/** Worst-first ordering, and the PDF's own band words. The dashboard used to
+ *  say "Moderate" where the PDF card says "MEDIUM" -- the same verdict under
+ *  two names, which is the small end of the same divergence problem. */
+const SEVERITY_RANK: Severity[] = ['positive', 'medium', 'high', 'critical']
+const SEVERITY_LABEL: Record<string, string> = {
+  positive: 'Low', medium: 'Medium', high: 'High', critical: 'Critical',
+  unknown: 'Not assessed',
+}
+
 const toPercent = (id: string, score: number): number =>
   TEN_POINT_CATEGORIES.has(id) ? score * 10 : score
 
@@ -777,8 +786,21 @@ export function getRiskFactors(r: Results | null): RiskFactorRow[] {
     }
     const avg = Math.round(scored.reduce((n, s) => n + s.score, 0) / scored.length)
     const worst = scored.slice().sort((a, b) => a.score - b.score)[0]
-    const sev: Severity = avg >= 75 ? 'positive' : avg >= 55 ? 'medium' : avg >= 35 ? 'high' : 'critical'
-    const riskLabel = avg >= 75 ? 'Low' : avg >= 55 ? 'Moderate' : avg >= 35 ? 'High' : 'Critical'
+
+    // A dimension is as weak as its weakest member. Averaging is wrong for a
+    // risk summary: a confirmed open FTP port does not become acceptable
+    // because three sibling checks were clean. `_severity` is stamped during
+    // scan assembly by card_severity.py -- the SAME rule the PDF card uses --
+    // so the two artefacts cannot disagree about one scan.
+    const stamped = categories
+      .map((id) => cat(r, id)?._severity as Severity | undefined)
+      .filter((v): v is Severity => !!v && v !== 'unknown')
+    const sev: Severity = stamped.length
+      ? SEVERITY_RANK.reduce((acc, s) => (stamped.includes(s) ? s : acc), 'positive' as Severity)
+      : (avg >= 75 ? 'positive' : avg >= 55 ? 'medium' : avg >= 35 ? 'high' : 'critical')
+    // Band vocabulary matches the PDF exactly (CRITICAL / HIGH / MEDIUM / LOW),
+    // so the same posture is never called two different things.
+    const riskLabel = SEVERITY_LABEL[sev]
     return {
       key, label, score: avg, severity: sev, riskLabel,
       topContributor: CATEGORY_LABELS[worst.id] ?? worst.id,

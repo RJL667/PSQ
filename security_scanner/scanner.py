@@ -1393,6 +1393,26 @@ class SecurityScanner:
         )
         results["_scan_completeness"]["refusal_blinded_checkers"] = _refused_blind
 
+        # Stamp each category with the SAME severity its PDF card renders.
+        #
+        # The dashboard's dimension roll-up previously averaged whatever `score`
+        # fields happened to exist, which several categories do not have at all.
+        # On takealot.com that produced a green "Network Exposure - Low" from
+        # shodan_vulns alone, while the PDF's DNS card was RED for a confirmed
+        # open FTP port the panel could not see. Computing the verdict once,
+        # here, is what stops the two artefacts disagreeing about one scan --
+        # replicating the rules in the frontend would just re-create the fault.
+        try:
+            from card_severity import category_severity
+            for _cid, _cdata in cat_results.items():
+                if not isinstance(_cdata, dict):
+                    continue
+                _sev = category_severity(_cid, _cdata)
+                if _sev is not None:
+                    _cdata["_severity"] = _sev
+        except Exception:
+            pass      # a display aid must never fail a scan
+
         # ...but an origin that ran OUT OF CAPACITY is not a security control.
         # `blocked` fires for 503 too (coverage really is degraded, and the
         # affected checkers must still say so), yet 503 is what a server does

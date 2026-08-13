@@ -1754,6 +1754,132 @@ def _check_score_scale_agreement(failures):
     print(f"  [{'PASS' if shows else 'FAIL'}] score_scale:coverage_denominator     {shows}")
 
 
+def _check_card_severity_equivalence(failures):
+    """card_severity must render the SAME verdict the PDF card renders.
+
+    The dashboard's Risk Factors panel has no counterpart in the PDF, and it
+    used to average whatever `score` fields happened to exist. Several
+    categories have no `score` at all, and each PDF card computes its own
+    traffic light from that category's NATIVE fields -- open ports, exposed
+    services, a grade letter, a compliance percentage.
+
+    takealot.com: the panel showed a GREEN "Network Exposure - Low" drawn from
+    shodan_vulns alone, while the PDF's DNS card was RED for a confirmed open
+    FTP port (vsFTPd 3.0.5). The finding existed, was rendered in the PDF, and
+    was invisible in the dashboard.
+
+    The severity is now computed once in card_severity.py, stamped onto each
+    category during scan assembly, and read by the dashboard. This asserts the
+    module still agrees with what pdf_cards ACTUALLY does, by rendering each
+    real card and intercepting the colour it chose. If someone edits a card's
+    traffic light without editing card_severity, this fails.
+    """
+    import importlib as _il4
+    ph4 = _il4.import_module("pdf_helpers")
+    pc4 = _il4.import_module("pdf_cards")
+    cs4 = _il4.import_module("card_severity")
+
+    COL2SEV = {str(ph4.C_GREEN): "positive", str(ph4.C_AMBER): "medium",
+               str(ph4.C_RED): "high", str(ph4.C_CRITICAL): "critical",
+               str(ph4.C_GREY_4): "unknown"}
+    CASES = {
+        ("dns_infrastructure", "cat_dns"): [
+            {"status": "completed", "open_ports": []},
+            {"status": "completed", "open_ports": [{"port": 80, "service": "H", "risk": "low"},
+                                                   {"port": 443, "service": "S", "risk": "low"},
+                                                   {"port": 8080, "service": "P", "risk": "low"}]},
+            {"status": "completed", "open_ports": [{"port": 21, "service": "FTP", "risk": "high"}]},
+        ],
+        ("shodan_vulns", "cat_shodan"): [
+            {"status": "completed", "critical_count": 0, "high_count": 0, "medium_count": 0, "low_count": 0},
+            {"status": "completed", "critical_count": 0, "high_count": 0, "medium_count": 2, "low_count": 0},
+            {"status": "completed", "critical_count": 0, "high_count": 1, "medium_count": 0, "low_count": 0},
+            {"status": "completed", "critical_count": 1, "high_count": 0, "medium_count": 0, "low_count": 0},
+        ],
+        ("website_security", "cat_website"): [{"status": "completed", "score": v} for v in (100, 60, 20)],
+        ("http_headers", "cat_headers"):     [{"status": "completed", "score": v} for v in (100, 60, 20)],
+        ("waf", "cat_waf"): [
+            {"status": "completed", "detected": True, "waf_name": "Cloudflare"},
+            {"status": "completed", "detected": False, "blocking_observed": True},
+            {"status": "completed", "detected": False},
+        ],
+        ("privacy_compliance", "cat_privacy_compliance"): [
+            {"status": "completed", "compliance_pct": 90, "policy_found": True},
+            {"status": "completed", "compliance_pct": 60, "policy_found": True},
+            {"status": "completed", "compliance_pct": 10, "policy_found": True},
+            {"status": "completed", "compliance_pct": 0, "policy_found": False},
+        ],
+        ("payment_security", "cat_payment"): [
+            {"status": "completed"},
+            {"status": "completed", "has_payment_page": True, "payment_page_https": False},
+            {"status": "completed", "self_hosted_payment_form": True},
+        ],
+        ("exposed_admin", "cat_admin"): [
+            {"status": "completed", "critical_count": 0, "high_count": 0, "exposed": []},
+            {"status": "completed", "critical_count": 0, "high_count": 2, "exposed": []},
+            {"status": "completed", "critical_count": 1, "high_count": 0, "exposed": []},
+        ],
+        ("info_disclosure", "cat_info_disclosure"): [
+            {"status": "completed", "score": v, "exposed_paths": []} for v in (100, 70, 10)],
+        ("ssl", "cat_ssl"): [{"status": "completed", "grade": g} for g in ("A+", "C", "F")],
+        ("email_hardening", "cat_email_hardening"): [{"status": "completed", "score": v} for v in (10, 5, 1)],
+        ("security_policy", "cat_security_policy"): [
+            {"status": "completed", "security_txt": {"present": True}},
+            {"status": "completed", "security_txt": {"present": False}},
+        ],
+        ("vpn_remote", "cat_vpn"): [
+            {"status": "completed", "vpn_detected": True},
+            {"status": "completed", "vpn_detected": False},
+            {"status": "completed", "rdp_exposed": True},
+        ],
+    }
+
+    S = ph4.build_styles()
+    checked = mismatched = 0
+    for (cat_id, fn_name), cases in CASES.items():
+        card = getattr(pc4, fn_name, None)
+        if card is None:
+            failures.append(f"card_severity[{cat_id}]: pdf_cards.{fn_name} not found")
+            continue
+        for data in cases:
+            seen = {}
+            orig = pc4.build_cat_card
+
+            def spy(title, col, status, rows, issues, S_, **kw):
+                seen["col"] = col
+                return orig(title, col, status, rows, issues, S_, **kw)
+
+            pc4.build_cat_card = spy
+            try:
+                card({cat_id: data}, S)
+            except Exception:
+                pc4.build_cat_card = orig
+                continue
+            pc4.build_cat_card = orig
+            pdf_sev = COL2SEV.get(str(seen.get("col")))
+            mine = cs4.category_severity(cat_id, data)
+            checked += 1
+            if pdf_sev != mine:
+                mismatched += 1
+                failures.append(
+                    f"card_severity[{cat_id}]: PDF card renders {pdf_sev!r} but "
+                    f"card_severity says {mine!r} for {data} — the dashboard would show "
+                    "a different verdict from the PDF for the same scan")
+    ok = mismatched == 0 and checked > 30
+    print(f"  [{'PASS' if ok else 'FAIL'}] card_severity:matches_pdf_cards    "
+          f"{checked} branches, {mismatched} mismatched")
+
+    # ...and a dimension takes its WORST member, never an average.
+    w = cs4.worst_severity(["positive", "positive", "high", "positive"])
+    ok_w = w == "high"
+    if not ok_w:
+        failures.append(
+            f"card_severity[worst]: worst_severity returned {w!r} for a group containing "
+            "a high finding — a dimension must be as weak as its weakest member, or a "
+            "confirmed exposure is averaged away by clean siblings")
+    print(f"  [{'PASS' if ok_w else 'FAIL'}] card_severity:dimension_is_worst  {w}")
+
+
 def _check_scan_target_input(failures):
     """Two ways the scan target goes wrong before a single checker runs.
 
@@ -2048,6 +2174,7 @@ def main():
     _check_scan_target_input(failures)
     _check_dehashed_credit_guards(failures)
     _check_score_scale_agreement(failures)
+    _check_card_severity_equivalence(failures)
     _check_balance_not_metered(failures)
     _check_hibp_and_waf_evidence(failures)
     _check_classification(failures)
