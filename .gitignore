@@ -50,3 +50,4 @@ security_scanner/preview_scans.db
 # ship in a deploy tarball — it would overwrite the VM's live value with a
 # stale one from a dev machine or a test run.
 security_scanner/scans/_dehashed_balance.json
+security_scanner/scans/_dehashed_balance_history.jsonl

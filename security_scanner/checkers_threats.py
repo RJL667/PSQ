@@ -1367,11 +1367,86 @@ import json as _json
 
 _BALANCE_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                               "scans", "_dehashed_balance.json")
+# Append-only observation log. The latest-value file answers "what is the
+# balance"; this answers "where did it go", which is the question that actually
+# comes up and the one we could not answer on 2026-08-13.
+_BALANCE_HISTORY_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                      "scans", "_dehashed_balance_history.jsonl")
+
+# Per-domain DeHashed result cache. Breach corpora move on the order of weeks;
+# a rescan of the same domain hours or days later pays full price for a byte
+# identical answer. VERIFIED WASTE: rbs.co.za was scanned on 2026-08-11 and
+# again on 2026-08-13 and returned exactly the same 455 records / 61 unique
+# emails / identical source list, billed both times.
+#
+# Durable rather than in-process: the service restarts often enough that an
+# in-memory cache would be wiped between scans, which is the same mistake the
+# balance cache originally made.
+_DH_CACHE_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                              "scans", "_dehashed_cache")
+DEHASHED_CACHE_TTL_S = float(_os.environ.get("DEHASHED_CACHE_TTL_S", 7 * 86400))
 
 
-def record_dehashed_balance(balance: int, at: float) -> None:
+def _dh_cache_path(domain: str) -> str:
+    import hashlib as _hl
+    key = _hl.sha256((domain or "").strip().lower().encode()).hexdigest()[:32]
+    return _os.path.join(_DH_CACHE_DIR, key + ".json")
+
+
+def dehashed_cache_get(domain: str):
+    """Cached DeHashed payload for `domain`, or None when absent/stale/disabled."""
+    if DEHASHED_CACHE_TTL_S <= 0:
+        return None
+    try:
+        import time as _t
+        with open(_dh_cache_path(domain), encoding="utf-8") as f:
+            ent = _json.load(f)
+        if (_t.time() - float(ent.get("at", 0))) > DEHASHED_CACHE_TTL_S:
+            return None
+        return ent.get("result")
+    except Exception:
+        return None
+
+
+def dehashed_cache_put(domain: str, result: dict) -> None:
+    """Cache a CONCLUSIVE result only.
+
+    Caching an error, an exhausted quota or an unfunded lookup would pin a
+    non-answer in place for the whole TTL and hide a provider outage behind a
+    stale hit -- the same absence-of-evidence failure this codebase keeps
+    removing elsewhere.
+    """
+    if DEHASHED_CACHE_TTL_S <= 0 or not isinstance(result, dict):
+        return
+    if result.get("status") != "completed":
+        return
+    try:
+        import time as _t
+        _os.makedirs(_DH_CACHE_DIR, exist_ok=True)
+        tmp = _dh_cache_path(domain) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump({"at": _t.time(), "domain": domain, "result": result}, f)
+        _os.replace(tmp, _dh_cache_path(domain))
+    except Exception:
+        pass
+
+
+def record_dehashed_balance(balance: int, at: float, *, source: str = "") -> None:
+    """Persist the latest balance AND append it to a history log.
+
+    Only the latest value used to be kept, which made every retrospective credit
+    question unanswerable. On 2026-08-13 the balance moved 98 -> 77 -> 76 and
+    working out which call spent what took a day of inference, because there was
+    no record of the individual movements. An append-only line per observation
+    costs nothing and turns that into one query.
+
+    Deliberately a JSONL sidecar rather than a DB table: it must survive a
+    datastore switch, it is written from the scan hot path, and it must never
+    fail a scan. Same best-effort contract as the latest-value file.
+    """
     if balance is None:
         return
+    prev = _DEHASHED_BALANCE.get("balance")
     _DEHASHED_BALANCE.update({"balance": int(balance), "at": float(at)})
     try:
         _os.makedirs(_os.path.dirname(_BALANCE_FILE), exist_ok=True)
@@ -1379,6 +1454,17 @@ def record_dehashed_balance(balance: int, at: float) -> None:
             _json.dump(_DEHASHED_BALANCE, f)
     except Exception:
         pass          # persistence is best-effort; never break a scan for it
+    try:
+        with open(_BALANCE_HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({
+                "at": round(float(at), 3),
+                "balance": int(balance),
+                # The delta is the whole point: it attributes spend to a call.
+                "delta": (int(balance) - int(prev)) if prev is not None else None,
+                "source": source or "unknown",
+            }) + "\n")
+    except Exception:
+        pass
 
 
 def last_dehashed_balance() -> dict:
@@ -1460,6 +1546,14 @@ class DehashedChecker:
             result["status"] = "no_api_key"
             return result
 
+        # Cache first: a repeat scan of the same domain within the TTL must not
+        # spend a credit for an answer we already hold.
+        _cached = dehashed_cache_get(domain)
+        if _cached is not None:
+            out = dict(_cached)
+            out["cached"] = True
+            return out
+
         # Try v2 API first (POST + API key header)
         r = DEHASHED.post(
             self.API_URL_V2,
@@ -1520,7 +1614,8 @@ class DehashedChecker:
             try:
                 if data.get("balance") is not None:
                     import time as _t
-                    record_dehashed_balance(int(data["balance"]), _t.time())
+                    record_dehashed_balance(int(data["balance"]), _t.time(),
+                                            source=f"scan:{domain}")
             except Exception:
                 pass
 
@@ -1654,6 +1749,9 @@ class DehashedChecker:
             result["status"] = "error"
             result["error"] = str(e)
 
+        # Cache only a conclusive answer (enforced inside dehashed_cache_put),
+        # so an outage or an exhausted quota can never be pinned in place.
+        dehashed_cache_put(domain, result)
         return result
 
 

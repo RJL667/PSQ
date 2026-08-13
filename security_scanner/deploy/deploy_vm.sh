@@ -60,6 +60,8 @@ fi
 # does NOT protect a tarball -- a local test run recreates the file and `tar`
 # happily includes it -- so the guarantee has to live here, at extract time.
 #   scans/_objstore        generated PDFs + one-time export blobs
+#   _dehashed_balance_history.jsonl  append-only credit-spend log; a tarball copy
+#                          would overwrite the server's real history
 #   _dehashed_balance.json cached credit balance; a stale copy would rewind the
 #                          displayed count and trigger a needless paid refresh
 tar -xzf "$TARBALL" -C "$APP_ROOT" \
@@ -67,6 +69,7 @@ tar -xzf "$TARBALL" -C "$APP_ROOT" \
     --exclude='security_scanner/.env.*' \
     --exclude='security_scanner/secrets.env' \
     --exclude='security_scanner/scans/_dehashed_balance.json' \
+    --exclude='security_scanner/scans/_dehashed_balance_history.jsonl' \
     --exclude='security_scanner/scans/_objstore' \
     --exclude='security_scanner/scans/_objstore/*'   # -> $APP_ROOT/security_scanner
 echo "   code at $APP_DIR"

@@ -1554,6 +1554,187 @@ def _check_hibp_and_waf_evidence(failures):
     print(f"  [{'PASS' if ok3 else 'FAIL'}] hibp:research_is_authority      "
           f"researched_clean={researched_clean} researched_hit={researched_hit}")
 
+def _check_dehashed_credit_guards(failures):
+    """The balance probe must be CHEAP, and a repeat scan must be FREE.
+
+    2026-08-13. Ledger showed 3 DeHashed calls: an rbs.co.za scan (455 records),
+    a takealot.com scan (263,469 records), and one balance probe. Balance moved
+    98 -> 77 -> 76. takealot returned a quarter of a million records for ONE
+    credit; the day the probe fired cost 21. Cost does not track records
+    returned -- it tracked the probe, which queried `domain:example.com`, the
+    canonical test domain that appears in essentially every credential dump ever
+    assembled (our own scan of it: 1,220,357 records).
+
+    The probe was itself added to FIX a leak (the old credit indicator ran a live
+    search on every page load) and introduced a worse one by choosing the single
+    most expensive query available.
+    """
+    import re as _re2
+    app_src = open(os.path.join(SEC, "app.py"), encoding="utf-8").read()
+
+    # 1. The probe query must not name a domain with a large breach corpus.
+    # The probe is the only "domain:" literal in app.py; the scan checker's own
+    # query is built from the target and lives in checkers_threats.
+    m = _re2.search(r'"query":\s*"domain:([^"]+)"', app_src)
+    probe_domain = m.group(1) if m else None
+    BANNED = {"example.com", "example.org", "example.net", "test.com",
+              "gmail.com", "yahoo.com", "hotmail.com"}
+    ok = bool(probe_domain) and probe_domain.lower() not in BANNED
+    if not ok:
+        failures.append(
+            f"dehashed_credits[probe_target]: balance probe queries {probe_domain!r} — "
+            "a domain with a large breach corpus makes the probe cost far more than a "
+            "real scan (measured: ~20 credits vs ~1). Probe a name that cannot appear "
+            "in any dump, e.g. one under the RFC 2606 .invalid TLD")
+    print(f"  [{'PASS' if ok else 'FAIL'}] dehashed_credits:probe_target      {probe_domain}")
+
+    # 2. The probe must stay TTL-cached, or a refresh storm bills per page load.
+    ttl_guarded = "DEHASHED_BALANCE_TTL_S" in app_src and "cached" in app_src
+    if not ttl_guarded:
+        failures.append(
+            "dehashed_credits[probe_ttl]: the balance probe lost its TTL cache — "
+            "every page load would spend a credit, which is the original leak")
+    print(f"  [{'PASS' if ttl_guarded else 'FAIL'}] dehashed_credits:probe_ttl_cached  {ttl_guarded}")
+
+    # 3. Cache conclusive results only; never pin an outage in place.
+    import tempfile as _tf, time as _time, importlib as _il2, json as _js2
+    ct2 = _il2.import_module("checkers_threats")
+    _tmp = _tf.mkdtemp()
+    _orig_dir, _orig_hist = ct2._DH_CACHE_DIR, ct2._BALANCE_HISTORY_FILE
+    ct2._DH_CACHE_DIR = os.path.join(_tmp, "c")
+    ct2._BALANCE_HISTORY_FILE = os.path.join(_tmp, "h.jsonl")
+    try:
+        for label, res, want in (
+            ("completed",             {"status": "completed"},             True),
+            ("quota_exhausted",       {"status": "quota_exhausted"},       False),
+            ("error",                 {"status": "error"},                 False),
+            ("no_api_key",            {"status": "no_api_key"},            False),
+            ("subscription_required", {"status": "subscription_required"}, False),
+        ):
+            d = "gate-%s.example" % label
+            ct2.dehashed_cache_put(d, res)
+            got = ct2.dehashed_cache_get(d) is not None
+            okc = got == want
+            if not okc:
+                failures.append(
+                    f"dehashed_credits[cache/{label}]: cached={got} expected {want} — "
+                    "caching a non-conclusive lookup pins a provider outage in place "
+                    "for the whole TTL and hides it behind a stale hit")
+            print(f"  [{'PASS' if okc else 'FAIL'}] dehashed_credits:cache/{label:<20} {got}")
+
+        # 4. The balance history must record a DELTA, which is what attributes
+        #    spend to a call. Only the latest value used to be kept, which is
+        #    why the 2026-08-13 question took a day to answer.
+        ct2.record_dehashed_balance(98, _time.time(), source="scan:a.com")
+        ct2.record_dehashed_balance(77, _time.time(), source="balance_probe")
+        rows = [_js2.loads(l) for l in open(ct2._BALANCE_HISTORY_FILE, encoding="utf-8")]
+        okh = (len(rows) == 2 and rows[1]["delta"] == -21
+               and rows[1]["source"] == "balance_probe")
+        if not okh:
+            failures.append(
+                f"dehashed_credits[history]: {rows} — the append-only log must record "
+                "delta and source per observation, or credit spend cannot be attributed "
+                "to the call that caused it")
+        print(f"  [{'PASS' if okh else 'FAIL'}] dehashed_credits:history_delta     "
+              f"{rows[-1]['delta'] if rows else None} / {rows[-1]['source'] if rows else None}")
+    finally:
+        ct2._DH_CACHE_DIR, ct2._BALANCE_HISTORY_FILE = _orig_dir, _orig_hist
+        import shutil as _sh; _sh.rmtree(_tmp, ignore_errors=True)
+
+
+def _check_scan_target_input(failures):
+    """Two ways the scan target goes wrong before a single checker runs.
+
+    1. A domain pasted out of a submission form, a PDF or a mail client arrives
+       as a full URL, an email address, or text carrying a zero-width character
+       that is INVISIBLE in the input box. The old syntax-only check rejected it
+       with "Invalid or missing domain" while the broker could see the domain
+       was correct.
+
+    2. A typo of a real domain passes syntax validation and scans to completion
+       against nothing. morgancarco.com (for morgancargo.com), 2026-08-07:
+       a fully scored report, 266 "Medium", 77% coverage, 0 discovered IPs, and
+       headline findings "No SPF record - spoofing risk" / "No DMARC record -
+       phishing risk". Both are vacuously true of a domain that does not exist
+       and both read as real findings; the real morgancargo.com publishes SPF
+       with -all and a DMARC policy.
+
+    DNS is mocked so the gate stays offline and deterministic.
+    """
+    import importlib as _il
+    from unittest import mock
+    dv = _il.import_module("domain_validation")
+
+    for label, raw, want in (
+        ("plain",              "morgancargo.com",                     "morgancargo.com"),
+        ("full URL + path",    "https://www.morgancargo.com/contact",  "www.morgancargo.com"),
+        ("email from a form",  "info@morgancargo.com",                 "morgancargo.com"),
+        ("mailto link",        "mailto:info@morgancargo.com",          "morgancargo.com"),
+        ("zero-width space",   "morgancargo.com​",                "morgancargo.com"),
+        ("BOM",                "﻿morgancargo.com",                "morgancargo.com"),
+        ("port",               "morgancargo.com:443",                  "morgancargo.com"),
+        ("query + fragment",   "https://morgancargo.com?utm=x#f",      "morgancargo.com"),
+        ("root dot",           "morgancargo.com.",                     "morgancargo.com"),
+    ):
+        got = dv.normalize_domain(raw)
+        ok = got == want and dv.valid_domain(raw)
+        if not ok:
+            failures.append(
+                f"scan_target[normalise/{label}]: {raw!r} -> {got!r}, expected {want!r} "
+                "(valid=%s) — a broker pasting this out of a submission form must not "
+                "be told the domain is invalid" % dv.valid_domain(raw))
+        print(f"  [{'PASS' if ok else 'FAIL'}] scan_target:normalise/{label:<18} {got}")
+
+    # www. is a real hostname and must NOT be silently rewritten to the apex:
+    # deciding apex-vs-www is a product choice, not input cleaning.
+    keeps_www = dv.normalize_domain("https://www.morgancargo.com") == "www.morgancargo.com"
+    if not keeps_www:
+        failures.append(
+            "scan_target[normalise/www]: 'www.' was stripped — that silently changes "
+            "which host is scanned")
+    print(f"  [{'PASS' if keeps_www else 'FAIL'}] scan_target:normalise/keeps_www      {keeps_www}")
+
+    # --- existence: NXDOMAIN must be refused, everything else allowed --------
+    import dns.resolver as _dnsr
+    import dns.exception as _dnse
+
+    def _resolver(behaviour):
+        class _R:
+            lifetime = 5
+            timeout = 5
+            def resolve(self, name, rdtype):
+                if behaviour == "nxdomain":
+                    raise _dnsr.NXDOMAIN()
+                if behaviour == "noanswer":
+                    raise _dnsr.NoAnswer()
+                if behaviour == "timeout":
+                    raise _dnse.Timeout()
+                if behaviour == "ns_only":
+                    if rdtype == "NS":
+                        return ["ns1.example."]
+                    raise _dnsr.NoAnswer()
+                return ["1.2.3.4"]
+        return _R
+
+    for label, behaviour, want in (
+        ("NXDOMAIN (typo)",        "nxdomain", False),
+        ("resolves normally",      "ok",       True),
+        ("registered, NS only",    "ns_only",  True),
+        ("resolver timeout",       "timeout",  True),
+        ("no answer any type",     "noanswer", True),
+    ):
+        with mock.patch.object(_dnsr, "Resolver", _resolver(behaviour)):
+            got = dv.domain_exists("example.com")
+        ok = got is want
+        if not ok:
+            failures.append(
+                f"scan_target[exists/{label}]: domain_exists={got!r} expected {want!r} — "
+                "only NXDOMAIN proves the name is unregistered; a parked domain with NS "
+                "records is a legitimate target and resolver trouble must fail OPEN "
+                "rather than block a real scan")
+        print(f"  [{'PASS' if ok else 'FAIL'}] scan_target:exists/{label:<20} {got}")
+
+
 def _check_base_path_links(failures):
     src_dir = os.path.join(SEC, "frontend", "src")
     # (?!/) excludes protocol-relative "//cdn.example.com" while still matching
@@ -1752,6 +1933,8 @@ def main():
     _check_table_headers(failures)
     _check_blocked_not_clean(failures)
     _check_base_path_links(failures)
+    _check_scan_target_input(failures)
+    _check_dehashed_credit_guards(failures)
     _check_balance_not_metered(failures)
     _check_hibp_and_waf_evidence(failures)
     _check_classification(failures)

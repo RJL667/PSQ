@@ -470,11 +470,12 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
 # ---------------------------------------------------------------------------
 
 import re
-_DOMAIN_RE = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
 
-def valid_domain(domain: str) -> bool:
-    domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
-    return bool(_DOMAIN_RE.match(domain)) and len(domain) <= 253
+# Scan-target input handling lives in domain_validation so the regression gate
+# can import it without booting Flask. normalize_domain() is what lets a broker
+# paste a URL, an email address, or a value copied out of a PDF form and still
+# have the scan target come out right.
+from domain_validation import normalize_domain, valid_domain, domain_exists
 
 
 # WS2: the job queue + in-process worker pool. The job is run_scan(**payload). With
@@ -528,8 +529,9 @@ def preflight():
     override before submitting the full scan."""
     from flag_inference import run_preflight
     data = request.get_json(silent=True) or {}
-    domain = str(data.get("domain", "")).strip().lower()
-    domain = domain.removeprefix("https://").removeprefix("http://").split("/")[0]
+    # normalize_domain handles what a paste out of a submission form actually
+    # contains: invisible characters, a scheme, an email address, a path, a port.
+    domain = normalize_domain(data.get("domain", ""))
     if not domain or not valid_domain(domain):
         return jsonify({"status": "invalid_domain", "error": "Invalid or missing domain"}), 400
     sub_industry = str(data.get("sub_industry", "")).strip() or None
@@ -584,8 +586,30 @@ def dehashed_balance():
             record_provider_call("dehashed", "balance_probe")
         except Exception:
             pass
+        # PROBE A DOMAIN NOBODY HAS EVER BREACHED.
+        #
+        # This probe used to query `domain:example.com`, which is the single
+        # worst choice available: example.com is the canonical test domain and
+        # appears in essentially every credential dump ever assembled. Our own
+        # scan of it returned 1,220,357 matching records.
+        #
+        # 2026-08-13 measurement. Ledger showed 3 DeHashed calls that day: an
+        # rbs.co.za scan (455 records), a takealot.com scan (263,469 records),
+        # and one balance probe. The balance moved 98 -> 77 -> 76. So takealot,
+        # returning a quarter of a million records, cost ONE credit, while the
+        # day the probe fired cost 21. Cost does not track records returned; it
+        # tracked this query. A scan is ~1 credit and the probe was ~20.
+        #
+        # `size: 1` does not protect us -- the page size bounds the response,
+        # not whatever DeHashed prices the query at. So make the QUERY cheap
+        # instead: a domain under .invalid, which RFC 2606 reserves precisely so
+        # it can never be registered and therefore can never appear in a breach
+        # corpus. The response we actually want is the `balance` field, which
+        # comes back on any successful search regardless of how many records
+        # matched.
         r = req.post("https://api.dehashed.com/v2/search",
-                     json={"query": "domain:example.com", "page": 1, "size": 1},
+                     json={"query": "domain:phishield-balance-probe.invalid",
+                           "page": 1, "size": 1},
                      headers={"Content-Type": "application/json",
                               "Dehashed-Api-Key": DEHASHED_API_KEY},
                      timeout=10)
@@ -595,7 +619,8 @@ def dehashed_balance():
             # every refresh for the next TTL, is free.
             if data.get("balance") is not None:
                 from checkers_threats import record_dehashed_balance
-                record_dehashed_balance(int(data["balance"]), _t.time())
+                record_dehashed_balance(int(data["balance"]), _t.time(),
+                                        source="balance_probe")
             return jsonify({"status": "active", "balance": data.get("balance"),
                             "cached": False})
         elif r.status_code == 401:
@@ -822,6 +847,21 @@ def start_scan():
 
     if not domain or not valid_domain(domain):
         return jsonify({"error": "Invalid or missing domain"}), 400
+
+    # ...and it must actually EXIST. Syntax validation passes a typo of a real
+    # domain, and the scan then completes against nothing: every DNS-dependent
+    # checker returns empty, empty scores as clean, and the broker receives a
+    # risk rating and a financial exposure figure for a domain that was never
+    # registered. Refusing here is the only honest answer, and it costs one
+    # DNS query. See domain_exists() for why NXDOMAIN specifically.
+    if not domain_exists(domain):
+        return jsonify({
+            "error": f"'{domain}' does not exist (NXDOMAIN). No assessment is "
+                     f"possible for a domain that is not registered. Check the "
+                     f"spelling, or confirm the correct domain with the client.",
+            "code": "domain_not_resolvable",
+            "domain": domain,
+        }), 400
 
     # Parse optional insurance context fields
     industry = str(data.get("industry", "Other")).strip()

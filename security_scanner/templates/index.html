@@ -623,6 +623,44 @@ function schedulePreflight() {
 // auto-discovery instead of skipping pre-flight entirely. 600ms
 // debounce inside schedulePreflight protects crt.sh from per-keystroke
 // hammering.
+// Clean the scan target on paste. A value copied out of a submission form, a
+// PDF or a mail client routinely arrives as a full URL, an email address, or
+// plain text carrying a zero-width character that is invisible in the box --
+// and the domain then fails validation while looking perfectly correct on
+// screen. Mirrors normalize_domain() in domain_validation.py; the server
+// normalises again regardless, this is so the broker SEES the target that will
+// actually be scanned rather than being silently corrected.
+function normalizeDomainInput(raw) {
+  if (!raw) return '';
+  let s = String(raw)
+    .replace(/[​-‏‪-‮⁠﻿­⁦-⁩]/g, '')
+    .trim().replace(/^["'<]+|["'>]+$/g, '').trim().toLowerCase();
+  s = s.replace(/^(https?:\/\/|ftp:\/\/|\/\/|mailto:)/, '');
+  if (s.includes('@')) s = s.split('@').pop();      // pasted email address
+  s = s.split(/[/?#]/)[0];                          // path, query, fragment
+  s = s.split(':')[0];                              // port
+  return s.trim().replace(/\.+$/, '');
+}
+
+const domainEl = document.getElementById('domain');
+domainEl.addEventListener('paste', (e) => {
+  const text = (e.clipboardData || window.clipboardData)?.getData('text');
+  if (!text) return;                                // let the browser handle it
+  const cleaned = normalizeDomainInput(text);
+  if (!cleaned || cleaned === text.trim().toLowerCase()) return;  // nothing to do
+  e.preventDefault();
+  domainEl.value = cleaned;
+  domainEl.dispatchEvent(new Event('input', { bubbles: true }));
+});
+// Catch anything that reached the field another way (drag-drop, autofill).
+domainEl.addEventListener('blur', () => {
+  const cleaned = normalizeDomainInput(domainEl.value);
+  if (cleaned && cleaned !== domainEl.value) {
+    domainEl.value = cleaned;
+    domainEl.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+});
+
 document.getElementById('domain').addEventListener('blur', schedulePreflight);
 document.getElementById('domain').addEventListener('input', schedulePreflight);
 document.getElementById('sub-industry').addEventListener('change', schedulePreflight);
