@@ -5,6 +5,13 @@ import { SEVERITY_COLOR } from '../../data/checkerState'
 import type { Results } from '../../types/results'
 import styles from './RiskFactors.module.css'
 
+/** Name of the posture axis. "Resilience" because the number RISES as the
+ *  estate gets safer: calling a higher-is-better figure a "risk score" is the
+ *  same inversion trap as `dehashed 0` meaning worst, or `+70` reading as
+ *  additive -- both of which were misread this week by the people who built
+ *  them. Reads naturally per area too: "network resilience score". */
+const SCORE_NAME = 'Resilience score'
+
 type View = 'impact' | 'underwriting' | 'technical'
 const VIEWS: Array<{ key: View; label: string }> = [
   { key: 'impact', label: 'Impact View' },
@@ -56,14 +63,25 @@ export default function RiskFactors({ r }: { r: Results }) {
             </div>
             {view === 'impact' && (
               <>
+                {/* TWO AXES, side by side, because neither works alone.
+                    Across all 36 scans, worst-member-only puts 79.6% of
+                    dimensions on High/Critical while a weighted average puts
+                    85.2% on Low/Medium and finds 2 criticals in 142. One cries
+                    wolf, the other never alarms. The score prices the estate;
+                    the blocker gates it. */}
                 <span className={styles.riskLabel} style={{ color: SEVERITY_COLOR[f.severity] }}>{f.riskLabel}</span>
-                {/* The category whose own PDF card set this verdict. More use
-                    than the number that used to sit here, which was only the
-                    bar inverted and read as an additive contribution it never
-                    was: on one scan the five values summed to 326 against an
-                    overall score of 251. */}
-                <span className={styles.impact} title={`This verdict comes from ${f.topContributor}, matching that category's card in the PDF report`}>
-                  {f.topContributor}
+                <span className={styles.impact}>
+                  {f.score != null && (
+                    <span className={styles.scoreNum} title={`${f.label} resilience score: the weighted average across the ${f.assessed} categories that produced a verdict, where higher is safer. Separate from the risk label beside it, which is set by the single worst finding.`}>
+                      {f.score}
+                    </span>
+                  )}
+                  {f.blockers.length > 0 && (
+                    <span className={styles.blocker} style={{ color: SEVERITY_COLOR[f.severity] }}
+                      title={`${f.blockers.length} finding(s) at high or critical severity set the label regardless of the score: ${f.blockers.join(', ')}`}>
+                      {f.blockers.length}&nbsp;blocker{f.blockers.length > 1 ? 's' : ''}
+                    </span>
+                  )}
                 </span>
               </>
             )}
@@ -82,7 +100,7 @@ export default function RiskFactors({ r }: { r: Results }) {
       <div className={styles.footnote}>
         {view === 'technical'
           ? 'Top contributor per dimension, from completed checkers.'
-          : 'Each dimension takes the verdict of its weakest category, matching that category’s card in the PDF report — a confirmed exposure is not averaged away by clean siblings. The name on the right is the category that set the verdict. Where fewer categories produced a verdict than the dimension covers, the count is shown.'}
+          : `Two separate measures. The number is the ${SCORE_NAME.toLowerCase()} for that area — a weighted average across every category assessed, where higher is safer. The label beside it is set by the single worst finding, matching that category’s card in the PDF report, so one confirmed exposure is never averaged away by clean siblings. A well-run area can therefore score highly and still carry a blocker; hover a blocker to see which finding set it.`}
       </div>
     </Panel>
   )

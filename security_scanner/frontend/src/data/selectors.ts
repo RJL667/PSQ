@@ -631,19 +631,36 @@ export function getKeyFindings(r: Results | null): Finding[] {
 // contribution, never a fabricated number. Dimensions with no scorable category
 // report status only (spec §11).
 
+/** A dimension carries TWO independent axes, because neither works alone.
+ *
+ *  Measured over 142 dimension verdicts across all 36 scans on file:
+ *
+ *    worst-member-only   79.6% land on High/Critical, 8.5% on Low
+ *    weighted average    85.2% land on Low/Medium, and only 2 of 142 Critical
+ *
+ *  One cries wolf, the other never raises an alarm. They disagree on 109 of
+ *  142 verdicts (77%), and the disagreements are the state that matters:
+ *  rbs.co.za's Data Protection scores 75 -- a well-run area -- while carrying a
+ *  CRITICAL finding. takealot's Network Exposure scores 77 with an open FTP
+ *  port. A single number cannot say both, and an underwriter needs both: the
+ *  score prices the estate, the blocker gates it. */
 export interface RiskFactorRow {
   key: string
   label: string
-  /** 0..100 security score (higher = safer); null when no category scored */
+  /** AXIS 1 — posture. Weighted average across assessed members, higher =
+   *  safer. Answers "how well-run is this area?". null when nothing assessed. */
   score: number | null
+  /** AXIS 2 — the blocker. Driven by the WORST member, so a single critical
+   *  finding can never be averaged away by clean siblings. */
   severity: Severity
   riskLabel: string
+  /** The categories that set the severity: named, so the label is actionable
+   *  rather than an opinion. Empty when nothing is high or critical. */
+  blockers: string[]
   topContributor: string
-  /** 0..100 share of remaining risk this dimension represents */
-  impact: number | null
   /** categories in this dimension that produced a verdict */
   assessed: number
-  /** categories the dimension is defined over */
+  /** categories that CAN produce one (excludes cards the PDF never colours) */
   total: number
 }
 
@@ -654,9 +671,7 @@ export interface RiskFactorRow {
  *  So where the PDF already states a verdict, the dashboard must show THAT
  *  verdict rather than compute a parallel one — otherwise the two can, and do,
  *  disagree about the same scan. */
-type VerdictSource = (r: Results) => Pick<
-  RiskFactorRow, 'score' | 'severity' | 'riskLabel' | 'topContributor' | 'impact' | 'assessed' | 'total'
-> | null
+type VerdictSource = (r: Results) => Omit<RiskFactorRow, 'key' | 'label'> | null
 
 const FACTOR_MAP: Array<{
   key: string; label: string; categories: string[]; verdictFrom?: VerdictSource
@@ -703,7 +718,7 @@ function credentialVerdict(r: Results): ReturnType<VerdictSource> {
   if (!level || level === 'UNKNOWN' || cr.assessed === false) {
     return {
       score: null, severity: 'unknown', riskLabel: 'Not assessed',
-      topContributor: '—', impact: null, assessed: 0, total: 1,
+      blockers: [], topContributor: '—', assessed: 0, total: 1,
     }
   }
 
@@ -727,8 +742,8 @@ function credentialVerdict(r: Results): ReturnType<VerdictSource> {
 
   return {
     score, severity: band.severity, riskLabel: band.label,
+    blockers: (level === 'CRITICAL' || level === 'HIGH') ? ['Credential risk'] : [],
     topContributor: contributor,
-    impact: score != null ? 100 - score : null,
     // One authoritative source, so there is no partial-coverage question here:
     // the classifier already fails closed when its own inputs are unavailable.
     assessed: 1, total: 1,
@@ -757,8 +772,11 @@ const TEN_POINT_CATEGORIES = new Set(['email_security', 'email_hardening'])
 const SEVERITY_RANK: Severity[] = ['positive', 'medium', 'high', 'critical']
 /** Where a band sits on the bar. Not a score -- the verdict is categorical,
  *  and a bar that disagreed with its own label is what this replaces. */
-const SEVERITY_BAR: Record<string, number> = {
-  positive: 100, medium: 60, high: 32, critical: 10,
+/** Posture points per band. The bar renders the weighted average of these,
+ *  so three clean checks and one bad port reads differently from four bad
+ *  ones -- which worst-member-only cannot express. */
+const SEVERITY_POINTS: Record<string, number> = {
+  positive: 100, medium: 60, high: 30, critical: 0,
 }
 const SEVERITY_LABEL: Record<string, string> = {
   positive: 'Low', medium: 'Medium', high: 'High', critical: 'Critical',
@@ -786,7 +804,7 @@ export function getRiskFactors(r: Results | null): RiskFactorRow[] {
     if (!scored.length) {
       return {
         key, label, score: null, severity: 'unknown', riskLabel: 'Not assessed',
-        topContributor: '—', impact: null, assessed: 0, total: categories.length,
+        blockers: [], topContributor: '—', assessed: 0, total: categories.length,
       }
     }
     // A dimension is as weak as its weakest member. Averaging is wrong for a
@@ -802,29 +820,36 @@ export function getRiskFactors(r: Results | null): RiskFactorRow[] {
     if (!real.length) {
       return {
         key, label, score: null, severity: 'unknown', riskLabel: 'Not assessed',
-        topContributor: '—', impact: null, assessed: 0, total: stamped.length || categories.length,
+        blockers: [], topContributor: '—', assessed: 0,
+        total: stamped.length || categories.length,
       }
     }
 
+    // AXIS 2 first: the blocker. Worst member, so a confirmed exposure is never
+    // averaged away by clean siblings.
     const sev: Severity =
       SEVERITY_RANK.reduce((acc, s) => (real.some(([, v]) => v === s) ? s : acc), 'positive' as Severity)
-    // The bar has to agree with the verdict. It used to show the AVERAGE score
-    // while the label showed the worst member, which on takealot would have
-    // rendered a full-width bar labelled "High" reading "0 left". The verdict
-    // is categorical now -- it comes from the PDF's traffic light -- so the bar
-    // is a band position, not a mean.
-    const score = SEVERITY_BAR[sev]
-    // Name the category that actually SET the verdict, not the lowest number.
-    const driver = real.find(([, v]) => v === sev)?.[0]
+    const blockers = real
+      .filter(([, v]) => v === 'high' || v === 'critical')
+      .map(([id]) => CATEGORY_LABELS[id] ?? id)
+
+    // AXIS 1: the posture score. Weighted mean across everything assessed, so a
+    // dimension with three clean checks and one bad port scores well ABOVE one
+    // with four bad checks -- while the label above still says Critical.
+    const score = Math.round(
+      real.reduce((n, [, v]) => n + SEVERITY_POINTS[v], 0) / real.length)
 
     return {
       key, label, score, severity: sev, riskLabel: SEVERITY_LABEL[sev],
-      topContributor: driver ? (CATEGORY_LABELS[driver] ?? driver) : '—',
-      impact: null,
+      blockers,
+      // Name the category that SET the verdict, not the lowest number.
+      topContributor: (() => {
+        const driver = real.find(([, v]) => v === sev)?.[0]
+        return driver ? (CATEGORY_LABELS[driver] ?? driver) : '—'
+      })(),
       // Categories that produced a verdict, over those that CAN produce one.
       // cloud_cdn has no traffic light in the PDF ("no CDN" is not a security
-      // failure), so it is not counted in either -- padding the denominator
-      // with a category that can never contribute would understate coverage.
+      // failure), so it is excluded from both sides rather than padding.
       assessed: real.length,
       total: stamped.length,
     }

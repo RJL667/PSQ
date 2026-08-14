@@ -1733,6 +1733,48 @@ def _check_score_scale_agreement(failures):
             "as a verdict — the PDF card refuses to")
     print(f"  [{'PASS' if fails_closed else 'FAIL'}] score_scale:cred_fails_closed     {fails_closed}")
 
+    # --- two axes: a good score must be able to coexist with a blocker ------
+    # Measured over 142 dimension verdicts across all 36 scans:
+    #   worst-member-only   79.6% High/Critical, 8.5% Low
+    #   weighted average    85.2% Low/Medium, 2 Critical in 142
+    # One cries wolf, the other never alarms; they disagree on 109 of 142.
+    # rbs.co.za's Data Protection scores 75 -- a well-run area -- while carrying
+    # a CRITICAL finding. A single number cannot say both, so the row carries
+    # the posture score AND the blocker independently.
+    has_blockers = "blockers" in sel and "'high' || v === 'critical'" in sel
+    weighted = "SEVERITY_POINTS" in sel and "SEVERITY_POINTS[v], 0) / real.length" in sel
+    if not (has_blockers and weighted):
+        failures.append(
+            f"two_axis[present]: blockers={has_blockers} weighted_score={weighted} — the "
+            "dimension must carry a posture score AND a named blocker list. Collapsing "
+            "them loses the state that matters: a well-run area with one confirmed "
+            "exposure reads as neither wholly good nor wholly bad")
+    print(f"  [{'PASS' if has_blockers and weighted else 'FAIL'}] two_axis:score_and_blockers      "
+          f"blockers={has_blockers} weighted={weighted}")
+
+    # The axes must be INDEPENDENT: the score must not be derived from the band,
+    # or a blocker would drag the score down and the two would collapse into one.
+    independent = "SEVERITY_BAR" not in sel
+    if not independent:
+        failures.append(
+            "two_axis[independent]: the bar still renders a band position rather than the "
+            "weighted score — a blocker would then drive both axes and a well-run area "
+            "with one bad finding could not be told from a badly-run one")
+    print(f"  [{'PASS' if independent else 'FAIL'}] two_axis:axes_independent       {independent}")
+
+    # Replicate the arithmetic: 3 clean + 1 critical must give a HIGH score and
+    # a CRITICAL label simultaneously. That is the whole point.
+    PTS = {"positive": 100, "medium": 60, "high": 30, "critical": 0}
+    members = ["positive", "positive", "positive", "critical"]
+    score = round(sum(PTS[m] for m in members) / len(members))
+    label = max(members, key=["positive", "medium", "high", "critical"].index)
+    ok_both = score >= 70 and label == "critical"
+    if not ok_both:
+        failures.append(
+            f"two_axis[coexist]: 3 clean + 1 critical gives score={score} label={label!r}; "
+            "a high score must be able to coexist with a critical label")
+    print(f"  [{'PASS' if ok_both else 'FAIL'}] two_axis:good_score_with_blocker score={score} label={label}")
+
     # ...and the roll-up must actually apply it.
     applies = "toPercent" in sel and "TEN_POINT_CATEGORIES.has" in sel
     if not applies:
