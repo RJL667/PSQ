@@ -31,6 +31,12 @@ PROVIDER_CALLS = Counter("provider_calls_total", "Metered provider calls", ["pro
 CHECKER_DURATION = Histogram("checker_duration_seconds", "Per-checker wall time",
                              ["checker"], buckets=(1, 5, 15, 30, 60, 120, 180, 300))
 BREAKER_OPEN = Counter("circuit_breaker_open_total", "Circuit-breaker trips", ["provider"])
+# Per-tier report render failures. Deliberately a METRIC and not a
+# /health/providers field: that endpoint returns 503 when degraded and the
+# uptime monitor gates on it, so one historical scan failing to render would
+# take the whole readiness probe red -- training people to ignore it.
+PDF_RENDER_FAILURES = Counter("pdf_render_failures_total",
+                              "Report renders that raised, by tier", ["tier"])
 # 1 = usable, 0 = configured but not usable (rotated / revoked / out of credit).
 # A dead provider key does not fail a scan — it silently downgrades a checker to
 # "unassessed" — so it needs its own signal rather than showing up as an error rate.

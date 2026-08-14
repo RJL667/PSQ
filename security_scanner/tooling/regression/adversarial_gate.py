@@ -2001,6 +2001,106 @@ def _check_exec_deck_credentials(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] exec_deck:unassessed/{label:<16} {got}")
 
 
+def _check_report_degradation(failures):
+    """Every tier must RENDER on a degraded scan, and the tiers must AGREE.
+
+    Two controls the 2026-08-14 incident showed were missing, both proposed by
+    the review agent that critiqued the first fix.
+
+    (a) RENDERS AT ALL. pdf_snapshot renders 3 tiers x 2 fixtures, both fully
+        populated, and compares HASHES. It cannot catch a tier that raises on a
+        shape the fixtures do not contain. Two separate live crashes hid there:
+        `credential_risk.risk_score = None` (an unassessed estate) and
+        `insurance = {"error": ...}` (analytics raised, which scanner.py leaves
+        behind). Both took down ONLY the Executive Summary, so it read as a tier
+        bug rather than a data bug.
+
+        This sweeps every category x {absent, blocked, score None} x 3 tiers and
+        asserts each renders. When first run it found roughly forty crash sites,
+        nearly all of them a `.get("score", <perfect>)` default flowing into a
+        comparison.
+
+    (b) THE TIERS MUST AGREE. Before the fix, phishield_R10M_finance rendered
+        "credential risk CRITICAL" on the assessment tier and LOW on the full
+        tier -- same scan, same gate run, both hashed and blessed. A hash cannot
+        see a contradiction between two artefacts; only an assertion can.
+    """
+    import copy as _cp, json as _js3, importlib as _il6, re as _re6, traceback as _tb6
+    pr6 = _il6.import_module("pdf_report")
+
+    fx = os.path.join(SEC, "test_fixtures", "phishield_R10M_finance_2026-05-15.json")
+    base = _js3.loads(open(fx, encoding="utf-8").read())
+
+    # --- (a) degradation sweep ------------------------------------------
+    cats = sorted(base.get("categories", {}))
+    SHAPES = (
+        ("absent",    lambda c, k: c.pop(k, None)),
+        ("blocked",   lambda c, k: c.update({k: {"status": "unreachable"}})),
+        ("scoreNone", lambda c, k: c.update({k: {"status": "completed", "score": None}})),
+    )
+    # per_ip is a field carried alongside the categories, not a checker; the
+    # blocked shape is not one it can take, so exclude rather than special-case.
+    cats = [c for c in cats if c != "per_ip"]
+
+    crashes, runs = [], 0
+    for cid in cats:
+        for lbl, mut in SHAPES:
+            d = _cp.deepcopy(base); mut(d["categories"], cid)
+            for tier in ("assessment", "summary", "full"):
+                runs += 1
+                try:
+                    pr6.generate_pdf(d, report_type=tier)
+                except Exception:
+                    fr = _re6.findall(r"(pdf_\w+\.py)\", line (\d+), in (\w+)",
+                                      _tb6.format_exc())
+                    crashes.append("%s/%s/%s at %s" % (
+                        cid, lbl, tier, ("%s:%s %s" % fr[-1]) if fr else "?"))
+
+    # Scan-level degradation the categories sweep cannot express.
+    for lbl, mut in (("insurance={'error'}", lambda d: d.update(insurance={"error": "x"})),
+                     ("insurance absent",    lambda d: d.pop("insurance", None)),
+                     ("no categories",       lambda d: d["categories"].clear())):
+        d = _cp.deepcopy(base); mut(d)
+        for tier in ("assessment", "summary", "full"):
+            runs += 1
+            try:
+                pr6.generate_pdf(d, report_type=tier)
+            except Exception:
+                fr = _re6.findall(r"(pdf_\w+\.py)\", line (\d+), in (\w+)",
+                                  _tb6.format_exc())
+                crashes.append("%s/%s at %s" % (
+                    lbl, tier, ("%s:%s %s" % fr[-1]) if fr else "?"))
+
+    ok_a = not crashes
+    if not ok_a:
+        failures.append(
+            "report_degradation[renders]: %d of %d renders raised. A tier that will "
+            "not build is invisible until a client clicks download, and only ONE tier "
+            "breaks, so it reads as a tier bug. First few: %s"
+            % (len(crashes), runs, "; ".join(crashes[:4])))
+    print(f"  [{'PASS' if ok_a else 'FAIL'}] report_degradation:all_tiers_render "
+          f"{runs} renders, {len(crashes)} crashed")
+
+    # --- (b) cross-tier agreement ---------------------------------------
+    cr = (base.get("categories", {}) or {}).get("credential_risk") or {}
+    level = str(cr.get("risk_level") or "").upper()
+    deck = pr6._assessment_top_findings(base)
+    cred = next((f for f in deck
+                 if "credential risk" in str(f.get("headline", "")).lower()), None)
+    deck_level = cred["level"] if cred else None
+    # The deck may legitimately stay silent on a LOW/NONE estate; what it may
+    # NOT do is contradict the classifier.
+    ok_b = deck_level is None or deck_level == level
+    if not ok_b:
+        failures.append(
+            f"report_degradation[cross_tier]: the assessment deck says {deck_level!r} "
+            f"while credential_risk.risk_level is {level!r} for the same scan. Two "
+            "artefacts describing one estate differently is what the hash-only "
+            "baseline blessed for months")
+    print(f"  [{'PASS' if ok_b else 'FAIL'}] report_degradation:tiers_agree      "
+          f"deck={deck_level} classifier={level}")
+
+
 def _check_scan_target_input(failures):
     """Two ways the scan target goes wrong before a single checker runs.
 
@@ -2297,6 +2397,7 @@ def main():
     _check_score_scale_agreement(failures)
     _check_card_severity_equivalence(failures)
     _check_exec_deck_credentials(failures)
+    _check_report_degradation(failures)
     _check_balance_not_metered(failures)
     _check_hibp_and_waf_evidence(failures)
     _check_classification(failures)

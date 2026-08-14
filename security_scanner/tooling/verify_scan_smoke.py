@@ -196,6 +196,32 @@ def run(domain: str = "example.com",
         return 1
     print("    shape OK — schema_version, _overall_score coupling, "
           "financial_impact p50, risk_probability all present")
+
+    # RENDER ALL THREE TIERS from this scan's real output.
+    #
+    # This harness constructs SecurityScanner() with NO API keys on purpose, so
+    # dehashed comes back `no_api_key` and CredentialRiskClassifier writes
+    # `risk_score: None` -- byte-identical to the production shape that took the
+    # Executive Summary down on 2026-08-14, where the broker summary and full
+    # report rendered fine and only the third tier 500'd.
+    #
+    # Fixtures could not have caught it: they are all fully populated. This is
+    # the one check that exercises a REAL degraded scan end to end, and it costs
+    # about a second on a run that already takes 90-180s.
+    from pdf_report import generate_pdf
+    for tier in ("assessment", "summary", "full"):
+        try:
+            pdf = generate_pdf(result, report_type=tier)
+        except Exception as e:
+            print(f"    FAIL — the {tier} report could not be rendered from this "
+                  f"scan: {type(e).__name__}: {e}")
+            print("    A tier that will not build is invisible until a client "
+                  "clicks download, and only one tier breaks at a time.")
+            return 1
+        if not pdf[:4] == b"%PDF":
+            print(f"    FAIL — the {tier} report did not produce a PDF")
+            return 1
+        print(f"    {tier:<11s} rendered  {len(pdf):,} bytes")
     return 0
 
 

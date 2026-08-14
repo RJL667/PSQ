@@ -570,3 +570,37 @@ def waf_posture(cats: dict) -> dict:
                    "refused during the scan, leaving the site directly exposed "
                    "to automated attacks and traffic floods."),
     }
+
+
+def score_or_none(cat, key: str = "score"):
+    """A category's score, or None when it cannot be trusted.
+
+    NEVER falls back to a perfect score. The PDF layer had fourteen defaults
+    that mean "perfect" -- `.get("score", 100)`, `.get("score", 10)`,
+    `.get("coverage_pct", 100)` -- so a checker that was absent, errored, was
+    skipped, or ran out of credit rendered as a flawless one. That is the same
+    absence-of-evidence failure removed from the scoring layer (a score-less
+    blocked checker used to bank a clean sweep) and from the credential cards
+    (an unfunded provider used to render a green "Clean").
+
+    Returning None forces the caller to decide, which is the point: a missing
+    checker is neither a pass nor a finding, and the report should say so rather
+    than pick whichever is more convenient.
+
+    The non-conclusive status set is imported from card_severity rather than
+    re-listed -- a second copy is how the dashboard and the PDF drifted apart in
+    the first place.
+    """
+    if not isinstance(cat, dict):
+        return None
+    try:
+        from card_severity import NON_CONCLUSIVE_STATUSES
+    except Exception:
+        NON_CONCLUSIVE_STATUSES = {
+            "error", "timeout", "no_api_key", "subscription_required",
+            "rate_limited", "skipped", "unreachable", "no_data",
+            "not_applicable", "quota_exhausted", "disabled", "auth_failed"}
+    if cat.get("status") in NON_CONCLUSIVE_STATUSES:
+        return None
+    v = cat.get(key)
+    return v if isinstance(v, (int, float)) else None

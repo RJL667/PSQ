@@ -17,6 +17,7 @@ from pdf_helpers import (
     C_GREY_4, C_WHITE, C_BLACK, INNER_W,
     build_cat_card, kv_row, make_traffic_circle, not_assessed_card,
     _cat_table, _tl, waf_posture,
+    score_or_none,
 )
 
 
@@ -102,27 +103,33 @@ def cat_email(d, S):
     dm  = em.get("dmarc", {})
     dkim= em.get("dkim", {})
     mx  = em.get("mx", {})
-    score = em.get("score", 0)
-    col = _tl(score >= 8, score >= 5)
+    score = score_or_none(em)
+    # Grey when unknown: an email checker that did not run is not a failing one.
+    col = C_GREY_4 if score is None else _tl(score >= 8, score >= 5)
     rows = [
         ("SPF",    ("Present" + (" — DANGEROUS +all" if spf.get("dangerous") else "") if spf.get("present") else "Missing")),
         ("DMARC",  f"Present — policy: {dm.get('policy','—')}" if dm.get("present") else "Missing"),
         ("DKIM",   ("Found: " + ", ".join(dkim.get("selectors_found", []))) if dkim.get("selectors_found") else "Not found"),
         ("MX",     f"{len(mx.get('records', []))} record(s)"),
-        ("Score",  f"{score}/10"),
+        ("Score",  f"{score}/10" if score is not None else "Not assessed"),
     ]
-    fb = "Email authentication is well configured — SPF, DKIM, and DMARC are in place." if score >= 8 else "Email authentication gaps increase susceptibility to phishing and spoofing attacks."
-    parts = build_cat_card("Email Authentication (SPF/DKIM/DMARC)", col, f"Score {score}/10", rows, em.get("issues", []), S, fallback=fb)
+    fb = ("Email authentication could not be assessed on this scan — no verdict is implied."
+          if score is None else
+          "Email authentication is well configured — SPF, DKIM, and DMARC are in place."
+          if score is not None and score >= 8 else
+          "Email authentication gaps increase susceptibility to phishing and spoofing attacks.")
+    parts = build_cat_card("Email Authentication (SPF/DKIM/DMARC)", col,
+                           f"Score {score}/10" if score is not None else "Not assessed", rows, em.get("issues", []), S, fallback=fb)
 
     parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if score >= 8:
+    if score is not None and score >= 8:
         parts.append(Paragraph(
             "Email authentication is well configured. SPF, DKIM, and DMARC work together to prevent attackers from "
             "sending emails that appear to come from your domain (email spoofing). This is one of the most effective "
             "defences against business email compromise (BEC) and phishing attacks targeting your staff or clients.",
             S["body"]))
-    elif score >= 5:
+    elif score is not None and score >= 5:
         parts.append(Paragraph(
             "Email authentication is partially configured. Some protections are in place, but gaps remain that "
             "could allow attackers to spoof emails from your domain. Phishing emails impersonating your organisation "
@@ -161,8 +168,8 @@ def cat_email_hardening(d, S):
     bimi = eh.get("bimi", {})
     dane = eh.get("dane", {})
     tlsrpt = eh.get("tls_rpt", {})
-    score= eh.get("score", 0)
-    col  = _tl(score >= 7, score >= 3)
+    score= score_or_none(eh)
+    col  = C_GREY_4 if score is None else _tl(score >= 7, score >= 3)
     rows = [
         ("MTA-STS", f"Present — mode: {mts.get('mode','?')}" if mts.get("present") else "Not configured"),
         ("BIMI",    "Present" + (" + VMC" if bimi.get("has_vmc") else "") if bimi.get("present") else "Not configured"),
@@ -170,12 +177,14 @@ def cat_email_hardening(d, S):
         ("TLS-RPT", f"Present — reports to: {tlsrpt.get('rua','?')}" if tlsrpt.get("present") else "Not configured"),
         ("Score",   f"{score}/10"),
     ]
-    fb = "Advanced email protections are well configured." if score >= 7 else "Advanced email hardening (MTA-STS, DANE, BIMI) is partially or not configured — these controls help prevent email interception."
+    fb = ("This check did not run on this scan, so no verdict is implied." if score is None else
+          "Advanced email protections are well configured." if score >= 7 else
+          "Advanced email hardening (MTA-STS, DANE, BIMI) is partially or not configured — these controls help prevent email interception.")
     parts = build_cat_card("Advanced Email Hardening (MTA-STS/DANE/BIMI)", col, f"Score {score}/10", rows, eh.get("issues", []), S, fallback=fb)
 
     parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if score >= 7:
+    if score is not None and score >= 7:
         parts.append(Paragraph(
             "Advanced email hardening controls are in place. MTA-STS enforces encrypted email transport, "
             "DANE/TLSA provides certificate pinning for mail servers, and BIMI displays your verified brand logo "
@@ -219,8 +228,8 @@ def cat_headers(d, S):
                                "Could not assess (blocked/unreachable)",
                                [], [reason], S, fallback=reason)
         return parts
-    score = hh.get("score", 0)
-    col   = _tl(score >= 80, score >= 50)
+    score = score_or_none(hh)
+    col   = C_GREY_4 if score is None else _tl(score >= 80, score >= 50)
     rows  = [(name, "Present" if data.get("present") else "MISSING")
              for name, data in hh.get("headers", {}).items()]
     # CSP quality detail
@@ -233,12 +242,14 @@ def cat_headers(d, S):
                 rows.append(("  CSP Issue", d_item))
         if csp_q.get("missing_critical"):
             rows.append(("  Missing directives", ", ".join(csp_q["missing_critical"])))
-    fb = "All recommended security headers are present." if score >= 80 else f"Only {score}% of recommended security headers are configured — missing headers leave the site vulnerable to clickjacking, XSS, and data injection."
+    fb = ("This check did not run on this scan, so no verdict is implied." if score is None else
+          "All recommended security headers are present." if score >= 80 else
+          f"Only {score}% of recommended security headers are configured — missing headers leave the site vulnerable to clickjacking, XSS, and data injection.")
     parts = build_cat_card("HTTP Security Headers", col, f"{score}% coverage", rows, hh.get("issues", []), S, fallback=fb)
 
     parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if score >= 80:
+    if score is not None and score >= 80:
         parts.append(Paragraph(
             "Security headers are well configured. These HTTP response headers instruct browsers to enforce "
             "security policies, preventing common web attacks such as clickjacking, cross-site scripting (XSS), "
@@ -255,7 +266,7 @@ def cat_headers(d, S):
     parts.append(Spacer(1, 2 * mm))
     parts.append(Paragraph("<b>Recommended Actions</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if score < 80:
+    if score is not None and score < 80:
         parts.append(Paragraph("1. Add missing security headers to your web server configuration (Apache, Nginx, or CDN).", S["body"]))
         parts.append(Paragraph("2. Prioritise Content-Security-Policy (CSP) and X-Frame-Options as they prevent the most common attacks.", S["body"]))
         parts.append(Paragraph("3. Test header changes using securityheaders.com before deploying to production.", S["body"]))
@@ -1767,8 +1778,8 @@ def cat_compliance_frameworks(data, S):
 
 def cat_website(d, S):
     ws    = d.get("website_security", {})
-    score = ws.get("score", 0)
-    col   = _tl(score >= 80, score >= 50)
+    score = score_or_none(ws)
+    col   = C_GREY_4 if score is None else _tl(score >= 80, score >= 50)
     ck    = ws.get("cookies", {})
     rows  = [
         ("HTTPS enforced", "Yes" if ws.get("https_enforced") else "No"),
@@ -1777,12 +1788,14 @@ def cat_website(d, S):
         ("Cookie Secure",  "OK" if ck.get("secure", True) else "Issues"),
         ("Cookie HttpOnly","OK" if ck.get("httponly", True) else "Issues"),
     ]
-    fb = "Website security configuration is strong — HTTPS enforced with secure cookie settings." if score >= 80 else f"Website security score of {score}% — review HTTPS enforcement, mixed content, and cookie security settings."
+    fb = ("This check did not run on this scan, so no verdict is implied." if score is None else
+          "Website security configuration is strong — HTTPS enforced with secure cookie settings." if score >= 80 else
+          f"Website security score of {score}% — review HTTPS enforcement, mixed content, and cookie security settings.")
     parts = build_cat_card("Website Security", col, f"{score}%", rows, ws.get("issues", []), S, fallback=fb)
 
     parts.append(Paragraph("<b>What This Means</b>", S["cat_title"]))
     parts.append(Spacer(1, 1 * mm))
-    if score >= 80:
+    if score is not None and score >= 80:
         parts.append(Paragraph(
             "Website security fundamentals are well implemented. HTTPS is enforced, cookies are configured "
             "with Secure and HttpOnly flags, and no mixed content issues were detected. This protects user "
@@ -1817,8 +1830,8 @@ def cat_website(d, S):
 def cat_web_ranking(d, S):
     wr = d.get("web_ranking", {})
     rank = wr.get("rank")
-    score = wr.get("score", 30)
-    col = _tl(score >= 70, score >= 40)
+    score = score_or_none(wr)
+    col = C_GREY_4 if score is None else _tl(score >= 70, score >= 40)
     rows = [
         ("Tranco Rank", f"#{rank:,}" if rank else "Not in top 1M"),
         ("In List", "Yes" if wr.get("in_list") else "No"),
@@ -1842,8 +1855,9 @@ def cat_web_ranking(d, S):
 
 def cat_info_disclosure(d, S):
     info = d.get("info_disclosure", {})
-    score = info.get("score", 100)
-    col = _tl(score >= 90, score >= 60)
+    score = score_or_none(info)
+    # Grey, not green: an unassessed check is not a passing one.
+    col = C_GREY_4 if score is None else _tl(score >= 90, score >= 60)
     exposed = info.get("exposed_paths", [])
     rows = [("Exposed Paths", str(len(exposed)))]
     for p in exposed[:5]:
@@ -1851,7 +1865,8 @@ def cat_info_disclosure(d, S):
     if len(exposed) > 5:
         rows.append(("...", f"+{len(exposed)-5} more"))
     fb = f"{len(exposed)} sensitive path(s) exposed — internal files or configuration may be accessible to attackers." if exposed else "No sensitive files or configuration paths are publicly accessible."
-    parts = build_cat_card("Information Disclosure", col, f"{score}%",
+    parts = build_cat_card("Information Disclosure", col,
+                           f"{score}%" if score is not None else "Not assessed",
                           rows, info.get("issues", []), S, fallback=fb)
     parts += waf_truncation_note(info, S)
 
@@ -3886,8 +3901,10 @@ def build_summary_table(results: dict, S) -> Table:
         return [circ, Paragraph(f"<b>{label}</b>", S["kv_key"]), Paragraph(val_text, S["kv_val"])]
 
     ssl_grade = cats.get("ssl", {}).get("grade", "?")
-    em_score  = cats.get("email_security", {}).get("score", 0)
-    hh_score  = cats.get("http_headers", {}).get("score", 0)
+    # These defaulted to 0, which reads as a genuine worst score rather than
+    # "we never looked" -- the mirror image of the perfect-score defaults.
+    em_score  = score_or_none(cats.get("email_security"))
+    hh_score  = score_or_none(cats.get("http_headers"))
     br_count  = cats.get("breaches", {}).get("breach_count", 0)
     adm_c     = cats.get("exposed_admin", {}).get("critical_count", 0)
     adm_h     = cats.get("exposed_admin", {}).get("high_count", 0)
@@ -3904,10 +3921,12 @@ def build_summary_table(results: dict, S) -> Table:
     rows = [
         row("SSL Grade",             ssl_grade,
             _tl(ssl_grade in ("A+", "A", "B"), ssl_grade == "C")),
-        row("Email Security Score",  f"{em_score}/10",
-            _tl(em_score >= 8, em_score >= 5)),
-        row("HTTP Security Headers", f"{hh_score}%",
-            _tl(hh_score >= 80, hh_score >= 50)),
+        row("Email Security Score",
+            f"{em_score}/10" if em_score is not None else "Not assessed",
+            C_GREY_4 if em_score is None else _tl(em_score >= 8, em_score >= 5)),
+        row("HTTP Security Headers",
+            f"{hh_score}%" if hh_score is not None else "Not assessed",
+            C_GREY_4 if hh_score is None else _tl(hh_score >= 80, hh_score >= 50)),
         row(*_breach_summary_row(cats, br_count)),
         row("Exposed Admin Panels",  adm_c + adm_h,
             _tl(adm_c + adm_h == 0, adm_c == 0)),
@@ -4470,7 +4489,7 @@ def _kill_chain_severities(results: dict) -> dict:
     osv_crit = osv.get("critical_count", 0)
     osv_high = osv.get("high_count", 0)
     ssl_grade = cats.get("ssl", {}).get("grade", "A")
-    hh_score = cats.get("http_headers", {}).get("score", 100)
+    hh_score = score_or_none(cats.get("http_headers"))
     # Supply-chain exploitation escalators (Step 7).
     _tpjs = cats.get("third_party_js", {}) or {}
     _dm = cats.get("dependency_manifests", {}) or {}
@@ -4480,7 +4499,7 @@ def _kill_chain_severities(results: dict) -> dict:
         or _tpjs.get("missing_sri_count", 0) > 0 or bool(_dm.get("exposed_manifests"))
     exploit = ("CRITICAL" if (osv_crit > 0 or sc_exp_crit)
                else "HIGH" if (osv_high > 0 or ssl_grade in ("D", "E", "F") or sc_exp_high)
-               else "MEDIUM" if hh_score < 50 else "LOW")
+               else "MEDIUM" if (hh_score is not None and hh_score < 50) else "LOW")
 
     # Phase 4 — Data Access & Impact
     db_ports = {3306, 5432, 27017, 6379, 9200, 1433}
@@ -4574,8 +4593,9 @@ def _build_attackers_view(results: dict, S) -> list:
     if osv_crit: exploit_findings.append(f"{osv_crit} critical CVE(s) with known exploits — remote code execution possible")
     if osv_high: exploit_findings.append(f"{osv_high} high-severity CVE(s) — privilege escalation and data access")
     if ssl_grade in ("D", "E", "F"): exploit_findings.append(f"SSL grade {ssl_grade} — weak encryption enables man-in-the-middle interception")
-    headers = cats.get("http_headers", {}).get("score", 100)
-    if headers < 40: exploit_findings.append(f"Security headers score {headers}% — vulnerable to XSS, clickjacking, and injection attacks")
+    headers = score_or_none(cats.get("http_headers"))
+    if headers is not None and headers < 40:
+        exploit_findings.append(f"Security headers score {headers}% — vulnerable to XSS, clickjacking, and injection attacks")
     exploit_findings += _supply_chain_attacker_findings(cats)["exploit"]  # Step 7
     if not exploit_findings: exploit_findings.append("No critical exploitation vectors identified from external scan")
 

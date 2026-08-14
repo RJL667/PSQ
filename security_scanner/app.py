@@ -453,9 +453,16 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
             # object storage (replaces the ephemeral scans/<domain>/ disk archive).
             # The download endpoint then serves from the store; reportlab is off the
             # request path for the common case.
+            # ALL THREE TIERS, not just `full`. Pre-rendering only one meant
+            # the other two were never exercised until a human clicked, so a
+            # tier that could not build stayed invisible -- which is exactly how
+            # the Executive Summary was broken for an unknown period while the
+            # other two downloaded fine. Measured cost: assessment 0.05s,
+            # summary 0.06s, full 0.30s, on a scan that takes 90-180s.
             try:
-                from pdf_service import enqueue_pdf
-                enqueue_pdf(scan_id, "full", results)
+                from pdf_service import enqueue_pdf, TIERS
+                for _tier in TIERS:
+                    enqueue_pdf(scan_id, _tier, results)
             except Exception:
                 pass  # PDF generation is best-effort; never fails the scan
 

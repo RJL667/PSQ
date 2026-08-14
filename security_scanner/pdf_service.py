@@ -21,9 +21,23 @@ from job_queue import InProcessJobQueue
 TIERS = ("assessment", "summary", "full")
 
 
+# Bump when a RENDER change should invalidate every stored PDF.
+#
+# The key carried no version, so a stored PDF outlived the code that produced
+# it. When the Executive Summary's inverted credential verdict was fixed on
+# 2026-08-14, every client who had already downloaded one was still being
+# served the wrong artefact from object storage -- the fix had landed and the
+# PDFs had not. It took a manual purge of 17 blobs, which is a step nobody will
+# remember next time.
+#
+# History: v1 = pre-2026-08-14. v2 = credential verdict read from risk_level
+# instead of an inverted score threshold, plus the degraded-render hardening.
+RENDER_VERSION = "v2"
+
+
 def pdf_key(scan_id: str, tier: str) -> str:
     tier = tier if tier in TIERS else "full"
-    return f"pdfs/{scan_id}/{tier}.pdf"
+    return f"pdfs/{scan_id}/{RENDER_VERSION}/{tier}.pdf"
 
 
 def get_pdf(scan_id: str, tier: str) -> Optional[bytes]:
@@ -52,7 +66,28 @@ def render_and_store(scan_id: str, tier: str, results: dict) -> bytes:
 
 
 def _handler(payload: dict):
-    render_and_store(payload["scan_id"], payload.get("tier", "full"), payload["results"])
+    """Render one tier. A failure here MUST be counted.
+
+    job_queue swallows handler exceptions on the grounds that "the handler
+    records failure itself" -- which run_scan does and this did not. The result
+    was three silent swallows in a row (queue, store, enqueue call site), so a
+    tier that could not build produced no log line, no metric and no alarm. The
+    first anyone knew was a client clicking download.
+    """
+    tier = payload.get("tier", "full")
+    try:
+        render_and_store(payload["scan_id"], tier, payload["results"])
+    except Exception as e:
+        try:
+            from observability import PDF_RENDER_FAILURES
+            PDF_RENDER_FAILURES.labels(tier=tier).inc()
+        except Exception:
+            pass
+        import logging
+        logging.getLogger(__name__).exception(
+            "PDF render failed for scan=%s tier=%s: %s",
+            payload.get("scan_id"), tier, e)
+        raise
 
 
 # Separate pool sized for reportlab's memory (independent of the scan worker pool).

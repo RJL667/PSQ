@@ -30,6 +30,7 @@ from pdf_helpers import (
     build_styles, section_header, section_with_first_card, badge_text,
     kv_row, issues_cell, build_cat_card, not_assessed_card,
     _header_footer, _section_header_banner, _risk_colour_value, _colour_issue,
+    score_or_none,
     waf_posture,
     _cat_table, _tl, _load_assessment_brand, _brand,
 )
@@ -122,8 +123,8 @@ def _assessment_extract_kpis(results: dict) -> list:
     {value, label, description, severity in {ok,warn,bad}}."""
     cats = results.get("categories", {})
     ssl_grade = cats.get("ssl", {}).get("grade", "?")
-    em_score  = cats.get("email_security", {}).get("score", 0)
-    hh_score  = cats.get("http_headers", {}).get("score", 0)
+    em_score  = score_or_none(cats.get("email_security"))
+    hh_score  = score_or_none(cats.get("http_headers"))
     adm_total = (cats.get("exposed_admin", {}).get("critical_count", 0)
                  + cats.get("exposed_admin", {}).get("high_count", 0))
     hrp_services = cats.get("high_risk_protocols", {}).get("exposed_services", [])
@@ -138,8 +139,15 @@ def _assessment_extract_kpis(results: dict) -> list:
 
     return [
         {"value": ssl_grade,           "label": "SSL / TLS Grade",       "description": "Encryption quality",         "severity": ssl_sev(ssl_grade)},
-        {"value": f"{em_score}/10",    "label": "Email Security",        "description": "Phishing exposure",          "severity": "ok" if em_score >= 8 else "warn" if em_score >= 5 else "bad"},
-        {"value": f"{hh_score}%",      "label": "HTTP Sec. Headers",     "description": "Web app exposure",           "severity": "ok" if hh_score >= 80 else "warn" if hh_score >= 50 else "bad"},
+        # A tile for a checker that did not run shows its state, not a number.
+        # Printing "10/10" or "100%" for an absent result is the same false
+        # clean the scoring layer stopped banking.
+        {"value": f"{em_score}/10" if em_score is not None else "n/a",
+         "label": "Email Security",        "description": "Phishing exposure",
+         "severity": "unknown" if em_score is None else "ok" if em_score >= 8 else "warn" if em_score >= 5 else "bad"},
+        {"value": f"{hh_score}%" if hh_score is not None else "n/a",
+         "label": "HTTP Sec. Headers",     "description": "Web app exposure",
+         "severity": "unknown" if hh_score is None else "ok" if hh_score >= 80 else "warn" if hh_score >= 50 else "bad"},
         {"value": str(adm_total),     "label": "Exposed Admin Panels", "description": "Direct entry points",        "severity": "bad" if adm_total > 0 else "ok"},
         {"value": str(db_count),      "label": "Critical DB Exposed",  "description": "Database internet-facing",   "severity": "bad" if db_count > 0 else "ok"},
         {"value": "Yes" if rdp_exposed else "No", "label": "RDP Exposed", "description": "Top ransomware vector",    "severity": "bad" if rdp_exposed else "ok"},
@@ -189,17 +197,19 @@ def _assessment_kill_chain(results: dict) -> list:
 
     # Phase 3: Exploitation
     ssl_grade = cats.get("ssl", {}).get("grade", "A")
-    hh_score  = cats.get("http_headers", {}).get("score", 100)
+    hh_score  = score_or_none(cats.get("http_headers"))
     osv_crit  = cats.get("osv_vulns", {}).get("critical_count", 0)
     osv_high  = cats.get("osv_vulns", {}).get("high_count", 0)
     p3_sev = sevs["exploit"]
     p3f = []
     if ssl_grade in ("D", "E", "F"): p3f.append(f"SSL grade {ssl_grade} enables interception")
-    if hh_score < 50: p3f.append(f"Security headers at {hh_score}% only")
+    if hh_score is not None and hh_score < 50:
+        p3f.append(f"Security headers at {hh_score}% only")
     if osv_crit: p3f.append(f"{osv_crit} critical CVE(s) with known exploits")
     for _scf in _supply_chain_attacker_findings(cats)["exploit"]:  # Step 7
         if len(p3f) < 3: p3f.append(_scf)
-    if hh_score < 50 and len(p3f) < 3: p3f.append("Exposed to XSS & clickjacking")
+    if hh_score is not None and hh_score < 50 and len(p3f) < 3:
+        p3f.append("Exposed to XSS & clickjacking")
     if not p3f: p3f = ["No critical exploitation vectors identified"]
 
     # Phase 4: Data & Impact
@@ -383,8 +393,10 @@ def _assessment_top_findings(results: dict) -> list:
         }))
 
     # Email weak
-    em_score = cats.get("email_security", {}).get("score", 10)
-    if em_score < 5:
+    # Unknown != healthy. This defaulted to 10/10, so a missing or skipped
+    # email checker silently produced "no email finding" on the exec deck.
+    em_score = score_or_none(cats.get("email_security"))
+    if em_score is not None and em_score < 5:
         cands.append((60, {
             "level": "HIGH",
             "headline": f"Weak email authentication ({em_score}/10)",
@@ -406,8 +418,9 @@ def _assessment_top_findings(results: dict) -> list:
         }))
 
     # HTTP headers weak
-    hh = cats.get("http_headers", {}).get("score", 100)
-    if hh < 40:
+    # Defaulted to 100/100 -- an absent headers result rendered as perfect.
+    hh = score_or_none(cats.get("http_headers"))
+    if hh is not None and hh < 40:
         cands.append((50, {
             "level": "MEDIUM",
             "headline": f"Web application headers misconfigured ({hh}%)",
@@ -430,7 +443,7 @@ def _assessment_top_findings(results: dict) -> list:
     # the target is otherwise healthy. These are lower-tier posture signals.
     if len(cands) < 3:
         have = {c[1]["headline"] for c in cands}
-        em_b = cats.get("email_security", {}).get("score", 10)
+        em_b = score_or_none(cats.get("email_security"))
         sub_count = cats.get("subdomains", {}).get("total_count", 0)
         ip_count = cats.get("external_ips", {}).get("total_unique_ips", 0)
         breach_emails = cats.get("dehashed", {}).get("unique_emails", 0)
@@ -441,13 +454,13 @@ def _assessment_top_findings(results: dict) -> list:
                 "headline": f"SSL/TLS grade {ssl_grade} — encryption could be stronger",
                 "summary": "Encryption is acceptable but not best-practice.",
                 "detail": f"SSL grade {ssl_grade} indicates older cipher suites or configuration that should be hardened to an A grade."}))
-        if 5 <= em_b < 8:
+        if em_b is not None and 5 <= em_b < 8:
             backfill.append((36, {
                 "level": "LOW",
                 "headline": f"Email authentication at {em_b}/10",
                 "summary": "Phishing-resistance has room to improve.",
                 "detail": "SPF/DKIM/DMARC are partially configured; tightening DMARC to p=reject reduces domain-spoofing risk."}))
-        if 40 <= hh < 80:
+        if hh is not None and 40 <= hh < 80:
             backfill.append((34, {
                 "level": "LOW",
                 "headline": f"Web security headers at {hh}%",
@@ -507,7 +520,10 @@ ASX_SANS_ITAL   = "Helvetica-Oblique"
 
 _ASX_SEV_COLOR = {"CRITICAL": ASX_CRITICAL, "HIGH": ASX_AMBER, "MEDIUM": ASX_AMBER, "LOW": ASX_GREEN}
 _ASX_SEV_HEX   = {"CRITICAL": "#a32f25", "HIGH": "#d97706", "MEDIUM": "#d97706", "LOW": "#16a34a"}
-_KPI_COLOR     = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED}
+# "unknown" is grey on purpose: a KPI tile for a checker that did not run must
+# not borrow any of the three verdict colours.
+_KPI_COLOR     = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED,
+                  "unknown": ASX_GREY_MUTED}
 
 
 # --- Drawing primitives --------------------------------------------------
@@ -790,7 +806,10 @@ def _assessment_slide_score_and_kpis(results):
         ("INNERGRID", (0, 0), (-1, -1), 6, ASX_WHITE),
     ]
     # Coloured LEFT bar per cell — paint via LINEBEFORE with thick line
-    sev_to_color = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED}
+    # Second copy of the KPI severity map; "unknown" must reach both or a tile
+    # for a checker that did not run raises KeyError mid-render.
+    sev_to_color = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED,
+                    "unknown": ASX_GREY_MUTED}
     flat = [kpis[0], kpis[1], kpis[2], kpis[3], kpis[4], kpis[5]]
     for idx in range(6):
         col = idx % 3
@@ -1363,31 +1382,53 @@ def _assessment_slide_financial_impact(results):
     bar_area_w = ASX_INNER_W - 290 - 30  # right column width minus padding
     max_val = max((v for _, _, v, _ in rows), default=1) or 1
 
-    bar_chart_rows = []
-    for label, sub, val, bar_color in rows:
-        # Label + sub on one line: "Label  ·  sub"
-        title_para = Paragraph(
-            f"<b><font color='#0f2744'>{label}</font></b>"
-            f"  <font color='#94a3b8' size='10'>&middot;  {sub}</font>",
-            scn_lbl_st)
-        # Bar width proportional to value (min 30pt for visibility)
-        bw = max(30, (val / max_val) * (bar_area_w - 130))
-        bar = _asx_bar(bw, bar_color, height=20)
-        # Bar + value side by side
-        bar_row = Table([[bar, Paragraph(fmt(val), ParagraphStyle(
-            "v", fontSize=15, fontName=ASX_SANS_BOLD,
-            textColor=bar_color, leading=18, alignment=TA_LEFT))]],
-            colWidths=[bw + 6, 130])
-        bar_row.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-            ("LEFTPADDING", (1, 0), (1, 0), 10),
-        ]))
-        bar_chart_rows.append([title_para])
-        bar_chart_rows.append([Spacer(1, 3)])
-        bar_chart_rows.append([bar_row])
-        bar_chart_rows.append([Spacer(1, 5)])
+    # NO SCENARIOS = NO TABLE. ReportLab raises "Table must have at least a row
+    # and column" on an empty row list, which took down the whole Executive
+    # Summary while the broker summary and full report rendered fine.
+    #
+    # This is reachable in production: scanner.py leaves
+    # results["insurance"] = {"error": ...} when apply_insurance_analytics
+    # raises, so the scan stores, downloads two tiers, and 500s the third. Same
+    # symptom as the credential crash of 2026-08-14, different trigger, found by
+    # the review agent that critiqued the fix for the first one.
+    #
+    # Say so instead. An absent financial model is not a zero exposure, and the
+    # deck must not imply one.
+    if not rows:
+        note = Paragraph(
+            "Financial exposure could not be modelled for this scan, so no loss "
+            "scenarios are shown. This is not an indication of low exposure — the "
+            "modelling inputs were unavailable. Re-run the scan before relying on "
+            "this report for a placement decision.",
+            ParagraphStyle("fin_na", fontSize=11, fontName=ASX_SANS,
+                           textColor=ASX_GREY_BODY, leading=16))
+        bar_chart_rows = [[note]]
+    else:
+        bar_chart_rows = []
+        for label, sub, val, bar_color in rows:
+            # Label + sub on one line: "Label  ·  sub"
+            title_para = Paragraph(
+                f"<b><font color='#0f2744'>{label}</font></b>"
+                f"  <font color='#94a3b8' size='10'>&middot;  {sub}</font>",
+                scn_lbl_st)
+            # Bar width proportional to value (min 30pt for visibility)
+            bw = max(30, (val / max_val) * (bar_area_w - 130))
+            bar = _asx_bar(bw, bar_color, height=20)
+            # Bar + value side by side
+            bar_row = Table([[bar, Paragraph(fmt(val), ParagraphStyle(
+                "v", fontSize=15, fontName=ASX_SANS_BOLD,
+                textColor=bar_color, leading=18, alignment=TA_LEFT))]],
+                colWidths=[bw + 6, 130])
+            bar_row.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("LEFTPADDING", (1, 0), (1, 0), 10),
+            ]))
+            bar_chart_rows.append([title_para])
+            bar_chart_rows.append([Spacer(1, 3)])
+            bar_chart_rows.append([bar_row])
+            bar_chart_rows.append([Spacer(1, 5)])
 
     bar_chart = Table(bar_chart_rows, colWidths=[bar_area_w])
     bar_chart.setStyle(TableStyle([
