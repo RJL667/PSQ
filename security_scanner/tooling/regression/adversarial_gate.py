@@ -1922,6 +1922,85 @@ def _check_card_severity_equivalence(failures):
     print(f"  [{'PASS' if ok_w else 'FAIL'}] card_severity:dimension_is_worst  {w}")
 
 
+def _check_exec_deck_credentials(failures):
+    """The Executive Summary must render, and must not invert the verdict.
+
+    TWO live defects, found 2026-08-14 when the Executive Summary would not
+    download while the broker summary and full report both did.
+
+    1. CRASH. `_assessment_top_findings` read
+       `credential_risk.get("risk_score", 0)`. The default applies only when the
+       KEY IS ABSENT -- the classifier writes the key with value None for an
+       unassessed estate, so `None >= 50` raised TypeError. Every scan run with
+       the credential lookup skipped produced a broken exec deck and two working
+       ones, which is why it looked tier-specific rather than data-specific.
+
+    2. INVERSION. It then thresholded that score, but K5_RISK_SCORE is
+       CRITICAL 0 / HIGH 25 / MEDIUM 55 / LOW 85 / NONE 100 -- HIGHER IS SAFER.
+       The tests read `>= 80 -> CRITICAL`, so the SAFEST estates were reported
+       as the worst and genuinely critical ones were not flagged by score at all:
+
+           classifier LOW (85)      -> deck said CRITICAL
+           classifier NONE (100)    -> deck said CRITICAL
+           classifier CRITICAL (0)  -> not flagged
+
+       Measured across 20 stored scans, the deck disagreed with the classifier
+       on 13. morgancarco.com -- an unregistered domain with ZERO credential
+       records -- reported "Overall credential risk is classified as CRITICAL".
+
+    The deck now reads `risk_level`, which the classifier already states.
+    """
+    import importlib as _il5
+    pr5 = _il5.import_module("pdf_report")
+
+    def deck_level(cred_risk, dehashed=None):
+        res = {"categories": {"credential_risk": cred_risk,
+                              "dehashed": dehashed or {"total_entries": 0}}}
+        found = pr5._assessment_top_findings(res)
+        f = next((x for x in found
+                  if "credential risk" in str(x.get("headline", "")).lower()), None)
+        return f["level"] if f else None
+
+    # The classifier's verdict must survive to the deck unchanged.
+    for level, score in (("CRITICAL", 0), ("HIGH", 25), ("MEDIUM", 55)):
+        got = deck_level({"risk_level": level, "risk_score": score, "assessed": True})
+        ok = got == level
+        if not ok:
+            failures.append(
+                f"exec_deck[{level}]: deck reported {got!r} for a classifier verdict of "
+                f"{level!r} (score {score}, where HIGHER IS SAFER) — thresholding that "
+                "score inverts the verdict and reports the safest estates as the worst")
+        print(f"  [{'PASS' if ok else 'FAIL'}] exec_deck:level/{level:<9}          {got}")
+
+    # A safe estate must NOT be reported as a finding at all.
+    for level, score in (("LOW", 85), ("NONE", 100)):
+        got = deck_level({"risk_level": level, "risk_score": score, "assessed": True})
+        ok = got is None
+        if not ok:
+            failures.append(
+                f"exec_deck[{level}]: a {level} credential estate (score {score}) was "
+                f"reported as a {got!r} finding — this is the inversion that put "
+                "'credential risk CRITICAL' on clean reports")
+        print(f"  [{'PASS' if ok else 'FAIL'}] exec_deck:safe_not_flagged/{level:<5} {got}")
+
+    # An UNASSESSED estate must not crash, and must not invent a level.
+    for label, cr in (("risk_score None", {"risk_level": "UNKNOWN", "risk_score": None,
+                                           "assessed": False}),
+                      ("missing entirely", {})):
+        try:
+            got = deck_level(cr)
+            crashed = False
+        except Exception as e:
+            got, crashed = "%s: %s" % (type(e).__name__, e), True
+        ok = (not crashed) and got is None
+        if not ok:
+            failures.append(
+                f"exec_deck[unassessed/{label}]: {got!r} — an unassessed credential estate "
+                "must not raise and must not be given a level; the Executive Summary "
+                "would not download at all while the other two tiers rendered")
+        print(f"  [{'PASS' if ok else 'FAIL'}] exec_deck:unassessed/{label:<16} {got}")
+
+
 def _check_scan_target_input(failures):
     """Two ways the scan target goes wrong before a single checker runs.
 
@@ -2217,6 +2296,7 @@ def main():
     _check_dehashed_credit_guards(failures)
     _check_score_scale_agreement(failures)
     _check_card_severity_equivalence(failures)
+    _check_exec_deck_credentials(failures)
     _check_balance_not_metered(failures)
     _check_hibp_and_waf_evidence(failures)
     _check_classification(failures)

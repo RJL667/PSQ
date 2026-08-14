@@ -289,15 +289,51 @@ def _assessment_top_findings(results: dict) -> list:
             "detail": "Port 3389 (Remote Desktop) is reachable from the internet. A single weak or stolen password could allow an attacker to log in interactively to a workstation or server."
         }))
 
-    # Credential risk
-    cr_score = (ins.get("credential_risk", {}) or cats.get("credential_risk", {})).get("risk_score", 0)
-    cred_total = cats.get("dehashed", {}).get("total_entries", 0)
-    staff_n = cats.get("dehashed", {}).get("staff_accounts_total", 0)
-    svc_n = cats.get("hudson_rock", {}).get("compromised_services_total", 0)
-    hr_emp = cats.get("hudson_rock", {}).get("compromised_employees", 0)
-    if cred_total > 0 or cr_score >= 50:
-        level = ("CRITICAL" if (cred_total >= 20 or cr_score >= 80)
-                 else "HIGH" if (cred_total >= 5 or cr_score >= 50) else "MEDIUM")
+    # Credential risk.
+    #
+    # This block thresholded credential_risk.risk_score, which is K5_RISK_SCORE:
+    # CRITICAL 0, HIGH 25, MEDIUM 55, LOW 85, NONE 100 -- HIGHER IS SAFER. The
+    # tests read `cr_score >= 80 -> CRITICAL`, so the polarity was inverted and
+    # the deck reported the SAFEST estates as the worst:
+    #
+    #     classifier LOW  (85)  -> deck said CRITICAL
+    #     classifier NONE (100) -> deck said CRITICAL
+    #     classifier CRITICAL (0) -> not flagged by score at all
+    #
+    # Measured across 20 scans: the deck disagreed with the classifier on 13.
+    # morgancarco.com, an unregistered domain with ZERO credential records,
+    # reported "Overall credential risk is classified as CRITICAL".
+    #
+    # It also crashed outright when the estate was not assessed. `.get(key, 0)`
+    # returns None when the key EXISTS with a None value, which is exactly what
+    # the classifier writes for UNKNOWN -- so every scan run with the credential
+    # lookup skipped raised TypeError and the Executive Summary would not
+    # download at all, while the other two tiers rendered fine.
+    #
+    # The classifier already states the verdict. Read it instead of re-deriving
+    # one from a number whose direction this block had backwards.
+    _cr = (ins.get("credential_risk") or cats.get("credential_risk") or {})
+    cr_level = str(_cr.get("risk_level") or "").upper()
+    cr_assessed = _cr.get("assessed") is not False and cr_level not in ("", "UNKNOWN")
+    _dh = cats.get("dehashed") or {}
+    cred_total = _dh.get("total_entries") or 0
+    staff_n = _dh.get("staff_accounts_total") or 0
+    svc_n = (cats.get("hudson_rock") or {}).get("compromised_services_total") or 0
+    hr_emp = (cats.get("hudson_rock") or {}).get("compromised_employees") or 0
+
+    # Only claim a credential finding when the estate was actually assessed and
+    # the verdict is material. An unassessed estate is not a clean one, but it
+    # is not a FINDING either -- coverage reports it, this deck must not invent
+    # a level for it.
+    if cr_assessed and cr_level in ("CRITICAL", "HIGH", "MEDIUM"):
+        level = cr_level
+    elif not cr_assessed and cred_total >= 5:
+        # Classifier unavailable but the raw corpus is not empty: fall back to
+        # volume alone, which is weaker evidence, so never above HIGH.
+        level = "HIGH" if cred_total >= 20 else "MEDIUM"
+    else:
+        level = None
+    if level:
         counts = (f"{cred_total} credential records found"
                   + (f", incl. {staff_n} staff account(s)" if staff_n else "")
                   + (f" and {svc_n} service(s) captured from {hr_emp} infected employee device(s)"
