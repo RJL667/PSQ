@@ -622,6 +622,52 @@ def _check_credential_failclosed(failures):
 # before the flip be redeemed after it. Asserted here so a future refactor cannot
 # quietly reopen it.
 #   (label, env value, expect_blocked)
+# ---------------------------------------------------------------------------
+# PAID-PROVIDER EGRESS GUARD.
+#
+# THIS GATE MUST BE OFFLINE. It runs on every push -- twice per check-in, once
+# per remote -- and on a developer machine `import app` loads .env, which puts
+# the LIVE production keys into the process. Any scenario that reaches a metered
+# provider therefore spends real money, silently, on every push.
+#
+# That is not hypothetical: _check_export_switch did exactly this from the day
+# the export scenarios were added, at 5 DeHashed credits a run, and nobody saw
+# it because a local run meters to SQLite while we read the ledger from the VM's
+# Postgres. It cost roughly 500 credits before it was found.
+#
+# So: block the hosts, collect what was attempted, and FAIL the gate. Blocking
+# alone is not enough -- provider_client.guarded_call swallows the exception and
+# returns None, so a blocked call still looks like a passing scenario. The
+# collected list is asserted at the end of main() for that reason.
+_PAID_PROVIDER_HOSTS = (
+    "dehashed.com", "intelx.io", "api.shodan.io", "virustotal.com",
+    "securitytrails.com", "hudsonrock.com", "haveibeenpwned.com",
+    "snusbase.com", "leakcheck.io", "whiteintel.io",
+)
+_BLOCKED_EGRESS: list = []
+
+
+def _install_paid_egress_guard():
+    """Patch the ONE funnel every requests verb passes through.
+
+    Session.request, not requests.post -- a scenario that mocks requests.post
+    leaves requests.get, requests.request and any Session call wide open, which
+    is precisely how the export path stayed invisible to the balance-metering
+    scenario sitting a few hundred lines away.
+    """
+    import requests.sessions
+    _orig = requests.sessions.Session.request
+
+    def guarded(self, method, url, *args, **kwargs):
+        u = str(url).lower()
+        if any(h in u for h in _PAID_PROVIDER_HOSTS):
+            _BLOCKED_EGRESS.append(f"{method} {url}")
+            raise RuntimeError(f"paid-provider egress blocked in gate: {method} {url}")
+        return _orig(self, method, url, *args, **kwargs)
+
+    requests.sessions.Session.request = guarded
+
+
 EXPORT_SWITCH_SCENARIOS = [
     ("unset (default)",  None,    True),
     ("explicit off",     "0",     True),
@@ -635,11 +681,32 @@ def _check_export_switch(failures):
     # init_db() against whatever DB the env points at, so instead patch the flag
     # the decorator reads at call time (route behaviour), and check the env
     # parsing separately against the same values (config behaviour).
+    #
+    # THE "enabled" SCENARIO REACHES A REAL, PAGINATED, BILLED DeHashed FETCH.
+    # 2026-08-14: this was the single largest DeHashed credit consumer in the
+    # project. With export enabled the POST is NOT blocked, so the route runs
+    # credential_export.generate_encrypted_export -> _fetch_dehashed_full, which
+    # pages max_pages=5 x size=100 against `domain:example.com` -- 1,220,357
+    # records, so no page is ever short and the loop always runs all five.
+    # FIVE credits per gate run, TEN per check-in (the pre-push hook fires once
+    # per remote), plus every manual run during development. Measured: balance
+    # 476 -> 466 across exactly two runs.
+    #
+    # It never appeared in the usage ledger because a local run writes to SQLite,
+    # not the VM's Postgres, so the durable ledger we report from never saw one.
+    #
+    # Stub the fetch, not the flag: the point of these scenarios is the ROUTE's
+    # open/closed behaviour (503 on POST and on download, plus the status
+    # endpoint), all of which is preserved. Only the network call goes away.
     import importlib
     app_mod = importlib.import_module("app")
+    ce_mod = importlib.import_module("credential_export")
     for label, val, want_blocked in EXPORT_SWITCH_SCENARIOS:
         parsed = str(val or "").strip().lower() in ("1", "true", "yes", "on")
         with mock.patch.object(app_mod, "CREDENTIAL_EXPORT_ENABLED", parsed), \
+             mock.patch.object(ce_mod, "_fetch_dehashed_full", return_value=[
+                 {"email": "probe@examplecorp.co.za", "password": "x",
+                  "database_name": "synthetic"}]), \
              app_mod.app.test_client() as c:
             post = c.post("/api/credential-export", json={
                 "domain": "example.com", "consent": True, "authorised_by": "T",
@@ -2408,6 +2475,7 @@ def _check_breach_intel(failures):
 
 def main():
     failures = []
+    _install_paid_egress_guard()   # must be first: the gate is offline by contract
     _check_breach_intel(failures)
     _check_key_probe(failures)
     _check_datastore_readiness(failures)
@@ -2450,6 +2518,21 @@ def main():
                 failures.append(f"{name}: port {port} confirmed={got} != expected {want}")
                 ok = False
         print(f"  [{'PASS' if ok else 'FAIL'}] {name:<18} scan={sorted(scan_ports)} high-risk={sorted(hrp_ports)}")
+
+    # Every scenario has run. Anything that tried to reach a metered provider
+    # was blocked above, but blocking is invisible to the scenario itself
+    # (guarded_call swallows the error and returns None), so assert it here.
+    if _BLOCKED_EGRESS:
+        uniq = sorted(set(_BLOCKED_EGRESS))
+        failures.append(
+            f"paid_egress: the gate attempted {len(_BLOCKED_EGRESS)} live call(s) to "
+            f"metered providers ({', '.join(uniq[:4])}"
+            f"{' ...' if len(uniq) > 4 else ''}). The gate runs on every push with the "
+            "live keys loaded from .env, so this spends real credits every time — "
+            "and a local run meters to SQLite, so it never shows up in the VM ledger. "
+            "Stub the provider call in the scenario that reaches it.")
+    print(f"  [{'PASS' if not _BLOCKED_EGRESS else 'FAIL'}] paid_egress:no_live_provider_calls  "
+          f"attempted={len(_BLOCKED_EGRESS)}")
 
     print("=" * 70)
     if failures:
