@@ -57,13 +57,13 @@ export default function RiskFactors({ r }: { r: Results }) {
             {view === 'impact' && (
               <>
                 <span className={styles.riskLabel} style={{ color: SEVERITY_COLOR[f.severity] }}>{f.riskLabel}</span>
-                {/* NOT a "+N" contribution to any score. It is 100 - the bar
-                    beside it, i.e. the remaining risk in this dimension. The
-                    leading plus read as additive: on one scan the five values
-                    summed to 326 while the overall score was 251, which relates
-                    to nothing. */}
-                <span className={styles.impact} title="Remaining risk in this dimension (100 minus the score shown by the bar). Not added to the overall score.">
-                  {f.impact != null ? `${f.impact} left` : '—'}
+                {/* The category whose own PDF card set this verdict. More use
+                    than the number that used to sit here, which was only the
+                    bar inverted and read as an additive contribution it never
+                    was: on one scan the five values summed to 326 against an
+                    overall score of 251. */}
+                <span className={styles.impact} title={`This verdict comes from ${f.topContributor}, matching that category's card in the PDF report`}>
+                  {f.topContributor}
                 </span>
               </>
             )}
@@ -82,7 +82,7 @@ export default function RiskFactors({ r }: { r: Results }) {
       <div className={styles.footnote}>
         {view === 'technical'
           ? 'Top contributor per dimension, from completed checkers.'
-          : 'Dimension scores are a deterministic roll-up of category scores (higher = safer). "N left" is the remaining risk in that dimension (100 minus the bar), not a contribution to the overall score. Where fewer categories produced a verdict than the dimension covers, the count is shown.'}
+          : 'Each dimension takes the verdict of its weakest category, matching that category’s card in the PDF report — a confirmed exposure is not averaged away by clean siblings. The name on the right is the category that set the verdict. Where fewer categories produced a verdict than the dimension covers, the count is shown.'}
       </div>
     </Panel>
   )

@@ -755,6 +755,11 @@ const TEN_POINT_CATEGORIES = new Set(['email_security', 'email_hardening'])
  *  say "Moderate" where the PDF card says "MEDIUM" -- the same verdict under
  *  two names, which is the small end of the same divergence problem. */
 const SEVERITY_RANK: Severity[] = ['positive', 'medium', 'high', 'critical']
+/** Where a band sits on the bar. Not a score -- the verdict is categorical,
+ *  and a bar that disagreed with its own label is what this replaces. */
+const SEVERITY_BAR: Record<string, number> = {
+  positive: 100, medium: 60, high: 32, critical: 10,
+}
 const SEVERITY_LABEL: Record<string, string> = {
   positive: 'Low', medium: 'Medium', high: 'High', critical: 'Critical',
   unknown: 'Not assessed',
@@ -784,32 +789,44 @@ export function getRiskFactors(r: Results | null): RiskFactorRow[] {
         topContributor: '—', impact: null, assessed: 0, total: categories.length,
       }
     }
-    const avg = Math.round(scored.reduce((n, s) => n + s.score, 0) / scored.length)
-    const worst = scored.slice().sort((a, b) => a.score - b.score)[0]
-
     // A dimension is as weak as its weakest member. Averaging is wrong for a
     // risk summary: a confirmed open FTP port does not become acceptable
     // because three sibling checks were clean. `_severity` is stamped during
     // scan assembly by card_severity.py -- the SAME rule the PDF card uses --
     // so the two artefacts cannot disagree about one scan.
     const stamped = categories
-      .map((id) => cat(r, id)?._severity as Severity | undefined)
-      .filter((v): v is Severity => !!v && v !== 'unknown')
-    const sev: Severity = stamped.length
-      ? SEVERITY_RANK.reduce((acc, s) => (stamped.includes(s) ? s : acc), 'positive' as Severity)
-      : (avg >= 75 ? 'positive' : avg >= 55 ? 'medium' : avg >= 35 ? 'high' : 'critical')
-    // Band vocabulary matches the PDF exactly (CRITICAL / HIGH / MEDIUM / LOW),
-    // so the same posture is never called two different things.
-    const riskLabel = SEVERITY_LABEL[sev]
+      .map((id) => [id, cat(r, id)?._severity as Severity | undefined] as const)
+      .filter((e): e is readonly [string, Severity] => !!e[1])
+
+    const real = stamped.filter(([, sv]) => sv !== 'unknown')
+    if (!real.length) {
+      return {
+        key, label, score: null, severity: 'unknown', riskLabel: 'Not assessed',
+        topContributor: '—', impact: null, assessed: 0, total: stamped.length || categories.length,
+      }
+    }
+
+    const sev: Severity =
+      SEVERITY_RANK.reduce((acc, s) => (real.some(([, v]) => v === s) ? s : acc), 'positive' as Severity)
+    // The bar has to agree with the verdict. It used to show the AVERAGE score
+    // while the label showed the worst member, which on takealot would have
+    // rendered a full-width bar labelled "High" reading "0 left". The verdict
+    // is categorical now -- it comes from the PDF's traffic light -- so the bar
+    // is a band position, not a mean.
+    const score = SEVERITY_BAR[sev]
+    // Name the category that actually SET the verdict, not the lowest number.
+    const driver = real.find(([, v]) => v === sev)?.[0]
+
     return {
-      key, label, score: avg, severity: sev, riskLabel,
-      topContributor: CATEGORY_LABELS[worst.id] ?? worst.id,
-      impact: 100 - avg,
-      // How much of the dimension actually produced a verdict. A dimension
-      // resting on one of four categories is not the same claim as one resting
-      // on all four, and the label alone cannot tell them apart.
-      assessed: scored.length,
-      total: categories.length,
+      key, label, score, severity: sev, riskLabel: SEVERITY_LABEL[sev],
+      topContributor: driver ? (CATEGORY_LABELS[driver] ?? driver) : '—',
+      impact: null,
+      // Categories that produced a verdict, over those that CAN produce one.
+      // cloud_cdn has no traffic light in the PDF ("no CDN" is not a security
+      // failure), so it is not counted in either -- padding the denominator
+      // with a category that can never contribute would understate coverage.
+      assessed: real.length,
+      total: stamped.length,
     }
   })
 }

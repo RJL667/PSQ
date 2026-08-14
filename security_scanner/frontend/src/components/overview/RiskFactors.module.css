@@ -27,7 +27,13 @@
    but it has to be visible enough that a one-of-four dimension cannot pass for
    a full one. */
 .coverage { font-size: 10.5px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
-.impact, .score { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; }
+.score { font-size: 12px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; }
+/* Now a category name rather than a number: quieter than the verdict it
+   explains, and allowed to truncate rather than push the row wider. */
+.impact {
+  font-size: 11px; font-weight: 500; color: var(--text-secondary); text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; min-width: 56px;
+}
 .contributor {
   font-size: 11.5px; color: var(--text-secondary); text-align: right;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;
