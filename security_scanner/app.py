@@ -593,29 +593,33 @@ def dehashed_balance():
             record_provider_call("dehashed", "balance_probe")
         except Exception:
             pass
-        # PROBE A DOMAIN NOBODY HAS EVER BREACHED.
+        # PROBE A DOMAIN THAT EXISTS, RESOLVES AS A NAME, AND MATCHES NOTHING.
         #
-        # This probe used to query `domain:example.com`, which is the single
-        # worst choice available: example.com is the canonical test domain and
-        # appears in essentially every credential dump ever assembled. Our own
-        # scan of it returned 1,220,357 matching records.
+        # MEASURED 2026-08-14, live against the API, three independent samples:
+        # a search costs exactly ONE credit and the cost does NOT track result
+        # volume. takealot.com returning 263,469 records cost 1; this probe
+        # returning 0 records costs 1. A rejected request costs nothing
+        # (balance 483 -> HTTP 400 -> 482, i.e. the 400 was free).
         #
-        # 2026-08-13 measurement. Ledger showed 3 DeHashed calls that day: an
-        # rbs.co.za scan (455 records), a takealot.com scan (263,469 records),
-        # and one balance probe. The balance moved 98 -> 77 -> 76. So takealot,
-        # returning a quarter of a million records, cost ONE credit, while the
-        # day the probe fired cost 21. Cost does not track records returned; it
-        # tracked this query. A scan is ~1 credit and the probe was ~20.
+        # That disproves the theory this comment used to carry -- that
+        # `domain:example.com` was expensive because example.com appears in
+        # every dump. It was not. The 21 credits attributed to it were ~21
+        # separate page-load probes that predated the TTL cache and the ledger.
         #
-        # `size: 1` does not protect us -- the page size bounds the response,
-        # not whatever DeHashed prices the query at. So make the QUERY cheap
-        # instead: a domain under .invalid, which RFC 2606 reserves precisely so
-        # it can never be registered and therefore can never appear in a breach
-        # corpus. The response we actually want is the `balance` field, which
-        # comes back on any successful search regardless of how many records
-        # matched.
+        # The replacement for example.com was `domain:...invalid` (RFC 2606, so
+        # unregistrable). DeHashed REJECTS it: HTTP 400 {"error": "Issue with
+        # query format"}. That broke the indicator, and because setCreditState()
+        # disables the checkbox on any non-active status, it silently switched
+        # OFF the credential check for every scan for ~19 hours.
+        #
+        # So the requirement is not "cheap", it is: a query DeHashed ACCEPTS,
+        # that returns zero rows, under a name no third party can ever register
+        # (a random .com could be bought tomorrow and start matching). A
+        # subdomain of a domain we own satisfies all three. VERIFY ANY CHANGE TO
+        # THIS QUERY AGAINST THE LIVE API BEFORE SHIPPING IT -- the gate mocks
+        # requests.post, so it cannot tell an accepted query from a rejected one.
         r = req.post("https://api.dehashed.com/v2/search",
-                     json={"query": "domain:phishield-balance-probe.invalid",
+                     json={"query": "domain:balance-probe.phishield.com",
                            "page": 1, "size": 1},
                      headers={"Content-Type": "application/json",
                               "Dehashed-Api-Key": DEHASHED_API_KEY},

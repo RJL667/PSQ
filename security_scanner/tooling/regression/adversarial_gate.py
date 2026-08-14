@@ -1557,17 +1557,27 @@ def _check_hibp_and_waf_evidence(failures):
 def _check_dehashed_credit_guards(failures):
     """The balance probe must be CHEAP, and a repeat scan must be FREE.
 
-    2026-08-13. Ledger showed 3 DeHashed calls: an rbs.co.za scan (455 records),
-    a takealot.com scan (263,469 records), and one balance probe. Balance moved
-    98 -> 77 -> 76. takealot returned a quarter of a million records for ONE
-    credit; the day the probe fired cost 21. Cost does not track records
-    returned -- it tracked the probe, which queried `domain:example.com`, the
-    canonical test domain that appears in essentially every credential dump ever
-    assembled (our own scan of it: 1,220,357 records).
+    2026-08-14 CORRECTION, measured live against the API. A search costs exactly
+    ONE credit and cost does NOT track result volume: takealot.com (263,469
+    records) and a zero-row probe both cost 1. A rejected request costs nothing
+    (483 -> HTTP 400 -> 482).
 
-    The probe was itself added to FIX a leak (the old credit indicator ran a live
-    search on every page load) and introduced a worse one by choosing the single
-    most expensive query available.
+    So the earlier reading recorded here -- that `domain:example.com` cost ~21
+    because it matches a huge corpus -- was WRONG. Those 21 credits were ~21
+    separate page-load probes from before the TTL cache and the ledger existed.
+
+    This gate's own remediation text then told the next reader to probe under the
+    RFC 2606 `.invalid` TLD. DeHashed REJECTS that with HTTP 400 "Issue with
+    query format", which killed the balance indicator, which (via
+    setCreditState) unticked and disabled the DeHashed checkbox, which silently
+    switched the credential check OFF for every scan for ~19 hours. The gate
+    caused the outage it was written to prevent.
+
+    The real requirement is a query DeHashed ACCEPTS that returns zero rows,
+    under a name no third party can register. This gate CANNOT verify the first
+    of those -- _check_balance_not_metered mocks requests.post, so a rejected
+    query looks identical to an accepted one. Changing the probe query requires
+    a live check against the API.
     """
     import re as _re2
     app_src = open(os.path.join(SEC, "app.py"), encoding="utf-8").read()
@@ -1579,13 +1589,29 @@ def _check_dehashed_credit_guards(failures):
     probe_domain = m.group(1) if m else None
     BANNED = {"example.com", "example.org", "example.net", "test.com",
               "gmail.com", "yahoo.com", "hotmail.com"}
-    ok = bool(probe_domain) and probe_domain.lower() not in BANNED
-    if not ok:
+    # RESERVED TLDs ARE NOT SAFE HERE. .invalid/.test/.example/.localhost are
+    # unregistrable, which is why they look ideal and why this gate used to
+    # recommend one -- but DeHashed rejects them outright (HTTP 400 "Issue with
+    # query format"), and a rejected probe reads to the UI as "credits
+    # unavailable", which disables the credential check on every subsequent
+    # scan. Unregistrable is worth nothing if the provider will not parse it.
+    RESERVED_TLDS = (".invalid", ".test", ".example", ".localhost")
+    _d = (probe_domain or "").lower()
+    reserved = _d.endswith(RESERVED_TLDS)
+    ok = bool(probe_domain) and _d not in BANNED and not reserved
+    if reserved:
         failures.append(
             f"dehashed_credits[probe_target]: balance probe queries {probe_domain!r} — "
-            "a domain with a large breach corpus makes the probe cost far more than a "
-            "real scan (measured: ~20 credits vs ~1). Probe a name that cannot appear "
-            "in any dump, e.g. one under the RFC 2606 .invalid TLD")
+            "DeHashed REJECTS reserved TLDs with HTTP 400, and a rejected probe "
+            "disables the credential check on every scan (live outage 2026-08-13). "
+            "Use a subdomain of a domain we own, and verify it returns HTTP 200 "
+            "against the real API before shipping")
+    elif not ok:
+        failures.append(
+            f"dehashed_credits[probe_target]: balance probe queries {probe_domain!r} — "
+            "a domain that appears in breach corpora returns rows we neither need nor "
+            "want to page through. Probe a name we control that matches nothing, e.g. "
+            "a subdomain of our own domain, verified HTTP 200 against the real API")
     print(f"  [{'PASS' if ok else 'FAIL'}] dehashed_credits:probe_target      {probe_domain}")
 
     # 2. The probe must stay TTL-cached, or a refresh storm bills per page load.
