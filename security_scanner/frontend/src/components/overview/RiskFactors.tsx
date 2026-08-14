@@ -72,8 +72,8 @@ export default function RiskFactors({ r }: { r: Results }) {
                 <span className={styles.riskLabel} style={{ color: SEVERITY_COLOR[f.severity] }}>{f.riskLabel}</span>
                 <span className={styles.impact}>
                   {f.score != null && (
-                    <span className={styles.scoreNum} title={`${f.label} resilience score: the weighted average across the ${f.assessed} categories that produced a verdict, where higher is safer. Separate from the risk label beside it, which is set by the single worst finding.`}>
-                      {f.score}
+                    <span className={styles.scoreNum} aria-label={`${f.label} resilience score ${f.score} out of 100`} title={`${f.label} resilience score: the weighted average across the ${f.assessed} categories that produced a verdict, where higher is safer. Separate from the risk label beside it, which is set by the single worst finding.`}>
+                      {f.score}<span className={styles.scoreUnit}>&nbsp;res</span>
                     </span>
                   )}
                   {f.blockers.length > 0 && (
@@ -100,7 +100,7 @@ export default function RiskFactors({ r }: { r: Results }) {
       <div className={styles.footnote}>
         {view === 'technical'
           ? 'Top contributor per dimension, from completed checkers.'
-          : `Two separate measures. The number is the ${SCORE_NAME.toLowerCase()} for that area — a weighted average across every category assessed, where higher is safer. The label beside it is set by the single worst finding, matching that category’s card in the PDF report, so one confirmed exposure is never averaged away by clean siblings. A well-run area can therefore score highly and still carry a blocker; hover a blocker to see which finding set it.`}
+          : `Two separate measures, and they run in opposite directions on purpose. “res” is the ${SCORE_NAME.toLowerCase()} for that area — a weighted average across every category assessed, where higher is safer. The label beside it is set by the single worst finding, matching that category’s card in the PDF report, so one confirmed exposure is never averaged away by clean siblings. A well-run area can therefore score highly and still carry a blocker; hover a blocker to see which finding set it.`}
       </div>
     </Panel>
   )

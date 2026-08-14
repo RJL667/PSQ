@@ -52,3 +52,7 @@
    the blocker is the part that changes what an underwriter does. */
 .scoreNum { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-primary); }
 .blocker { font-size: 10.5px; font-weight: 700; white-space: nowrap; margin-left: 7px; }
+/* The number needs its own noun as much as the label does: "Low risk 95" is
+   still two bare values side by side, and a reader should not have to know
+   which way each one points. */
+.scoreUnit { font-size: 9.5px; font-weight: 600; color: var(--text-muted); letter-spacing: .04em; }

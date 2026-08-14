@@ -723,11 +723,11 @@ function credentialVerdict(r: Results): ReturnType<VerdictSource> {
   }
 
   const BANDS: Record<string, { severity: Severity; label: string }> = {
-    CRITICAL: { severity: 'critical', label: 'Critical' },
-    HIGH: { severity: 'high', label: 'High' },
-    MEDIUM: { severity: 'medium', label: 'Medium' },
-    LOW: { severity: 'positive', label: 'Low' },
-    NONE: { severity: 'positive', label: 'Low' },
+    CRITICAL: { severity: 'critical', label: 'Critical risk' },
+    HIGH: { severity: 'high', label: 'High risk' },
+    MEDIUM: { severity: 'medium', label: 'Medium risk' },
+    LOW: { severity: 'positive', label: 'Low risk' },
+    NONE: { severity: 'positive', label: 'Low risk' },
   }
   const band = BANDS[level] ?? BANDS.LOW
   const score = typeof cr.risk_score === 'number' ? cr.risk_score : null
@@ -778,9 +778,16 @@ const SEVERITY_RANK: Severity[] = ['positive', 'medium', 'high', 'critical']
 const SEVERITY_POINTS: Record<string, number> = {
   positive: 100, medium: 60, high: 30, critical: 0,
 }
+/** The label names its own axis.
+ *
+ *  The two axes run in OPPOSITE vocabulary: the label is about risk, where Low
+ *  is good, while the resilience score rises as the estate gets safer. Bare
+ *  words put them side by side as "Low  95", which reads as a low score of 95.
+ *  Saying "Low risk" costs one word and removes the ambiguity entirely -- and
+ *  it does not diverge from the PDF, which states the same LOW / HIGH band. */
 const SEVERITY_LABEL: Record<string, string> = {
-  positive: 'Low', medium: 'Medium', high: 'High', critical: 'Critical',
-  unknown: 'Not assessed',
+  positive: 'Low risk', medium: 'Medium risk', high: 'High risk',
+  critical: 'Critical risk', unknown: 'Not assessed',
 }
 
 const toPercent = (id: string, score: number): number =>
