@@ -1446,7 +1446,17 @@ def record_dehashed_balance(balance: int, at: float, *, source: str = "") -> Non
     """
     if balance is None:
         return
+    # Fall back to the DURABLE value for the delta. The in-process dict is empty
+    # after every restart, so the first observation post-deploy recorded
+    # delta: null -- blinding the one field the ledger exists for, at exactly the
+    # moment (a deploy) when spend is most likely to change.
     prev = _DEHASHED_BALANCE.get("balance")
+    if prev is None:
+        try:
+            with open(_BALANCE_FILE, encoding="utf-8") as _pf:
+                prev = _json.load(_pf).get("balance")
+        except Exception:
+            prev = None
     _DEHASHED_BALANCE.update({"balance": int(balance), "at": float(at)})
     try:
         _os.makedirs(_os.path.dirname(_BALANCE_FILE), exist_ok=True)
