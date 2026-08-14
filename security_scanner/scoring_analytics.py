@@ -764,10 +764,22 @@ class RiskScorer:
     # Statuses that indicate a checker was intentionally skipped (no API key,
     # toggle off) — these should NOT count as failures in the completeness warning
     _SKIPPED_STATUSES = {"no_api_key", "auth_failed", "disabled", "skipped"}
+    # A skip is only benign when a HUMAN chose it. `probe_failed` is what the
+    # scan records when the credential toggle was switched off for the operator
+    # by a failing balance probe rather than by the operator -- a forged choice.
+    # It must grade as a FAILURE so the scan stops certifying full confidence on
+    # an estate nobody searched.
+    #
+    # Deliberately a NEW status rather than reclassifying no_api_key/auth_failed
+    # generally: those two carry legitimate deliberate cases (a provider that
+    # was never configured), they sit in the golden fixtures, and broadening the
+    # rule would move baselines that have nothing to do with this defect.
+    _FORCED_SKIP_STATUSES = {"probe_failed"}
 
     def _is_failed(self, checker_data: dict) -> bool:
         """Return True if this checker errored/timed out and should be excluded."""
-        return checker_data.get("status") in self._FAILED_STATUSES
+        st = checker_data.get("status")
+        return st in self._FAILED_STATUSES or st in self._FORCED_SKIP_STATUSES
 
     def calculate(self, results: dict, waf_apex_status: dict = None) -> tuple:
         def inv(score_0_100):

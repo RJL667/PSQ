@@ -1467,6 +1467,62 @@ def record_dehashed_balance(balance: int, at: float, *, source: str = "") -> Non
         pass
 
 
+_PROBE_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                            "scans", "_dehashed_probe.json")
+# How long a FAILED probe suppresses the next one. The balance TTL only ever
+# gates SUCCESS: a non-200 records nothing, so the cache stays cold and the very
+# next page load probes again, unbounded. That is the mechanism that made a
+# broken probe expensive, not the 12h happy-path cadence -- and it also spends
+# the DEHASHED_DAILY_CAP, which gates real scans, so an unbounded failing probe
+# can lock scanning out of a funded account.
+PROBE_FAIL_COOLDOWN_S = float(_os.environ.get("DEHASHED_PROBE_COOLDOWN_S", 900))
+
+
+def record_probe_outcome(status: str, http: "int | None" = None,
+                         error: str = "") -> None:
+    """Persist the outcome of EVERY balance probe, success or failure.
+
+    Only successes were ever persisted (`record_dehashed_balance` returns early
+    on a null balance), so nothing downstream could tell "never probed" from
+    "probed and rejected". That is why a probe returning HTTP 400 for 19 hours
+    raised no alarm while it silently disabled credential scanning.
+
+    Two consumers: the readiness route reports it, and the probe itself reads it
+    as a cooldown. Best-effort like the balance file -- never break a request.
+    """
+    try:
+        import time as _t
+        _os.makedirs(_os.path.dirname(_PROBE_FILE), exist_ok=True)
+        tmp = _PROBE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump({"status": status, "http": http, "error": error[:200],
+                        "at": round(_t.time(), 3)}, f)
+        _os.replace(tmp, _PROBE_FILE)
+    except Exception:
+        pass
+
+
+def last_probe_outcome() -> dict:
+    try:
+        with open(_PROBE_FILE, encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception:
+        return {}
+
+
+def probe_in_cooldown() -> bool:
+    """True when the last probe FAILED recently enough that we must not retry.
+
+    Deliberately one-sided: a success is governed by the balance TTL, a failure
+    by this. Without it a rejected probe re-fires on every page load forever.
+    """
+    import time as _t
+    o = last_probe_outcome()
+    if not o or o.get("status") == "active":
+        return False
+    return (_t.time() - float(o.get("at") or 0)) < PROBE_FAIL_COOLDOWN_S
+
+
 def last_dehashed_balance() -> dict:
     if _DEHASHED_BALANCE.get("balance") is not None:
         return dict(_DEHASHED_BALANCE)
@@ -2288,8 +2344,11 @@ class CredentialRiskClassifier:
         # produced by a lookup that never happened, and it is this channel that
         # drives the RSI (scanner.py). Report unassessed instead.
         _status = (dehashed or {}).get("status")
-        if _status in ("no_api_key", "auth_failed", "error", "timeout",
-                       "quota_exhausted", "subscription_required"):
+        # Sourced from the ONE canonical set rather than a fourth hand-maintained
+        # copy -- a new non-conclusive status must never be able to slip through
+        # here and score as a real clean.
+        from card_severity import NON_CONCLUSIVE_STATUSES as _NCS
+        if _status in _NCS and _status not in ("no_data", "not_applicable"):
             return {
                 "status": _status,
                 "assessed": False,

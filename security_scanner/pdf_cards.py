@@ -4450,6 +4450,24 @@ def _supply_chain_attacker_findings(cats: dict) -> dict:
     return {"access": access, "exploit": exploit}
 
 
+def conclusive_count(cats: dict, cat_id: str, key: str):
+    """A checker's COUNT field, or None when that checker could not answer.
+
+    The sibling of pdf_helpers.score_or_none, for the other half of the problem.
+    score_or_none guards a key literally named "score"; these are counts --
+    unique_emails, total_entries, compromised_employees -- which checkers
+    initialise to 0 BEFORE knowing whether they can run, and which on failure
+    stay 0 while only `status` changes. Read naively, an unassessed provider
+    hands a caller a confident zero.
+    """
+    from card_severity import NON_CONCLUSIVE_STATUSES
+    c = cats.get(cat_id)
+    if not isinstance(c, dict) or c.get("status") in NON_CONCLUSIVE_STATUSES:
+        return None
+    v = c.get(key)
+    return v if isinstance(v, (int, float)) else None
+
+
 def _kill_chain_severities(results: dict) -> dict:
     """Single source of truth for the four attacker-kill-chain phase severities.
 
@@ -4462,17 +4480,32 @@ def _kill_chain_severities(results: dict) -> dict:
     cats = results.get("categories", {}) or {}
     ins = results.get("insurance", {}) or {}
 
+    # A COUNT FROM A CHECKER THAT NEVER RAN IS NOT A ZERO.
+    # DehashedChecker initialises unique_emails/total_entries to 0 and
+    # HudsonRockChecker initialises compromised_employees to 0, BEFORE either
+    # knows whether it can run; on failure only `status` changes. So an
+    # unassessed provider handed this function a confident zero and the phase
+    # dropped a tier. Measured 2026-08-14: dehashed no_api_key alone moved recon
+    # HIGH -> LOW (two tiers), and dehashed unassessed + hudson_rock errored
+    # moved access CRITICAL -> LOW. Both rendered green on an estate nobody
+    # searched -- the exact absence-of-evidence failure this codebase keeps
+    # removing. `score_or_none` cannot help here: these are counts, not scores.
+    def _count(cat_id, key):
+        return conclusive_count(cats, cat_id, key)
+
     # Phase 1 — Reconnaissance
     ip_count = cats.get("external_ips", {}).get("total_unique_ips", 0)
-    emails = cats.get("dehashed", {}).get("unique_emails", 0)
-    recon = ("HIGH" if (ip_count > 5 or emails > 3)
-             else "MEDIUM" if (ip_count > 1 or emails > 0) else "LOW")
+    emails = _count("dehashed", "unique_emails")
+    recon = ("HIGH" if (ip_count > 5 or (emails or 0) > 3)
+             else "MEDIUM" if (ip_count > 1 or (emails or 0) > 0) else "LOW")
+    if emails is None and recon == "LOW":
+        recon = "UNKNOWN"          # we did not look; do not print a clean phase
 
     # Phase 2 — Initial Access
     rdp = cats.get("vpn_remote", {}).get("rdp_exposed", False)
     hrp = cats.get("high_risk_protocols", {}).get("exposed_services", []) or []
-    cred_leaks = cats.get("dehashed", {}).get("total_entries", 0)
-    infostealers = cats.get("hudson_rock", {}).get("compromised_employees", 0)
+    cred_leaks = _count("dehashed", "total_entries")
+    infostealers = _count("hudson_rock", "compromised_employees")
     # Supply-chain initial-access escalators (Step 7).
     _vb = cats.get("vendor_breach", {}) or {}
     _tpc = cats.get("third_party_correlation", {}) or {}
@@ -4480,15 +4513,21 @@ def _kill_chain_severities(results: dict) -> dict:
     sc_acc_crit = _vb.get("critical_match_count", 0) > 0
     sc_acc_high = _vb.get("high_match_count", 0) > 0 or _tpc.get("hudson_rock_third_party_count", 0) > 0
     sc_acc_med = bool(_vb.get("matches")) or (_evs.get("weak_dmarc") and _evs.get("vendor_count", 0) >= 1)
-    access = ("CRITICAL" if (rdp or infostealers > 0 or sc_acc_crit)
-              else "HIGH" if (len(hrp) > 0 or cred_leaks > 5 or sc_acc_high)
-              else "MEDIUM" if (cred_leaks > 0 or sc_acc_med) else "LOW")
+    access = ("CRITICAL" if (rdp or (infostealers or 0) > 0 or sc_acc_crit)
+              else "HIGH" if (len(hrp) > 0 or (cred_leaks or 0) > 5 or sc_acc_high)
+              else "MEDIUM" if ((cred_leaks or 0) > 0 or sc_acc_med) else "LOW")
+    # Only downgrade to UNKNOWN when the missing evidence could have CHANGED the
+    # verdict. A phase already CRITICAL from RDP does not become less certain
+    # because a credential search was skipped; a phase reading LOW purely because
+    # nobody looked is a different claim entirely.
+    if access == "LOW" and (cred_leaks is None or infostealers is None):
+        access = "UNKNOWN"
 
     # Phase 3 — Exploitation
     osv = cats.get("osv_vulns", {})
     osv_crit = osv.get("critical_count", 0)
     osv_high = osv.get("high_count", 0)
-    ssl_grade = cats.get("ssl", {}).get("grade", "A")
+    ssl_grade = cats.get("ssl", {}).get("grade") or "F"   # absent SSL is not an A -- fail closed, like every other guard here
     hh_score = score_or_none(cats.get("http_headers"))
     # Supply-chain exploitation escalators (Step 7).
     _tpjs = cats.get("third_party_js", {}) or {}
@@ -4547,8 +4586,17 @@ def _build_attackers_view(results: dict, S) -> list:
     server_sw = tech.get("server_software") or []
     if server_sw: recon_findings.append(f"Server technology exposed: {', '.join(server_sw[:3])}")
 
-    _PHASE_BG = {"CRITICAL": C_CRITICAL_BG, "HIGH": C_RED_BG, "MEDIUM": C_AMBER_BG, "LOW": C_GREEN_BG}
-    _PHASE_FG = {"CRITICAL": "#991b1b", "HIGH": "#dc2626", "MEDIUM": "#92400e", "LOW": "#166534"}
+    # UNKNOWN is grey, never green. A phase we could not assess must not borrow
+    # the colour of a phase we assessed and found clean. Both maps need the key
+    # or the render raises KeyError -- the same missing-key crash class fixed
+    # across two severity maps in 2be5898.
+    _PHASE_BG = {"CRITICAL": C_CRITICAL_BG, "HIGH": C_RED_BG, "MEDIUM": C_AMBER_BG,
+                 "LOW": C_GREEN_BG, "UNKNOWN": C_GREY_1}
+    _PHASE_FG = {"CRITICAL": "#991b1b", "HIGH": "#dc2626", "MEDIUM": "#92400e",
+                 "LOW": "#166534", "UNKNOWN": "#475569"}
+    if conclusive_count(cats, "dehashed", "unique_emails") is None:
+        recon_findings.append("Credential exposure NOT ASSESSED — breach databases "
+                              "were not searched for this scan")
 
     rows.append([Paragraph(f"<b><font color='{_PHASE_FG[recon_risk]}'>Phase 1: RECONNAISSANCE [{recon_risk}]</font></b>", S["kv_key"]),
                  Paragraph(f"<font color='{_PHASE_FG[recon_risk]}'><b>What an attacker learns about the target</b></font>", S["kv_val"])])
@@ -4573,6 +4621,12 @@ def _build_attackers_view(results: dict, S) -> list:
     dmarc = cats.get("email_security", {}).get("dmarc", {})
     if not dmarc.get("present"): access_findings.append("No DMARC policy — domain can be spoofed for phishing attacks against employees")
     access_findings += _supply_chain_attacker_findings(cats)["access"]  # Step 7
+    if conclusive_count(cats, "dehashed", "total_entries") is None:
+        access_findings.append("Stolen-credential reuse NOT ASSESSED — the credential "
+                               "database could not be searched for this scan")
+    if conclusive_count(cats, "hudson_rock", "compromised_employees") is None:
+        access_findings.append("Infostealer infections NOT ASSESSED — the infostealer "
+                               "source could not be queried for this scan")
 
     rows.append([Paragraph(f"<b><font color='{_PHASE_FG[access_risk]}'>Phase 2: INITIAL ACCESS [{access_risk}]</font></b>", S["kv_key"]),
                  Paragraph(f"<font color='{_PHASE_FG[access_risk]}'><b>How an attacker would break in</b></font>", S["kv_val"])])
@@ -4587,7 +4641,7 @@ def _build_attackers_view(results: dict, S) -> list:
     osv_high = osv.get("high_count", 0)
     shodan = cats.get("shodan_vulns", {})
     shodan_cves = shodan.get("total_cves", 0)
-    ssl_grade = cats.get("ssl", {}).get("grade", "A")
+    ssl_grade = cats.get("ssl", {}).get("grade") or "F"   # absent SSL is not an A -- fail closed, like every other guard here
     exploit_risk = sevs["exploit"]
     exploit_findings = []
     if osv_crit: exploit_findings.append(f"{osv_crit} critical CVE(s) with known exploits — remote code execution possible")

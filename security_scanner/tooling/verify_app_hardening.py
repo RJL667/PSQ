@@ -50,6 +50,32 @@ os.environ.pop("SCANNER_API_KEY", None)  # start in open (back-compat) mode
 os.chdir(ROOT)
 import app as A  # noqa: E402
 
+# PAID-PROVIDER EGRESS GUARD. `import app` above runs load_dotenv(), which puts
+# the LIVE production keys in this process, and this gate then calls the REAL
+# run_scan (the semaphore-timeout test). Today that is safe only because the
+# semaphore is drained first, so run_scan fails before any scanner work starts
+# -- an ordering accident, not a control. Any refactor that moves the acquire
+# after the SecurityScanner construction would turn every push into a live,
+# billed scan of example.com. The adversarial gate's guard cannot help: it runs
+# in a different process, later in the hook. Five lines, so just have it here.
+import requests.sessions as _rs  # noqa: E402
+
+_PAID = ("dehashed.com", "intelx.io", "api.shodan.io", "virustotal.com",
+         "securitytrails.com", "hudsonrock.com", "haveibeenpwned.com")
+_orig_req = _rs.Session.request
+
+
+def _no_paid_egress(self, method, url, *a, **kw):
+    if any(h in str(url).lower() for h in _PAID):
+        raise AssertionError(
+            f"verify_app_hardening attempted a live paid-provider call: "
+            f"{method} {url} — this gate runs on every push with real keys "
+            f"loaded; stub the provider instead")
+    return _orig_req(self, method, url, *a, **kw)
+
+
+_rs.Session.request = _no_paid_egress
+
 FAILURES = []
 
 

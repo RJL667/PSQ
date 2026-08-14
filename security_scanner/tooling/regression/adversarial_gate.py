@@ -1501,6 +1501,23 @@ def _check_balance_not_metered(failures):
         calls["n"] += 1
         return _Bal()
 
+    # REDIRECT THE DURABLE FILES TO A TEMP DIR FIRST.
+    # This check calls the REAL record_dehashed_balance with synthetic values
+    # (309, 228, 231), which wrote them into scans/_dehashed_balance.json AND
+    # appended them to _dehashed_balance_history.jsonl -- the append-only ledger
+    # built specifically to answer "which call spent what". Every gate run was
+    # injecting fake balances with fake deltas into the one forensic record we
+    # rely on, and the history file is never cleaned. The sibling check below
+    # already redirects properly; this one did not.
+    import tempfile as _tf3
+    _tmpd = _tf3.mkdtemp(prefix="gate_bal_")
+    _orig_bf, _orig_hf = ct_m._BALANCE_FILE, ct_m._BALANCE_HISTORY_FILE
+    _orig_pf = getattr(ct_m, "_PROBE_FILE", None)
+    ct_m._BALANCE_FILE = os.path.join(_tmpd, "b.json")
+    ct_m._BALANCE_HISTORY_FILE = os.path.join(_tmpd, "h.jsonl")
+    if _orig_pf is not None:
+        ct_m._PROBE_FILE = os.path.join(_tmpd, "p.json")
+
     ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})
     with mock.patch("requests.post", side_effect=_post), A.app.test_client() as c:
         for _ in range(10):
@@ -1548,6 +1565,84 @@ def _check_balance_not_metered(failures):
             "search must be reused, not re-purchased")
     print(f"  [{'PASS' if ok2 else 'FAIL'}] balance_metering:reuse_scan_balance "
           f"balance={got} extra_paid={calls['n'] - before}")
+
+    # A REJECTED PROBE MUST NOT RE-FIRE ON EVERY PAGE LOAD.
+    # This is the mechanism that actually burned credits and NOTHING gated it.
+    # The scenarios above all mock a 200 CARRYING a balance, so they only ever
+    # exercise the happy path -- under a 400 the assertion above ("<=1 call per
+    # 10 loads") would have passed at 10 out of 10, because a non-200 records no
+    # balance, the TTL cache never warms, and the next load probes again.
+    # Unbounded, and each one spends the daily cap that gates real scans.
+    class _Rej:
+        status_code = 400
+        text = '{"error": "Issue with query format"}'
+        def json(self):
+            return {"error": "Issue with query format"}
+
+    rej = {"n": 0}
+
+    def _post_rej(*a, **kw):
+        rej["n"] += 1
+        return _Rej()
+
+    # Clear BOTH durable files, not just the in-process dict: last_dehashed_
+    # balance() falls back to the file, so the previous scenario's cached 228
+    # would satisfy the TTL and no probe would fire at all.
+    ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})
+    for _f in (getattr(ct_m, "_PROBE_FILE", None), ct_m._BALANCE_FILE):
+        try:
+            os.remove(_f)
+        except (OSError, TypeError):
+            pass
+    with mock.patch("requests.post", side_effect=_post_rej), A.app.test_client() as c:
+        statuses = [c.get("/api/dehashed/balance").get_json() for _ in range(10)]
+    ok_rej = rej["n"] <= 1
+    if not ok_rej:
+        failures.append(
+            f"balance_metering[rejected_probe]: 10 page loads after a rejected probe "
+            f"performed {rej['n']} live calls — a FAILING probe must be cooled down, "
+            "not retried per page view. A non-200 records no balance, so the success "
+            "TTL cannot bound it; this is what drained the account on 2026-08-13.")
+    # and it must still report the failure honestly, not fall back to 'active'
+    ok_honest = all((s or {}).get("status") != "active" for s in statuses)
+    if not ok_honest:
+        failures.append(
+            "balance_metering[rejected_probe_honesty]: a rejected probe reported "
+            "status=active — the indicator must never claim a working key it "
+            "could not confirm")
+    print(f"  [{'PASS' if ok_rej and ok_honest else 'FAIL'}] balance_metering:rejected_probe_cooldown "
+          f"live_calls={rej['n']}/10 honest={ok_honest}")
+
+    # 200 WITHOUT a balance field must not be reported as active: index.html
+    # requires status=='active' AND balance!==null, so that combination was a
+    # state no branch handled. Reachable, and previously untested.
+    class _NoBal:
+        status_code = 200
+        def json(self):
+            return {"entries": [], "total": 0}      # no 'balance' key
+
+    ct_m._DEHASHED_BALANCE.update({"balance": None, "at": 0.0})
+    for _f in (ct_m._PROBE_FILE, ct_m._BALANCE_FILE):
+        try:
+            os.remove(_f)
+        except OSError:
+            pass
+    with mock.patch("requests.post", side_effect=lambda *a, **k: _NoBal()), \
+            A.app.test_client() as c:
+        nb = c.get("/api/dehashed/balance").get_json() or {}
+    ok_nb = not (nb.get("status") == "active" and nb.get("balance") is None)
+    if not ok_nb:
+        failures.append(
+            "balance_metering[200_without_balance]: returned status=active with "
+            "balance=None — the UI treats that as a failure, so the endpoint must "
+            "not claim active without a number")
+    print(f"  [{'PASS' if ok_nb else 'FAIL'}] balance_metering:200_without_balance "
+          f"status={nb.get('status')} balance={nb.get('balance')}")
+
+    # restore the real durable paths
+    ct_m._BALANCE_FILE, ct_m._BALANCE_HISTORY_FILE = _orig_bf, _orig_hf
+    if _orig_pf is not None:
+        ct_m._PROBE_FILE = _orig_pf
 
 
 def _check_hibp_and_waf_evidence(failures):

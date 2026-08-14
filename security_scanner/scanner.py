@@ -323,6 +323,7 @@ class SecurityScanner:
     def __init__(self, hibp_api_key: Optional[str] = None,
                  dehashed_email: Optional[str] = None,
                  dehashed_api_key: Optional[str] = None,
+                 dehashed_skip_reason: Optional[str] = None,
                  virustotal_api_key: Optional[str] = None,
                  securitytrails_api_key: Optional[str] = None,
                  shodan_api_key: Optional[str] = None,
@@ -330,6 +331,9 @@ class SecurityScanner:
         self.hibp_api_key          = hibp_api_key
         self.dehashed_email        = dehashed_email
         self.dehashed_api_key      = dehashed_api_key
+        # Why the credential check is off: None = operator's choice or simply
+        # unconfigured; 'probe_failed' = the UI switched it off for them.
+        self.dehashed_skip_reason  = dehashed_skip_reason
         self.virustotal_api_key    = virustotal_api_key
         self.securitytrails_api_key = securitytrails_api_key
         self.shodan_api_key        = shodan_api_key
@@ -1089,6 +1093,20 @@ class SecurityScanner:
                         matched.append(v)
                 if matched:
                     port_entry["osv_vulns"] = matched[:15]
+
+        # A FORGED SKIP IS NOT A DELIBERATE ONE.
+        # When the operator's credential toggle was switched off FOR them by a
+        # failing balance probe, the checker still reports `no_api_key` -- which
+        # RiskScorer grades as a benign, operator-chosen skip and therefore still
+        # certifies completeness 100 / score_reliable true. Restamp it before any
+        # scoring runs so it grades as a failure instead. Must happen here, not
+        # after scan() returns: the scorer runs inside this call.
+        if getattr(self, "dehashed_skip_reason", None) == "probe_failed":
+            _dh = cat_results.get("dehashed")
+            if isinstance(_dh, dict) and _dh.get("status") == "no_api_key":
+                _dh["status"] = "probe_failed"
+                _dh["error"] = ("credential search was disabled by a failed provider "
+                                "credit check, not by the operator")
 
         # --- Phase 4e: Credential risk enrichment (HIBP + Hudson Rock + Dehashed) ---
         self._notify(on_progress, "credential_risk", "running")

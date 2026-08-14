@@ -36,6 +36,11 @@ NON_CONCLUSIVE_STATUSES = {
     "error", "timeout", "no_api_key", "subscription_required", "rate_limited",
     "skipped", "unreachable", "no_data", "not_applicable", "quota_exhausted",
     "disabled", "auth_failed",
+    # The credential toggle was switched off FOR the operator by a failing
+    # balance probe, not BY the operator. Distinct from no_api_key (a deliberate
+    # deployment choice) so the scan can grade a forged skip as a failure rather
+    # than certifying full confidence on an estate nobody searched.
+    "probe_failed",
 }
 
 

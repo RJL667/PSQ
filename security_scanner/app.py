@@ -367,6 +367,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
              annual_revenue: float = 0, annual_revenue_zar: int = 0, country: str = "",
              include_fraudulent_domains: bool = False, client_ips: list = None,
              skip_dehashed: bool = False, skip_intelx: bool = False,
+             skip_dehashed_reason: str = None,
              skip_breach_intel: bool = False,
              regulatory_flags: dict = None, sub_industry: str = None,
              related_domains: list = None, records_held: int = None):
@@ -389,6 +390,7 @@ def run_scan(scan_id: str, domain: str, industry: str = "other",
                 hibp_api_key=HIBP_API_KEY,
                 dehashed_email=None if skip_dehashed else DEHASHED_EMAIL,
                 dehashed_api_key=None if skip_dehashed else DEHASHED_API_KEY,
+                dehashed_skip_reason=skip_dehashed_reason if skip_dehashed else None,
                 virustotal_api_key=VIRUSTOTAL_API_KEY,
                 securitytrails_api_key=SECURITYTRAILS_API_KEY,
                 shodan_api_key=SHODAN_API_KEY,
@@ -572,7 +574,8 @@ def dehashed_balance():
         return jsonify({"status": "no_api_key", "balance": None})
 
     import time as _t
-    from checkers_threats import last_dehashed_balance
+    from checkers_threats import (last_dehashed_balance, record_probe_outcome,
+                                  last_probe_outcome, probe_in_cooldown)
     _ttl = float(os.environ.get("DEHASHED_BALANCE_TTL_S", "43200"))
     cached = last_dehashed_balance()
     if cached.get("balance") is not None and (_t.time() - cached["at"]) < _ttl:
@@ -580,19 +583,18 @@ def dehashed_balance():
                         "cached": True,
                         "as_of_seconds_ago": int(_t.time() - cached["at"])})
 
+    # A FAILED PROBE MUST NOT RE-FIRE ON EVERY PAGE LOAD.
+    # The TTL above only ever gates SUCCESS -- a non-200 records no balance, so
+    # the cache stays cold and the next request probes again. Unbounded, and it
+    # spends the daily cap that gates real scans. Serve the last failure instead.
+    if probe_in_cooldown():
+        _o = last_probe_outcome()
+        return jsonify({"status": _o.get("status", "error"), "balance": None,
+                        "http": _o.get("http"), "cached": True,
+                        "as_of_seconds_ago": int(_t.time() - float(_o.get("at") or 0))})
+
     try:
         import requests as req
-        # METER IT. This path bypasses the provider seam, which is why its spend
-        # was invisible: the usage ledger showed ~17 DeHashed calls over the same
-        # period the account billed 200+. Anything that can spend a credit must
-        # be countable, or the next leak is just as hard to find as this one was.
-        try:
-            import scanner_db
-            scanner_db.record_usage("dehashed")
-            from observability import record_provider_call
-            record_provider_call("dehashed", "balance_probe")
-        except Exception:
-            pass
         # PROBE A DOMAIN THAT EXISTS, RESOLVES AS A NAME, AND MATCHES NOTHING.
         #
         # MEASURED 2026-08-14, live against the API, three independent samples:
@@ -624,24 +626,46 @@ def dehashed_balance():
                      headers={"Content-Type": "application/json",
                               "Dehashed-Api-Key": DEHASHED_API_KEY},
                      timeout=10)
+        # METER ONLY WHAT WAS ACTUALLY BILLED. This used to increment BEFORE the
+        # request and unconditionally, so a rejected 400 -- which DeHashed does
+        # not charge for (measured: 483 -> HTTP 400 -> 482) -- still consumed the
+        # DEHASHED_DAILY_CAP. That cap is the kill-switch gating REAL scans
+        # (provider_client.py allow_call), so a free, failing probe could lock
+        # scanning out of a fully funded account.
         if r.status_code == 200:
+            try:
+                import scanner_db
+                scanner_db.record_usage("dehashed")
+                from observability import record_provider_call
+                record_provider_call("dehashed", "balance_probe")
+            except Exception:
+                pass
             data = r.json()
             # We just paid for this one — cache it so the next page load, and
             # every refresh for the next TTL, is free.
-            if data.get("balance") is not None:
+            bal = data.get("balance")
+            if bal is not None:
                 from checkers_threats import record_dehashed_balance
-                record_dehashed_balance(int(data["balance"]), _t.time(),
-                                        source="balance_probe")
-            return jsonify({"status": "active", "balance": data.get("balance"),
-                            "cached": False})
+                record_dehashed_balance(int(bal), _t.time(), source="balance_probe")
+                record_probe_outcome("active", 200)
+                return jsonify({"status": "active", "balance": bal, "cached": False})
+            # 200 WITHOUT a balance field. Not "active" — the UI requires both
+            # (index.html checks status AND balance !== null), so claiming active
+            # here produced a state no branch handled.
+            record_probe_outcome("error", 200, "200 without a balance field")
+            return jsonify({"status": "error", "balance": None, "http": 200,
+                            "error": "no balance field in response"})
         elif r.status_code == 401:
+            record_probe_outcome("inactive", 401)
             return jsonify({"status": "inactive", "balance": None,
                             "error": r.json().get("error", "Auth failed")})
-        # Any other status (403 "Issue with API Key", 5xx, etc.): the key is
-        # present but the credit check did not succeed. Surface the http code
-        # so the UI can say "rejected" (403) vs "unavailable" (transient).
+        # Any other status (403 "Issue with API Key", 400 bad query, 5xx, etc.):
+        # the key is present but the credit check did not succeed. Surface the
+        # http code so the UI can say "rejected" (403) vs "unavailable".
+        record_probe_outcome("error", r.status_code, (r.text or "")[:200])
         return jsonify({"status": "error", "balance": None, "http": r.status_code})
     except Exception as e:
+        record_probe_outcome("error", None, str(e))
         return jsonify({"status": "error", "balance": None, "error": str(e)})
 
 
@@ -709,7 +733,11 @@ def intelx_balance():
             credits_max = search_info.get("CreditMax", 0)
             return jsonify({"status": "active", "balance": credits_left,
                             "max_credits": credits_max})
-        return jsonify({"status": "error", "balance": None})
+        # Carry the http code, as the DeHashed route does. setCreditState() uses
+        # it to tell a REJECTED key (403 -> disable the checkbox) from a
+        # transient failure (leave the check running). Without it every IntelX
+        # hiccup read as "unusable" and silently switched dark-web search off.
+        return jsonify({"status": "error", "balance": None, "http": r.status_code})
     except Exception as e:
         return jsonify({"status": "error", "balance": None, "error": str(e)})
 
@@ -898,6 +926,9 @@ def start_scan():
         records_held = None
     include_fraudulent_domains = bool(data.get("include_fraudulent_domains", False))
     skip_dehashed = bool(data.get("skip_dehashed", False))
+    # Only a whitelisted reason is honoured -- this feeds a scoring class.
+    skip_dehashed_reason = (data.get("skip_dehashed_reason")
+                            if data.get("skip_dehashed_reason") == "probe_failed" else None)
     skip_intelx = bool(data.get("skip_intelx", False))
     skip_breach_intel = bool(data.get("skip_breach_intel", False))
 
@@ -979,6 +1010,7 @@ def start_scan():
         "annual_revenue": annual_revenue, "annual_revenue_zar": annual_revenue_zar,
         "country": country, "include_fraudulent_domains": include_fraudulent_domains,
         "client_ips": client_ips, "skip_dehashed": skip_dehashed,
+        "skip_dehashed_reason": skip_dehashed_reason,
         "skip_intelx": skip_intelx, "skip_breach_intel": skip_breach_intel,
         "regulatory_flags": regulatory_flags,
         "sub_industry": sub_industry, "related_domains": related_domains,
@@ -1234,6 +1266,32 @@ def health_providers():
     for name, key in (("dehashed", DEHASHED_API_KEY), ("intelx", INTELX_API_KEY),
                       ("hibp", HIBP_API_KEY)):
         providers[name] = {"status": "configured" if key else "not_configured"}
+
+    # "Configured" only ever meant "a key is present in .env". It cannot see a
+    # key the provider REJECTS. On 2026-08-13 the DeHashed probe returned HTTP
+    # 400 for 19 hours -- which disabled credential scanning on every scan --
+    # while this route cheerfully reported "configured" and nothing alarmed.
+    #
+    # Read the STORED outcome of the last real probe. Deliberately a read, never
+    # a call: an uptime monitor at 5-minute intervals is 288 polls/day against a
+    # 150/day cap, so probing from the health route would turn the monitor itself
+    # into an outage.
+    if DEHASHED_API_KEY:
+        try:
+            from checkers_threats import last_probe_outcome
+            _po = last_probe_outcome()
+            if _po:
+                providers["dehashed"] = {
+                    "status": "configured" if _po.get("status") == "active" else "rejected",
+                    "last_probe": _po.get("status"), "http": _po.get("http"),
+                    "probed_seconds_ago": int(time.time() - float(_po.get("at") or 0)),
+                }
+                if _po.get("status") != "active":
+                    degraded.append("dehashed")
+                    providers["dehashed"]["error"] = (
+                        _po.get("error") or "last balance probe did not succeed")
+        except Exception:
+            pass
 
     # Remaining daily budget for the metered credential providers. Exhaustion is
     # no longer a correctness problem — those checkers now report UNASSESSED

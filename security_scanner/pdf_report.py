@@ -171,6 +171,10 @@ def _assessment_kill_chain(results: dict) -> list:
     if ip_count:  p1f.append(f"{ip_count} external IP addresses discoverable")
     if sub_count: p1f.append(f"{sub_count} subdomains can be enumerated")
     if emails:    p1f.append(f"{emails} staff emails found in breach data")
+    # Say WHY a phase is unassessed. "No significant signals" on an estate nobody
+    # searched is the false-clean this whole guard exists to stop.
+    if p1_sev == "UNKNOWN":
+        p1f.append("Breach databases not searched for this scan")
     if not p1f:   p1f = ["No significant reconnaissance signals"]
 
     # Phase 2: Initial Access
@@ -193,10 +197,12 @@ def _assessment_kill_chain(results: dict) -> list:
         _isd = hr_cat.get("days_since_compromise")
         p2f.append(f"{infostealers} infostealer-infected device(s)"
                    + (f", most recent {_isd}d ago" if _isd is not None else ""))
+    if p2_sev == "UNKNOWN" and len(p2f) < 3:
+        p2f.append("Credential and infostealer exposure not assessed")
     if not p2f: p2f = ["No clear initial-access vectors identified"]
 
     # Phase 3: Exploitation
-    ssl_grade = cats.get("ssl", {}).get("grade", "A")
+    ssl_grade = cats.get("ssl", {}).get("grade") or "F"   # absent SSL is not an A -- fail closed, like every other guard here
     hh_score  = score_or_none(cats.get("http_headers"))
     osv_crit  = cats.get("osv_vulns", {}).get("critical_count", 0)
     osv_high  = cats.get("osv_vulns", {}).get("high_count", 0)
@@ -519,7 +525,11 @@ ASX_SANS_BOLD   = "Helvetica-Bold"
 ASX_SANS_ITAL   = "Helvetica-Oblique"
 
 _ASX_SEV_COLOR = {"CRITICAL": ASX_CRITICAL, "HIGH": ASX_AMBER, "MEDIUM": ASX_AMBER, "LOW": ASX_GREEN}
-_ASX_SEV_HEX   = {"CRITICAL": "#a32f25", "HIGH": "#d97706", "MEDIUM": "#d97706", "LOW": "#16a34a"}
+# UNKNOWN is grey, never green: a kill-chain phase that could not be assessed
+# must not wear the colour of one assessed and found clean. Without the key the
+# pill lookup at _assessment_kill_chain raises KeyError.
+_ASX_SEV_HEX   = {"CRITICAL": "#a32f25", "HIGH": "#d97706", "MEDIUM": "#d97706",
+                  "LOW": "#16a34a", "UNKNOWN": "#475569"}
 # "unknown" is grey on purpose: a KPI tile for a checker that did not run must
 # not borrow any of the three verdict colours.
 _KPI_COLOR     = {"ok": ASX_GREEN, "warn": ASX_AMBER, "bad": ASX_RED,

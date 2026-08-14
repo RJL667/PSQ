@@ -19,6 +19,8 @@ from pathlib import Path
 # Runtime modules (scanner, pdf_report, scoring_analytics, flag_inference)
 # live one level up from this tooling script.
 ROOT = Path(__file__).parent.parent
+# Opt-in for the metered credential providers (DeHashed / IntelX).
+PAID = "--paid" in sys.argv
 sys.path.insert(0, str(ROOT))
 
 # Load .env from the main project (worktree has no separate .env)
@@ -63,12 +65,16 @@ def main():
     print(f"\n[2] Building SecurityScanner with available API keys...")
     scanner = SecurityScanner(
         hibp_api_key=os.environ.get("HIBP_API_KEY"),
-        dehashed_email=os.environ.get("DEHASHED_EMAIL"),
-        dehashed_api_key=os.environ.get("DEHASHED_API_KEY"),
+        # PAID PROVIDERS ARE OPT-IN. This tool loaded the live .env and passed
+        # DeHashed + IntelX into a full scan with no flag and no confirmation --
+        # the only tool in the repo that spent credentials unconditionally.
+        # tests/corpus_scan.py and corpus_parallel.py already gate on --paid.
+        dehashed_email=os.environ.get("DEHASHED_EMAIL") if PAID else None,
+        dehashed_api_key=os.environ.get("DEHASHED_API_KEY") if PAID else None,
         virustotal_api_key=os.environ.get("VIRUSTOTAL_API_KEY"),
         securitytrails_api_key=os.environ.get("SECURITYTRAILS_API_KEY"),
         shodan_api_key=os.environ.get("SHODAN_API_KEY"),
-        intelx_api_key=os.environ.get("INTELX_API_KEY"),
+        intelx_api_key=os.environ.get("INTELX_API_KEY") if PAID else None,
     )
     # Carry sub-industry + broker-confirmed regulatory flags through.
     # Simulate what the broker would tick in the form:

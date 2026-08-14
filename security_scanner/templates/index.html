@@ -440,12 +440,29 @@ function setCreditState(checkId, el, d) {
     el.style.color = d.balance <= crit ? '#ef4444' : (d.balance < warn ? '#f59e0b' : '#60a5fa');
     return;
   }
+  // UNUSABLE vs UNKNOWN. These are different states and collapsing them cost us
+  // 19 hours of scans with no credential search at all: the balance probe began
+  // returning HTTP 400 (a malformed QUERY, nothing to do with the key), this
+  // branch disabled the checkbox, the form then posted skip_dehashed:true, and
+  // every scan silently ran blind.
+  //
+  // Only disable when the KEY itself cannot work — no key, dead subscription,
+  // rejected key. For anything else (400, 5xx, timeout, network) the honest
+  // statement is "we don't know the balance", and the check should still RUN:
+  // the scan fails closed on its own if the provider really is dead, which
+  // renders an honest NOT ASSESSED. Refusing to look is strictly worse than
+  // looking without knowing the balance — the worst case is one wasted credit.
+  var unusable = (d.status === 'no_api_key' || d.status === 'inactive' || d.http === 403);
+  // Record that the UI, not the operator, switched this off. The scan grades a
+  // forged skip as a FAILURE rather than a deliberate choice, so the report
+  // stops certifying full confidence on a section nobody could search.
+  if (cb && unusable) { cb.dataset.forcedOff = '1'; }
   el.textContent = d.status === 'no_api_key' ? '(no API key configured)'
                  : d.status === 'inactive'   ? '(subscription inactive)'
                  : d.http === 403            ? '(API key rejected)'
-                 : '(credit check unavailable)';
-  el.style.color = '#ef4444';
-  if (cb) { cb.checked = false; cb.disabled = true; }
+                 : '(balance unknown — check will still run)';
+  el.style.color = unusable ? '#ef4444' : '#f59e0b';
+  if (cb && unusable) { cb.checked = false; cb.disabled = true; }
 }
 
 // Fetch Dehashed credit balance on page load
@@ -707,7 +724,14 @@ form.addEventListener('submit', async (e) => {
   if (recordsHeld > 0) body.records_held = recordsHeld;
 
   if (document.getElementById('fraud-check').checked) body.include_fraudulent_domains = true;
-  if (!document.getElementById('dehashed-check').checked) body.skip_dehashed = true;
+  const _dhCb = document.getElementById('dehashed-check');
+  if (!_dhCb.checked) {
+    body.skip_dehashed = true;
+    // Distinguish "the broker unticked this" from "the credit probe unticked it
+    // for them". Byte-identical in the DB until now, and the second silently
+    // inherited the first's no-warning, full-completeness treatment.
+    if (_dhCb.dataset.forcedOff === '1') body.skip_dehashed_reason = 'probe_failed';
+  }
   if (!document.getElementById('intelx-check').checked) body.skip_intelx = true;
   if (!document.getElementById('breachintel-check').checked) body.skip_breach_intel = true;
 
