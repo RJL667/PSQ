@@ -885,7 +885,13 @@ export function getAttackPath(r: Results | null): AttackStage[] {
     ?? (cat(r, 'dns_infrastructure')?.server_info as Record<string, string> | undefined)?.Server
   const svc = (cat(r, 'high_risk_protocols')?.exposed_services as Array<{ service: string; port: number }> | undefined) ?? []
   const cred = cat(r, 'dehashed')
-  const credExposed = (cred?.total_entries as number | undefined) ?? 0
+  // NOT a raw read. An unassessed provider reports total_entries: 0, which is
+  // indistinguishable from a searched-and-clean estate -- so the attack path
+  // could print "No confirmed initial-access vector" about credentials nobody
+  // looked for. ExposurePage guards the same category with isConclusive; this
+  // did not, so the PDF and the dashboard disagreed on identical data.
+  const credConclusive = cred ? isConclusive(cred) : false
+  const credExposed = credConclusive ? ((cred?.total_entries as number | undefined) ?? 0) : null
   const cves = (cat(r, 'shodan_vulns')?.cves as unknown[] | undefined)?.length ?? 0
   const fin = getFinancialSummary(r)
 
@@ -897,7 +903,10 @@ export function getAttackPath(r: Results | null): AttackStage[] {
 
   const access: string[] = []
   if (svc.length) access.push(`Internet-facing ${svc.map((s) => s.service).join(', ')} service`)
-  if (credExposed > 0) access.push('Third-party credential exposure')
+  if (credExposed !== null && credExposed > 0) access.push('Third-party credential exposure')
+  if (credExposed === null) access.push('Credential exposure not assessed on this scan')
+  // Only claim "no vector" when we actually looked. Saying it while the
+  // credential search never ran is the false clean this guard exists to stop.
   if (!access.length) access.push('No confirmed initial-access vector from external scan')
 
   const exploit: string[] = cves > 0

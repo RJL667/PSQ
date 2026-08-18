@@ -676,6 +676,67 @@ EXPORT_SWITCH_SCENARIOS = [
 ]
 
 
+def _check_shared_hosting_attribution(failures):
+    """A shared-hosting box must not be attributed as the insured's OWN infra.
+
+    2026-08-18, phishield.com. 213.133.105.171 serves the site and exposes MySQL
+    3306 + PostgreSQL 5432. classify_ip returned ('owned', 'cloud IaaS
+    (insured-operated)'), so the report told a broker the client had an
+    internet-facing database and advised closing a port on a box the client does
+    not operate -- it is a Hetzner MANAGED SHARED host and the client is one
+    tenant. This is the SAME defect ip_classification was created to fix: its
+    docstring cites a HostRocket shared host wrongly attributed to takealot.
+
+    Reverse DNS and org cannot separate the cases (Hetzner sells both), so the
+    signal is the certificate served with NO SNI -- the platform's own identity.
+    Offline here: the cert names are supplied, no network call.
+    """
+    import importlib
+    ipc = importlib.import_module("ip_classification")
+
+    HETZNER_SHARED = {"*.your-server.de", "your-server.de"}
+    cases = [
+        # label, kwargs, expect_third_party
+        ("shared host, provider default cert",
+         dict(reverse_dns="dedi5586.your-server.de", org="Hetzner Online AG",
+              default_cert_names=HETZNER_SHARED, insured_domain="phishield.com"), True),
+        # the insured's OWN server must stay scannable -- over-correcting here
+        # would silently drop real exposures off the insured's attack surface.
+        ("own server, cert names the insured",
+         dict(reverse_dns="static.1.2.3.4.clients.your-server.de",
+              org="Hetzner Online AG",
+              default_cert_names={"acme.co.za", "www.acme.co.za"},
+              insured_domain="acme.co.za"), False),
+        ("own server, wildcard covering the insured",
+         dict(default_cert_names={"*.acme.co.za"},
+              insured_domain="app.acme.co.za"), False),
+        # unknown must NOT invent a verdict: no 443, probe blocked, no crypto lib
+        ("cert unreadable -> unchanged behaviour",
+         dict(reverse_dns="dedi5586.your-server.de", org="Hetzner Online AG",
+              default_cert_names=None, insured_domain="phishield.com"), False),
+    ]
+    for label, kw, want_tp in cases:
+        bucket, prov = ipc.classify_ip("213.133.105.171", **kw)
+        got_tp = ipc.is_third_party(bucket)
+        ok = (got_tp == want_tp)
+        if not ok:
+            failures.append(
+                f"shared_hosting[{label}]: classify_ip -> ({bucket!r}, {prov!r}), "
+                f"third_party={got_tp} but expected {want_tp}. Attributing a "
+                "vendor-operated shared host to the insured produces a finding "
+                "they cannot remediate; attributing their OWN server to a vendor "
+                "silently drops a real exposure from the attack surface.")
+        print(f"  [{'PASS' if ok else 'FAIL'}] shared_hosting:{label[:38]:<38} "
+              f"{bucket}/{prov[:28]}")
+
+    # RFC 6125: a wildcard covers ONE label only.
+    ok_w = (ipc._cert_covers({"*.a.com"}, "x.a.com") is True
+            and ipc._cert_covers({"*.a.com"}, "y.x.a.com") is False)
+    if not ok_w:
+        failures.append("shared_hosting[wildcard_depth]: *.a.com must cover "
+                        "x.a.com but NOT y.x.a.com (RFC 6125 single-label)")
+    print(f"  [{'PASS' if ok_w else 'FAIL'}] shared_hosting:wildcard_single_label")
+
 def _check_export_switch(failures):
     # Two halves, deliberately: reloading app to re-read the env would re-run
     # init_db() against whatever DB the env points at, so instead patch the flag
@@ -2575,6 +2636,7 @@ def main():
     _check_key_probe(failures)
     _check_datastore_readiness(failures)
     _check_export_switch(failures)
+    _check_shared_hosting_attribution(failures)
     _check_credential_failclosed(failures)
     _check_provider_budget(failures)
     _check_lookalike_posture(failures)

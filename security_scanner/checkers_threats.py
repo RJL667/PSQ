@@ -622,6 +622,67 @@ class ShodanVulnChecker:
             return {"cve_id": cve_id, "description": "", "cvss_score": 0.0, "severity": "unknown",
                     "vector": "", "published": "", "has_patch": False, "easily_exploitable": False}
 
+
+# --- external CVE version corroboration -----------------------------------
+#
+# Shodan's `vulns` list is derived from CPEs Shodan INFERS from a banner, and it
+# is routinely wrong about version. phishield.com, 2026-08-18: the report carried
+# CVE-2017-15365 ("MariaDB before 10.1.30 and 10.2.x before 10.2.10") against a
+# server whose own banner reads 10.11.18 -- seven minor series newer, so the CVE
+# cannot apply. The evidence-gating added in 39a241a covers the PORT-TEMPLATE CVE
+# path (checkers_network PORT_INTEL) and never reached this one.
+#
+# Deliberately FLAGS, NEVER SUPPRESSES. Parsing affected ranges out of NVD prose
+# is fragile, and this codebase's rule is that uncertainty must be visible rather
+# than resolved by guessing -- silently dropping a real CVE is the worse failure.
+# So the finding stays, and carries the basis on which it is being asserted.
+import re as _re_mod  # explicit: `re` otherwise arrives via a star-import
+_VER_BEFORE_RE = _re_mod.compile(r"before\s+(\d+(?:\.\d+){1,3})", _re_mod.I)
+
+
+def _version_tuple(v):
+    try:
+        return tuple(int(x) for x in str(v).split(".")[:4])
+    except (ValueError, TypeError):
+        return None
+
+
+def annotate_cve_version_confidence(cve, detected_versions):
+    """Stamp an externally-sourced CVE with how far we actually corroborated it.
+
+    detected_versions: version strings THIS scan observed on the host (from our
+    own port banners), e.g. {"10.11.18-MariaDB"}.
+    """
+    cve = dict(cve or {})
+    cve.setdefault("source", "shodan")
+    cve["version_confirmed"] = False          # we never pinned a version ourselves
+    desc = str(cve.get("description") or "")
+    m = _VER_BEFORE_RE.search(desc)
+    if not m or not detected_versions:
+        cve["cve_confidence"] = "external_unconfirmed"
+        return cve
+    fixed = _version_tuple(m.group(1))
+    for dv in detected_versions:
+        d = str(dv or "")
+        # MariaDB prefixes its handshake with "5.5.5-" for replication
+        # compatibility, so the real banner reads "5.5.5-10.11.18-MariaDB".
+        # Parsed naively that is version 5.5.5, which would compare as ANCIENT
+        # and quietly defeat this whole check on the exact product that prompted
+        # it. Strip the compat prefix when a real version follows it.
+        if d.startswith("5.5.5-"):
+            d = d[len("5.5.5-"):]
+        head = _re_mod.match(r"(\d+(?:\.\d+){1,3})", d)
+        obs = _version_tuple(head.group(1)) if head else None
+        if fixed and obs and obs >= fixed:
+            cve["cve_confidence"] = "version_contradicted"
+            cve["cve_note"] = (
+                "external intelligence reported this CVE, but it is fixed in "
+                "%s and this host reports %s - retained for review, not counted "
+                "as a confirmed finding" % (m.group(1), dv))
+            return cve
+    cve["cve_confidence"] = "external_unconfirmed"
+    return cve
+
     def _check_full_api(self, ip: str, api_key: str, result: dict) -> bool:
         """Use Shodan full API. Returns True if successful, False to fall back."""
         try:
@@ -865,6 +926,19 @@ class ShodanVulnChecker:
         oldest_cve_age = 0
         cve_ages = []
 
+        # Versions THIS scan observed for itself, from Shodan's own service
+        # banners. Used only to contradict an external CVE, never to assert one.
+        _observed_versions = set()
+        for _svc in (result.get("services") or []):
+            for _k in ("version", "product"):
+                _v = _svc.get(_k)
+                if _v:
+                    _observed_versions.add(str(_v))
+            _b = str(_svc.get("banner_snippet") or "")
+            _m = _re_mod.search(r"(\d+\.\d+\.\d+[\w.\-+]*)", _b)
+            if _m:
+                _observed_versions.add(_m.group(1))
+
         for cve_id in raw_cves[:10]:
             info = self._fetch_cvss(cve_id)
             if info:
@@ -892,6 +966,12 @@ class ShodanVulnChecker:
                     poc_count += 1
                 else:
                     info["exploit_maturity"] = "theoretical"
+
+                # CORROBORATE THE VERSION. Shodan infers these CVEs from CPEs
+                # it guesses off a banner and is routinely wrong: a MariaDB
+                # 10.1/10.2 CVE was reported against a 10.11.18 host. Stamp how
+                # far we actually confirmed it -- flag, never suppress.
+                info = annotate_cve_version_confidence(info, _observed_versions)
 
                 # --- NEW: Easily exploitable (from CVSS vector) ---
                 if info.get("easily_exploitable"):

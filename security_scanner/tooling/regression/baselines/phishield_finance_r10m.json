@@ -908,6 +908,15 @@
           "effort": "Low",
           "kind": "scan_quality",
           "rank": 23,
+          "rsi_reduction": 0.05,
+          "severity": "medium",
+          "source": "engine",
+          "title": "Credential exposure could not be assessed on this scan \u2014 the breach database was not searched. Treat leaked credentials as UNKNOWN, not absent: force password resets and enable MFA on privileged accounts as a precaution, and re-run the credential search to confirm."
+        },
+        {
+          "effort": "Low",
+          "kind": "scan_quality",
+          "rank": 24,
           "rsi_reduction": null,
           "severity": "medium",
           "source": "recommendation",
@@ -921,11 +930,11 @@
         "most_likely": 67088
       },
       "simulated_rsi": 0.078,
-      "step_count": 11,
+      "step_count": 12,
       "steps": [
         {
           "action": "Firewall exposed database ports (MongoDB, Redis, PostgreSQL, MySQL, etc.) \u2014 restrict to VPN/private network only.",
-          "annual_savings_estimate": 78270,
+          "annual_savings_estimate": 71281,
           "category": "high_risk_protocols",
           "estimated_cost": "R9,000\u2013R36,000",
           "priority": 1,
@@ -933,7 +942,7 @@
         },
         {
           "action": "Patch critical vulnerabilities detected via version analysis (OSV.dev) \u2014 update affected software packages to latest stable versions.",
-          "annual_savings_estimate": 52179,
+          "annual_savings_estimate": 47521,
           "category": "osv_vulns",
           "estimated_cost": "R18,000\u2013R90,000",
           "priority": 1,
@@ -941,7 +950,7 @@
         },
         {
           "action": "Patch high-EPSS CVEs (>50% exploitation probability within 30 days) \u2014 prioritise by EPSS score for maximum risk reduction.",
-          "annual_savings_estimate": 26090,
+          "annual_savings_estimate": 23761,
           "category": "shodan_vulns",
           "estimated_cost": "R18,000\u2013R90,000",
           "priority": 2,
@@ -949,15 +958,23 @@
         },
         {
           "action": "Upgrade SSL/TLS configuration \u2014 enable TLS 1.2+, disable weak ciphers. sslyze analysis shows vulnerable protocols or cipher suites.",
-          "annual_savings_estimate": 26090,
+          "annual_savings_estimate": 23761,
           "category": "ssl",
           "estimated_cost": "R0\u2013R3,600",
           "priority": 2,
           "rsi_reduction": 0.05
         },
         {
+          "action": "Credential exposure could not be assessed on this scan \u2014 the breach database was not searched. Treat leaked credentials as UNKNOWN, not absent: force password resets and enable MFA on privileged accounts as a precaution, and re-run the credential search to confirm.",
+          "annual_savings_estimate": 23761,
+          "category": "dehashed",
+          "estimated_cost": "R9,000\u2013R36,000",
+          "priority": 2,
+          "rsi_reduction": 0.05
+        },
+        {
           "action": "Investigate and resolve IP/domain blacklisting \u2014 indicates prior compromise, spam, or malware distribution.",
-          "annual_savings_estimate": 26090,
+          "annual_savings_estimate": 23761,
           "category": "dnsbl",
           "estimated_cost": "R9,000\u2013R36,000",
           "priority": 2,
@@ -965,7 +982,7 @@
         },
         {
           "action": "Implement security headers: HSTS, Content-Security-Policy, X-Frame-Options, Permissions-Policy \u2014 prevents XSS, clickjacking, and data leakage.",
-          "annual_savings_estimate": 15654,
+          "annual_savings_estimate": 14256,
           "category": "http_headers",
           "estimated_cost": "R0\u2013R3,600",
           "priority": 3,
@@ -973,7 +990,7 @@
         },
         {
           "action": "Deploy a CDN for DDoS resilience and improved availability \u2014 single-origin hosting is vulnerable to volumetric attacks.",
-          "annual_savings_estimate": 10436,
+          "annual_savings_estimate": 9504,
           "category": "cloud_cdn",
           "estimated_cost": "R0\u2013R9,000/mo",
           "priority": 3,
@@ -981,7 +998,7 @@
         },
         {
           "action": "Configure web server to redirect all HTTP traffic to HTTPS (301 redirect) \u2014 prevents credential interception.",
-          "annual_savings_estimate": 10436,
+          "annual_savings_estimate": 9504,
           "category": "website_security",
           "estimated_cost": "R0\u2013R3,600",
           "priority": 3,
@@ -989,7 +1006,7 @@
         },
         {
           "action": "Audit risky-named subdomains (dev / staging / admin) for restricted access; reclaim or remove any dangling DNS records that point to unclaimed cloud services (subdomain takeover risk).",
-          "annual_savings_estimate": 10436,
+          "annual_savings_estimate": 9504,
           "category": "subdomains",
           "estimated_cost": "R3,600\u2013R18,000",
           "priority": 3,
@@ -997,7 +1014,7 @@
         },
         {
           "action": "Create a security.txt file at /.well-known/security.txt \u2014 establishes a vulnerability disclosure policy for responsible reporting.",
-          "annual_savings_estimate": 5218,
+          "annual_savings_estimate": 4752,
           "category": "security_policy",
           "estimated_cost": "R0",
           "priority": 3,
@@ -1005,14 +1022,14 @@
         },
         {
           "action": "Enable DNSSEC to protect against DNS spoofing and cache poisoning attacks.",
-          "annual_savings_estimate": 5218,
+          "annual_savings_estimate": 4752,
           "category": "dns_infrastructure",
           "estimated_cost": "R3,600\u2013R9,000",
           "priority": 3,
           "rsi_reduction": 0.01
         }
       ],
-      "total_potential_savings": 266117
+      "total_potential_savings": 266118
     },
     "rsi": {
       "annual_revenue": 10000000,

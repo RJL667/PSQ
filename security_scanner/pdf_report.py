@@ -53,7 +53,7 @@ from pdf_cards import (
     flag_audit_panel, scan_duration_profile, cat_risk_mitigations,
     build_summary_table, _build_legend, _build_vulnerability_posture,
     _build_attackers_view, _supply_chain_attacker_findings,
-    _kill_chain_severities, _finding_colour,
+    _kill_chain_severities, _finding_colour, conclusive_count,
 )
 
 
@@ -452,7 +452,11 @@ def _assessment_top_findings(results: dict) -> list:
         em_b = score_or_none(cats.get("email_security"))
         sub_count = cats.get("subdomains", {}).get("total_count", 0)
         ip_count = cats.get("external_ips", {}).get("total_unique_ips", 0)
-        breach_emails = cats.get("dehashed", {}).get("unique_emails", 0)
+        # conclusive_count, not a raw .get: an unassessed provider reports 0
+        # and would otherwise be indistinguishable from a searched-and-clean
+        # estate. Here it only suppresses a finding, but the next reader of
+        # this value should not have to work that out.
+        breach_emails = conclusive_count(cats, "dehashed", "unique_emails") or 0
         backfill = []
         if ssl_grade == "C":
             backfill.append((38, {
@@ -2077,7 +2081,7 @@ def generate_pdf(results: dict, report_type: str = "full") -> bytes:
         cred_risk = cats.get("credential_risk", {}).get("risk_level", "LOW")
         hr_employees = cats.get("hudson_rock", {}).get("compromised_employees", 0)
         ix_total = cats.get("intelx", {}).get("total_results", 0)
-        dh_total = cats.get("dehashed", {}).get("total_entries", 0)
+        dh_total = conclusive_count(cats, "dehashed", "total_entries") or 0
         hrp_critical = cats.get("high_risk_protocols", {}).get("critical_count", 0)
 
         # Wrap WHY THIS MATTERS header with first content block

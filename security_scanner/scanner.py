@@ -696,7 +696,8 @@ class SecurityScanner:
         # info-disclosure finding and must never be actively scanned. Reverse-DNS
         # is the strongest pre-scan signal (PTR is set by the IP owner); verified
         # origins are already cert-confirmed own infra and always scanned.
-        from ip_classification import classify_ip, OWNED, PRIVATE, is_third_party
+        from ip_classification import (classify_ip, OWNED, PRIVATE, is_third_party,
+                                       probe_default_cert)
 
         def _ptr_lookup(ip):
             try:
@@ -811,8 +812,25 @@ class SecurityScanner:
             banner = " ".join(
                 str(p.get("detected_version", "")) + " " + str(p.get("banner", ""))
                 for p in (dns.get("open_ports") or []))
+            # SHARED / MANAGED HOSTING. Read the certificate the box serves with
+            # NO SNI: that is the platform's own identity. A single-tenant server
+            # presents the insured's cert either way; a multi-tenant platform
+            # presents the provider's default (e.g. CN=*.your-server.de) and only
+            # serves the insured's once SNI names them. Reverse DNS and org
+            # cannot separate the two -- Hetzner sells customer-operated servers
+            # AND managed hosting under the same PTR suffix and the same org, so
+            # the IaaS rule below would claim a shared box as the insured's own.
+            # One extra handshake per scanned IP, and only when 443 is open.
+            _default_cert = None
+            try:
+                if 443 in (shod.get("open_ports") or []):
+                    _default_cert = probe_default_cert(ip)
+            except Exception:
+                _default_cert = None
             bucket, label = classify_ip(ip, reverse_dns=dns.get("reverse_dns"),
-                                        org=shod.get("org"), banner=banner)
+                                        org=shod.get("org"), banner=banner,
+                                        default_cert_names=_default_cert,
+                                        insured_domain=domain)
             if is_third_party(bucket):
                 ip_classification[ip] = bucket
                 third_party_hosting.append({

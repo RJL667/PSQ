@@ -308,7 +308,13 @@ class ExternalIPAggregator:
             ip_entry = {
                 "ip": ip,
                 "is_primary": i == 0,
-                "hosting": True,
+                # "hosting" was a hardcoded True on every IP -- it read like a
+                # detection, carried no information, and nothing consumed it. It
+                # actively misled a 2026-08-18 investigation into a shared-host
+                # misattribution ("the scanner already knew it was hosting").
+                # The real signal now lives in ip_classification (default-cert
+                # multi-tenancy) and surfaces as results["ip_classification"].
+                "hosting": True,   # DEPRECATED: constant, not a signal
                 "org": org or "Unknown",
                 "asn": asn,
                 "country": country,
@@ -622,6 +628,15 @@ COMPLIANCE_MAP = {
 
 # 28. Risk Scoring Engine
 # ---------------------------------------------------------------------------
+
+# Sourced from the canonical set so a new non-conclusive status cannot
+# silently start dropping remediation steps again.
+try:
+    from card_severity import NON_CONCLUSIVE_STATUSES as _NON_CONCLUSIVE_FOR_REMEDIATION
+except Exception:      # pragma: no cover - import cycle safety
+    _NON_CONCLUSIVE_FOR_REMEDIATION = {
+        "error", "timeout", "no_api_key", "auth_failed", "quota_exhausted",
+        "subscription_required", "probe_failed", "skipped", "disabled"}
 
 class RiskScorer:
     """
@@ -4022,6 +4037,15 @@ class RemediationSimulator:
          "Implement security headers: HSTS, Content-Security-Policy, X-Frame-Options, Permissions-Policy — prevents XSS, clickjacking, and data leakage.", "R0–R3,600", 0.03),
         ("dehashed", lambda c: c.get("total_entries", 0) > 0,
          "Force password resets for all leaked credentials and enable MFA. Breached credentials enable credential stuffing and account takeover attacks.", "R9,000–R36,000", 0.05),
+        # AN UNASSESSED PROVIDER MUST NOT SILENTLY REMOVE THE STEP.
+        # The row above is gated on total_entries > 0, which an unassessed
+        # DeHashed reports as 0 -- so a scan that could not search the credential
+        # estate quietly dropped "force password resets" out of the remediation
+        # plan entirely. The client was neither told to do it nor told why it was
+        # absent, which is the worst of both. Emit the step with honest framing
+        # instead: the action is still correct, the certainty is not.
+        ("dehashed", lambda c: (c.get("status") in _NON_CONCLUSIVE_FOR_REMEDIATION),
+         "Credential exposure could not be assessed on this scan — the breach database was not searched. Treat leaked credentials as UNKNOWN, not absent: force password resets and enable MFA on privileged accounts as a precaution, and re-run the credential search to confirm.", "R9,000–R36,000", 0.05),
         ("info_disclosure", lambda c: any(p.get("risk_level") == "critical" for p in c.get("exposed_paths", [])),
          "Remove exposed sensitive files (.env, .git, backups, config files) from web root — these leak credentials and infrastructure details.", "R0–R9,000", 0.03),
         ("exposed_admin", lambda c: c.get("critical_count", 0) > 0,
