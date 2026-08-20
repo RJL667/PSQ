@@ -737,6 +737,76 @@ def _check_shared_hosting_attribution(failures):
                         "x.a.com but NOT y.x.a.com (RFC 6125 single-label)")
     print(f"  [{'PASS' if ok_w else 'FAIL'}] shared_hosting:wildcard_single_label")
 
+def _check_checker_wiring(failures):
+    """Every `SomeChecker().method` scanner.py references must actually exist.
+
+    2026-08-18: a helper block was inserted using a METHOD as its anchor, so it
+    landed inside ShodanVulnChecker's body and de-indented every method after it
+    out of the class. ShodanVulnChecker lost .check entirely and scan() died at
+    startup with AttributeError. NINE OFFLINE GATES PASSED over that build --
+    none of them constructs the scanner -- and only the pre-push live smoke test
+    caught it, which runs on master pushes alone. A feature branch would have
+    shipped it.
+
+    The registry is built inline inside scan(), so no offline gate can reach it
+    by calling. Check it STATICALLY instead: walk scanner.py's AST for every
+    `X().attr`, import X, assert the attribute is there. Milliseconds, no
+    network, and it fails on exactly the defect that got through.
+    """
+    import ast, importlib
+    src = open(os.path.join(SEC, "scanner.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+
+    wanted = set()          # (ClassName, attr)
+    for node in ast.walk(tree):
+        # matches `ShodanVulnChecker().check` -> Attribute(value=Call(func=Name))
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id.endswith(("Checker", "Classifier", "Metadata",
+                                                 "Index", "Scorer", "Calculator"))):
+            wanted.add((node.value.func.id, node.attr))
+
+    if not wanted:
+        failures.append("checker_wiring: parsed scanner.py and found NO "
+                        "`SomeChecker().method` references — the gate has gone "
+                        "blind, which is worse than it failing")
+        print("  [FAIL] checker_wiring:parsed                 0 references")
+        return
+
+    # Resolve each class from the modules scanner.py imports from.
+    mods = {}
+    for m in ("checkers_core", "checkers_network", "checkers_threats",
+              "checkers_supply_chain", "scoring_analytics", "scanner"):
+        try:
+            mods[m] = importlib.import_module(m)
+        except Exception:
+            pass
+
+    missing, checked = [], 0
+    for cls_name, attr in sorted(wanted):
+        cls = None
+        for m in mods.values():
+            cls = getattr(m, cls_name, None)
+            if cls is not None:
+                break
+        if cls is None:
+            continue            # not one of ours / conditionally imported
+        checked += 1
+        if not hasattr(cls, attr):
+            missing.append(f"{cls_name}.{attr}")
+
+    ok = not missing
+    if not ok:
+        failures.append(
+            "checker_wiring: scanner.py calls " + ", ".join(missing) +
+            " but the attribute does not exist on the class. scan() will raise "
+            "AttributeError at startup and EVERY scan fails. This is the class of "
+            "break that nine offline gates missed on 2026-08-18.")
+    print(f"  [{'PASS' if ok else 'FAIL'}] checker_wiring:attrs_exist          "
+          f"{checked} checked, {len(missing)} missing")
+
+
 def _check_export_switch(failures):
     # Two halves, deliberately: reloading app to re-read the env would re-run
     # init_db() against whatever DB the env points at, so instead patch the flag
@@ -2637,6 +2707,7 @@ def main():
     _check_datastore_readiness(failures)
     _check_export_switch(failures)
     _check_shared_hosting_attribution(failures)
+    _check_checker_wiring(failures)
     _check_credential_failclosed(failures)
     _check_provider_budget(failures)
     _check_lookalike_posture(failures)

@@ -153,6 +153,55 @@ credit-free).
 | Probe-cache SQLite-backed implementation | Interface defined in `http_client.ProbeCache`; default `_NullProbeCache` no-op. Real implementation lands with continuous-monitoring scheduler. |
 | Continuous-monitoring scheduler | Open. Estimated 3-4 week build. Requires probe cache + per-tenant scheduling + delta-finding detection + alert-on-change pipeline. |
 
+### 4a. Risk-register workflow: analyst/client adjudication of findings (GAP, 2026-08-18)
+
+**Owner-raised, explicitly NOT for now.** Recorded here so the continuous-monitoring
+build does not get designed without it, because it changes the data model rather
+than the UI, and retrofitting it later is far more expensive than allowing for it.
+
+**The gap.** Today a finding has exactly one state: whatever the scanner decided.
+There is no way to record what happened when a human looked at it. After a client
+session the broker knows things the scan cannot: that an exposed service is a
+decommissioned host awaiting teardown, that a "critical" database is a vendor's
+shared platform (see 2026-08-18, `707418b`), that a lookalike domain is the
+client's own marketing site. None of that survives anywhere. The next scan
+re-raises the same finding at the same severity, and the client sees an
+unchanged report after telling us it was wrong.
+
+**What is wanted.** Selectable fields on each identified risk so a finding can be
+adjudicated:
+
+- a **status** drop-down (open / accepted / mitigated / false positive / vendor-owned / decommissioned)
+- an **override severity** with the scanner's original severity retained alongside it, never overwritten
+- a **mandatory comment** whenever the override differs from the scan verdict, so the escalation or de-escalation carries its own justification
+- **attribution and timestamp** on every change, since this becomes the audit trail for why a quoted risk differed from a scanned one
+
+**Reference UI.** The owner cites Darkivore's scan interface as the shape to aim
+for (risk items managed in place, adjudicated rather than merely listed). Not
+independently reviewed by me and NOT verified against their product; treat as a
+directional pointer from the owner, not a specification, and confirm before
+designing to it.
+
+**Why it is a continuous-monitoring item and not a dashboard item.** Adjudication
+only pays off across repeat scans. Its whole value is that scan N+1 remembers what
+a human decided about scan N, which means the override must attach to a STABLE
+FINDING IDENTITY that survives re-scanning, not to a row in one scan's results.
+That identity does not exist yet and is a prerequisite for the delta-finding
+detection already listed in section 4. Design them together.
+
+**Underwriting caution, to settle before build.** An override that de-escalates a
+finding changes the risk score a quote is derived from. That needs an explicit
+decision: does an adjudicated score feed the premium, or does the scanner's own
+score remain the rated one with the override shown alongside as broker context?
+Silently letting a client talk a score down would be a serious defect in an
+underwriting tool. Recommend the scanner's score stays authoritative for rating
+and the adjudicated view is presented separately, but this is the owner's call.
+
+**Ties into 5m (UI screening test).** 5m is about the dashboard faithfully
+REPORTING what the scan found. This item adds a second, human-authored layer on
+top. Doing 5m first is the right order: there is no point building adjudication
+over a display that does not yet provably agree with the scoring path.
+
 ## 5. Open accuracy items (gap analysis roadmap)
 
 Carried over from v9 / v10 gap analyses. Not blocking but worth flagging:

@@ -62,6 +62,36 @@ def build(doc):
 
     add_body(
         doc,
+        "A fourth case sits inside the third and is easy to miss. A check can "
+        "be switched off deliberately by the operator, and it can be switched "
+        "off FOR the operator by a fault elsewhere in the system. Those two "
+        "look identical in the stored result and must not be graded the same "
+        "way. In August 2026 a failing credit check on a credential provider "
+        "caused the assessment console to disable that provider's tick box; "
+        "the next seven scans ran with no credential search at all, and "
+        "because the system recorded them as an operator's choice they were "
+        "still certified as complete. The scanner now records WHY a check was "
+        "skipped. An operator's own decision remains benign; a skip that some "
+        "other failure imposed is graded as a failed check, so the scan stops "
+        "presenting itself as a full assessment.",
+    )
+
+    add_body(
+        doc,
+        "The same rule governs the attacker's-view kill chain. Each phase is "
+        "built from counts - staff addresses in breach data, stolen "
+        "credentials, infected devices - and a provider that never ran "
+        "reports those counts as zero. Read naively, an estate nobody "
+        "searched produces a green phase. Any phase whose verdict depends on "
+        "evidence the scan could not gather is now shown as UNKNOWN in grey, "
+        "never green, and the findings list states which source was not "
+        "consulted. A phase already rated critical on other evidence keeps "
+        "that rating: missing credential data cannot make a confirmed "
+        "exposure less certain.",
+    )
+
+    add_body(
+        doc,
         "The third state is the one that matters commercially, because the raw "
         "data of a blocked check and a clean check are identical: both produce "
         "zero findings. A checker that cannot distinguish them will report a "

@@ -810,6 +810,47 @@ def build(doc):
         "it is internet-accessible is itself a significant risk."
     )
 
+    add_bold_body(
+        doc,
+        "Whose exposure is it? ",
+        "On shared or managed hosting the database ports belong to the "
+        "platform, not to the client. They listen for every tenant on the "
+        "machine and would be open whether that client has ten databases or "
+        "none, so charging the finding to the insured overstates their own "
+        "attack surface and produces a remediation instruction they have no "
+        "ability to carry out. Reverse DNS and network ownership cannot "
+        "separate the two cases, because the larger providers sell both "
+        "customer-operated servers and managed hosting from the same address "
+        "space under the same name."
+    )
+
+    add_body(
+        doc,
+        "The scanner distinguishes them by the certificate the server presents "
+        "when a connection is opened without naming a host. That default "
+        "certificate is the platform's own identity: a single-tenant server "
+        "presents the client's certificate either way, whereas a multi-tenant "
+        "platform presents the provider's and serves the client's only once "
+        "the connection names them. Where the default certificate does not "
+        "cover the insured's domain, the host is treated as vendor-operated "
+        "and its exposures are reported as a supply-chain dependency rather "
+        "than as the client's own. A real August 2026 assessment reached a "
+        "hosting platform whose default certificate belonged to the provider "
+        "while the client held a single virtual host on it; the exposed "
+        "database services were the provider's to close."
+    )
+
+    add_body(
+        doc,
+        "The test is applied only when it returns a clear answer. If the "
+        "certificate cannot be read the host keeps its existing "
+        "classification and remains fully scanned, because wrongly re-homing "
+        "a client's own server to a vendor would quietly remove genuine "
+        "exposures from the assessment. The finding still matters to an "
+        "underwriter either way; what changes is who is accountable for it "
+        "and what the client can reasonably be asked to do."
+    )
+
     # ── 4.5.3  Cloud & CDN Infrastructure ────────────────────────────────────
     add_h2(doc, "4.5.3  Cloud & CDN Infrastructure")
 

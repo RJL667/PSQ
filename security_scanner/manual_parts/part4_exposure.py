@@ -658,6 +658,19 @@ def build(doc):
         "shown. The CISA KEV 'actively exploited' badge is displayed only "
         "for CVEs that survive this gating, so a well-defended host is not "
         "tagged with exploited-CVE warnings it does not actually carry."
+        " Vulnerabilities supplied by an external intelligence source are "
+        "held to the same standard but reported differently. Those lists are "
+        "derived from software fingerprints the provider infers from a "
+        "banner, and they are frequently wrong about version: one August 2026 "
+        "scan carried a MariaDB advisory affecting releases before 10.1.30 "
+        "against a server whose own banner reported 10.11.18. Such a finding "
+        "is now labelled either externally reported, version not confirmed, "
+        "or version contradicted, the latter naming both the version in "
+        "which the issue was fixed and the version the host actually "
+        "reports. The finding is never silently removed. Suppressing it on "
+        "an automated reading of an advisory's prose risks discarding a real "
+        "vulnerability, so the scanner states how far the claim was "
+        "corroborated and leaves the judgement visible."
     )
 
     add_body(doc, "Common findings include:")
