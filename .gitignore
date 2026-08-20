@@ -52,3 +52,8 @@ security_scanner/preview_scans.db
 security_scanner/scans/_dehashed_balance.json
 security_scanner/scans/_dehashed_balance_history.jsonl
 security_scanner/scans/_dehashed_cache/
+# Runtime caches written by the scanner at execution time. _egress_ip.json in
+# particular records whichever machine last ran the code, so a developer's own
+# address lands in the repo -- it did, in 61bcf37.
+security_scanner/scans/_egress_ip.json
+security_scanner/scans/_dehashed_probe.json
