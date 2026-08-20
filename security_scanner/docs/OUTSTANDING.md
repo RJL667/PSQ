@@ -153,6 +153,52 @@ credit-free).
 | Probe-cache SQLite-backed implementation | Interface defined in `http_client.ProbeCache`; default `_NullProbeCache` no-op. Real implementation lands with continuous-monitoring scheduler. |
 | Continuous-monitoring scheduler | Open. Estimated 3-4 week build. Requires probe cache + per-tenant scheduling + delta-finding detection + alert-on-change pipeline. |
 
+### 3c. Targets can block the scanner by source IP, silently costing coverage (GAP, 2026-08-20)
+
+**Observed, not theorised.** bbgroup.co.za refuses the scanner's egress IP
+outright: TCP filtered on port 80 AND 443 from the VM (34.35.151.242, Google
+Cloud africa-south1), 0 of 5 probes connecting, while the same host answered 10
+of 10 with HTTP 200 from an ordinary connection at 1.6-3.0s. Not a user-agent
+problem, a browser UA fails identically. Two checkers were lost permanently and
+the scan completed at 93% coverage.
+
+**What already works.** The blocking IS detected (`waf_status.blocked`,
+`kind: waf_timeout`), the affected checkers fail closed rather than scoring
+clean, the weight is redistributed, and since `9d6d0bd` the report states the
+refusal is not transient instead of advising a re-scan that cannot succeed.
+Nine stored scans carried that wrong advice.
+
+**What is missing.**
+
+1. **Nobody is counting it.** There is no measure of how many scans lose checkers
+   to source blocking, which checkers are lost most often, or whether it is
+   trending. Coverage loss is currently visible only one scan at a time, and a
+   systematic degradation would look like a series of unremarkable individual
+   scans. A count over the stored corpus is cheap and would size the problem
+   before any mitigation is designed.
+2. **One egress IP, no fallback.** Every scan leaves from a single VM address. A
+   target that blocks it blocks the whole product for that client, permanently,
+   and the block may not be aimed at us -- cloud and datacentre ranges are
+   commonly filtered wholesale.
+3. **No allow-list workflow.** The corrected report now tells the client to
+   allow-list the assessment source, but nothing tells them WHAT to allow-list.
+   The egress address is not published anywhere a broker can hand to a client.
+   That is a one-line fix and should probably happen regardless of the rest.
+4. **Coverage is not part of the quoting decision.** A 93%-coverage scan and a
+   100%-coverage scan are quoted identically. The redistribution assumes the
+   unmeasured checkers resemble the measured ones, which is an assumption, not a
+   measurement, and its direction of error is unknown: a client whose website
+   security is genuinely poor scores better for having blocked us. That is a
+   perverse incentive worth naming even if the answer is to accept it.
+
+**Interaction with the 2026-08-20 quoting decision.** Quotes must come off a
+fresh scan. Nothing yet says a fresh scan must also be a sufficiently COMPLETE
+one. Whether a coverage floor should gate quoting, and where it should sit, is an
+owner decision that has not been taken.
+
+**Not urgent.** One observed instance, correctly handled and honestly reported.
+It is here so it is sized before it is a pattern.
+
 ### 3b. Historical scans no longer reproduce their own score (OBSERVED, 2026-08-20)
 
 **Found by a safety guard, not by looking for it.** The recommendation backfill
