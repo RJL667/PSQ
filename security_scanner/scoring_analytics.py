@@ -1064,21 +1064,79 @@ class RiskScorer:
             "Low"
         )
 
-        # Build recommendations from all issues
-        all_issues = []
-        for cat in results.values():
+        # Build recommendations from all issues.
+        #
+        # THE REPORT CALLS THIS LIST "prioritised recommendations". Until
+        # 2026-08-18 it was not ordered at all: it was emitted in whatever order
+        # the categories happened to sit in the results dict, so on a real client
+        # report "Implement MTA-STS" ranked ABOVE a 2,245-record credential
+        # breach, and a broker reading top-down met email-hygiene advice before
+        # the most urgent action on the page. Reproduced exactly before fixing.
+        #
+        # Order by the SAME severity the cards in the report already show, so the
+        # narrative and the action list cannot disagree, and keep discovery order
+        # inside a band so equal-severity items stay stable for the golden gate.
+        all_issues = []                      # (cat_id, cat, issue)
+        for _cat_id, cat in results.items():
             if isinstance(cat, dict):
-                all_issues.extend(cat.get("issues", []))
+                for _iss in (cat.get("issues") or []):
+                    all_issues.append((_cat_id, cat, _iss))
 
-        recommendations = []
-        seen = set()
-        for issue in all_issues:
+        try:
+            from card_severity import category_severity as _cat_sev
+        except Exception:                    # pragma: no cover - import safety
+            _cat_sev = lambda *_a, **_k: None
+        _BAND = {"critical": 0, "high": 1, "medium": 2, "positive": 4}
+        _sev_cache = {}
+
+        def _band_for(cat_id, cat, issue):
+            # An issue that announces itself as CRITICAL outranks its category's
+            # aggregate: one critical finding inside an otherwise medium card is
+            # still the thing to do first.
+            if str(issue).strip().upper().startswith("CRITICAL"):
+                return 0
+            if cat_id not in _sev_cache:
+                try:
+                    _sev_cache[cat_id] = _cat_sev(cat_id, cat)
+                except Exception:
+                    _sev_cache[cat_id] = None
+            return _BAND.get(_sev_cache.get(cat_id), 3)
+
+        scored = []
+        seen_text = set()                    # DEDUPE ON THE TEXT, NOT THE KEY.
+        # Two different keys ("CRITICAL: 1 critical CVE" and "critical CVE(s)
+        # found") map to the SAME sentence, and the old `seen` held the key, so
+        # the identical line was printed twice -- items 15 and 18 of a real
+        # client report.
+        for _order, (_cat_id, cat, issue) in enumerate(all_issues):
             for key, rec in self.RECOMMENDATIONS.items():
-                if key in issue and key not in seen and rec:
-                    recommendations.append(rec)
-                    seen.add(key)
+                if key in issue and rec and rec not in seen_text:
+                    seen_text.add(rec)
+                    scored.append((_band_for(_cat_id, cat, issue), _order, rec))
 
-        if _bi_reason and "breach_rec" not in seen:
+        scored.sort(key=lambda t: (t[0], t[1]))
+        recommendations = [rec for _b, _o, rec in scored]
+
+        # SCALE AND SEVERITY, not a generic sentence. The static line said
+        # "enforce mandatory password reset for all leaked accounts" with no
+        # count, no MFA and no indication it was the most urgent item on the
+        # page -- which is why an owner reading a report with a CRITICAL
+        # credential card concluded the recommendations said nothing about it.
+        _dh_cat = results.get("dehashed") or {}
+        _dh_n = _dh_cat.get("total_entries") or 0
+        if _dh_cat.get("status") == "completed" and _dh_n > 0:
+            _cr_level = (results.get("credential_risk") or {}).get("risk_level")
+            _lead = ("CRITICAL: " if _cr_level == "CRITICAL"
+                     else "HIGH: " if _cr_level == "HIGH" else "")
+            _generic = self.RECOMMENDATIONS.get("credential record(s) found in Dehashed")
+            recommendations = [r for r in recommendations if r != _generic]
+            recommendations.insert(0, (
+                f"{_lead}{_dh_n:,} leaked credential record(s) are associated with this "
+                "domain. Force a password reset on every affected account, enable "
+                "multi-factor authentication on all remote access and email, and check "
+                "those accounts for reuse of the same password on other systems."))
+
+        if _bi_reason and "breach_rec" not in seen_text:
             # Researched intel available: lead with WHEN, since recency is what
             # drives the risk here (and what an underwriter asks first).
             recommendations.append(
@@ -1086,7 +1144,7 @@ class RiskScorer:
                 "Confirm with the insured what was remediated after the incident, "
                 "enforce password resets and MFA, and verify the root cause is closed."
             )
-        elif breach_count > 0 and "breach_rec" not in seen:
+        elif breach_count > 0 and "breach_rec" not in seen_text:
             recommendations.append(
                 f"Domain found in {breach_count} breach(es). Enforce strong passwords, "
                 "implement credential monitoring, and review affected user accounts."

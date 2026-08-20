@@ -807,6 +807,77 @@ def _check_checker_wiring(failures):
           f"{checked} checked, {len(missing)} missing")
 
 
+def _check_recommendation_priority(failures):
+    """The report calls this list "prioritised". It must actually be.
+
+    2026-08-18, owner-reported on a live client report: the REMEDIATION
+    RECOMMENDATIONS block ranked "Implement MTA-STS" above a credential breach,
+    printed the identical "Patch critical CVEs" line twice (items 15 and 18), and
+    described the credential exposure so generically -- no count, no severity, no
+    MFA -- that the owner read the list as saying nothing about it at all, while
+    the credential card in the same report was CRITICAL.
+
+    Three separate causes, all reproduced before fixing:
+      * no ordering: emitted in results-dict order, not severity order;
+      * dedupe keyed on the MAPPING KEY, and two keys carry the same sentence;
+      * a static recommendation string that cannot state scale.
+    """
+    import importlib
+    SA = importlib.import_module("scoring_analytics")
+
+    cats = {
+        "email_hardening": {"status": "completed", "score": 50,
+                            "issues": ["No MTA-STS policy found"]},
+        "http_headers":    {"status": "completed", "score": 50,
+                            "issues": ["Missing Content-Security-Policy header"]},
+        "dehashed":        {"status": "completed", "score": 0, "total_entries": 2245,
+                            "issues": ["2245 credential record(s) found in Dehashed for this domain"]},
+        "credential_risk": {"status": "completed", "risk_level": "CRITICAL", "assessed": True},
+        "shodan_vulns":    {"status": "completed", "score": 0,
+                            "issues": ["CRITICAL: 1 critical CVE", "3 critical CVE(s) found"]},
+    }
+    _s, _l, recs = SA.RiskScorer().calculate(dict(cats), {})
+
+    checks = []
+    checks.append(("no_duplicate_lines", len(recs) == len(set(recs)),
+                   "the same recommendation sentence is printed more than once; "
+                   "dedupe on the TEXT, not the mapping key"))
+
+    cred_i = next((i for i, r in enumerate(recs) if "leaked credential record" in r), None)
+    mta_i = next((i for i, r in enumerate(recs) if "MTA-STS" in r), None)
+    checks.append(("credential_outranks_hygiene",
+                   cred_i is not None and mta_i is not None and cred_i < mta_i,
+                   f"credential breach at position {cred_i}, MTA-STS at {mta_i} — a "
+                   "CRITICAL credential exposure must outrank email hygiene in a list "
+                   "the report calls prioritised"))
+
+    cred = recs[cred_i] if cred_i is not None else ""
+    checks.append(("credential_states_scale", "2,245" in cred,
+                   "the credential recommendation does not say HOW MANY records; a "
+                   "generic line reads as boilerplate and gets skipped"))
+    checks.append(("credential_states_severity", cred.startswith("CRITICAL"),
+                   "the credential recommendation does not carry the severity the "
+                   "credential card shows, so the action list and the narrative disagree"))
+    checks.append(("credential_names_mfa", "multi-factor" in cred,
+                   "password reset without MFA leaves the account takeover path open"))
+
+    # and a deliberate skip must NOT manufacture a credential action
+    cats2 = dict(cats)
+    cats2["dehashed"] = {"status": "no_api_key", "total_entries": 0, "issues": []}
+    cats2["credential_risk"] = {"status": "no_api_key", "assessed": False,
+                                "risk_level": "UNKNOWN"}
+    _s2, _l2, recs2 = SA.RiskScorer().calculate(dict(cats2), {})
+    checks.append(("unassessed_claims_no_count",
+                   not any("leaked credential record" in r for r in recs2),
+                   "an UNASSESSED credential check produced a numeric credential "
+                   "recommendation — asserting a count nobody measured"))
+
+    for label, ok, why in checks:
+        if not ok:
+            failures.append(f"rec_priority[{label}]: {why}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] rec_priority:{label:<28}")
+
+
 def _check_export_switch(failures):
     # Two halves, deliberately: reloading app to re-read the env would re-run
     # init_db() against whatever DB the env points at, so instead patch the flag
@@ -2708,6 +2779,7 @@ def main():
     _check_export_switch(failures)
     _check_shared_hosting_attribution(failures)
     _check_checker_wiring(failures)
+    _check_recommendation_priority(failures)
     _check_credential_failclosed(failures)
     _check_provider_budget(failures)
     _check_lookalike_posture(failures)

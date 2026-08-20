@@ -731,9 +731,18 @@
           "title": "Restrict admin panel access \u2014 implement IP whitelist, VPN-only access, or move to non-standard paths."
         },
         {
-          "effort": "Low",
+          "effort": "High",
           "kind": "remediation",
           "rank": 6,
+          "rsi_reduction": null,
+          "severity": "medium",
+          "source": "recommendation",
+          "title": "CRITICAL: 3,624 leaked credential record(s) are associated with this domain. Force a password reset on every affected account, enable multi-factor authentication on all remote access and email, and check those accounts for reuse of the same password on other systems."
+        },
+        {
+          "effort": "Low",
+          "kind": "remediation",
+          "rank": 7,
           "rsi_reduction": 0.01,
           "severity": "medium",
           "source": "engine",
@@ -742,7 +751,7 @@
         {
           "effort": "Low",
           "kind": "remediation",
-          "rank": 7,
+          "rank": 8,
           "rsi_reduction": null,
           "severity": "medium",
           "source": "recommendation",
@@ -751,7 +760,7 @@
         {
           "effort": "Medium",
           "kind": "remediation",
-          "rank": 8,
+          "rank": 9,
           "rsi_reduction": 0.05,
           "severity": "medium",
           "source": "engine",
@@ -760,7 +769,7 @@
         {
           "effort": "Medium",
           "kind": "remediation",
-          "rank": 9,
+          "rank": 10,
           "rsi_reduction": 0.05,
           "severity": "medium",
           "source": "engine",
@@ -769,7 +778,7 @@
         {
           "effort": "Medium",
           "kind": "remediation",
-          "rank": 10,
+          "rank": 11,
           "rsi_reduction": 0.02,
           "severity": "medium",
           "source": "engine",
@@ -778,7 +787,7 @@
         {
           "effort": "Medium",
           "kind": "remediation",
-          "rank": 11,
+          "rank": 12,
           "rsi_reduction": 0.02,
           "severity": "medium",
           "source": "engine",
@@ -787,20 +796,11 @@
         {
           "effort": "Medium",
           "kind": "remediation",
-          "rank": 12,
+          "rank": 13,
           "rsi_reduction": 0.01,
           "severity": "medium",
           "source": "engine",
           "title": "Enable DNSSEC to protect against DNS spoofing and cache poisoning attacks."
-        },
-        {
-          "effort": "Medium",
-          "kind": "remediation",
-          "rank": 13,
-          "rsi_reduction": null,
-          "severity": "medium",
-          "source": "recommendation",
-          "title": "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing."
         },
         {
           "effort": "Medium",
@@ -818,7 +818,7 @@
           "rsi_reduction": null,
           "severity": "medium",
           "source": "recommendation",
-          "title": "Notify affected users and enforce mandatory password reset for all leaked accounts."
+          "title": "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing."
         },
         {
           "effort": "Medium",
@@ -926,12 +926,12 @@
   },
   "overall_risk_score": 205,
   "recommendations": [
+    "CRITICAL: 3,624 leaked credential record(s) are associated with this domain. Force a password reset on every affected account, enable multi-factor authentication on all remote access and email, and check those accounts for reuse of the same password on other systems.",
+    "Immediately restrict access to sensitive files. Audit your web server configuration and .htaccess rules.",
+    "Immediately investigate and remediate the critically exposed service.",
     "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.",
     "Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures.",
     "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing.",
-    "Immediately restrict access to sensitive files. Audit your web server configuration and .htaccess rules.",
-    "Immediately investigate and remediate the critically exposed service.",
-    "Notify affected users and enforce mandatory password reset for all leaked accounts.",
     "Update your privacy policy to include all required sections for POPIA/GDPR compliance.",
     "Investigate blacklist listings \u2014 likely indicates past spam, malware distribution, or compromise."
   ],

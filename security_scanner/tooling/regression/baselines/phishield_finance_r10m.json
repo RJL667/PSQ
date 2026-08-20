@@ -1072,17 +1072,17 @@
   "overall_risk_score": 282,
   "recommendations": [
     "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on 90% of available data. A re-scan is recommended for a complete assessment.",
+    "Immediately investigate and remediate the critically exposed service.",
     "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.",
     "Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures.",
-    "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to enforce email authentication.",
-    "Configure DKIM signing for outbound email and publish the public key in DNS.",
     "Implement a Content Security Policy to mitigate XSS attacks.",
     "Add 'X-Content-Type-Options: nosniff' to prevent MIME sniffing.",
+    "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'.",
     "Create a security.txt file at /.well-known/security.txt to establish a vulnerability disclosure policy.",
     "Configure your web server to redirect all HTTP traffic to HTTPS (301 redirect).",
     "Implement a VPN or Zero Trust Network Access (ZTNA) solution for remote workers.",
-    "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'.",
-    "Immediately investigate and remediate the critically exposed service.",
+    "Upgrade DMARC policy from 'none' to 'quarantine' or 'reject' to enforce email authentication.",
+    "Configure DKIM signing for outbound email and publish the public key in DNS.",
     "Investigate blacklist listings \u2014 likely indicates past spam, malware distribution, or compromise."
   ],
   "risk_level": "Medium"
