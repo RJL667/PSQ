@@ -927,6 +927,35 @@ def _check_recommendation_priority(failures):
                    and "same result" in blocked_msg,
                    "the scan was refused by the target's edge but the report still "
                    "advises a re-scan, which cannot succeed from the same source"))
+    # NAME THE ADDRESS TO ALLOW-LIST, but only when it is relevant and only when
+    # it is actually known. A hardcoded literal goes stale the first time the VM
+    # moves and a client then allow-lists an address we no longer use, which is
+    # worse than silence because it looks like it worked.
+    import egress as _EG
+    _orig_egress = _EG.egress_ip
+    try:
+        _EG.egress_ip = lambda *a, **k: "34.35.151.242"
+        _known = SA.RiskScorer().calculate(
+            dict(fail_cats), {"blocked": True, "evidence": "12 of 20 probes timed out"})[2][0]
+        _EG.egress_ip = lambda *a, **k: None
+        _unknown = SA.RiskScorer().calculate(
+            dict(fail_cats), {"blocked": True, "evidence": "12 of 20 probes timed out"})[2][0]
+    finally:
+        _EG.egress_ip = _orig_egress
+
+    checks.append(("blocked_names_the_source", "34.35.151.242" in _known,
+                   "the client is told to allow-list the assessment source but the "
+                   "address is not stated, so the instruction cannot be acted on"))
+    checks.append(("unknown_source_omits_cleanly",
+                   "originates from" not in _unknown and "()" not in _unknown
+                   and "allow-listing the assessment source" in _unknown,
+                   "with no detectable egress address the report must omit it "
+                   "entirely -- never an empty bracket and never a guess"))
+    checks.append(("unblocked_does_not_leak_source",
+                   "originates from" not in transient_msg,
+                   "the scanner's own source address appears on a report where "
+                   "nothing was blocked; it is only useful in the blocked case"))
+
     checks.append(("transient_still_advises_rescan",
                    "re-scan is recommended" in transient_msg,
                    "a genuinely transient failure must still advise a re-scan; the "

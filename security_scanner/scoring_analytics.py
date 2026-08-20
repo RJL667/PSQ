@@ -1221,12 +1221,25 @@ class RiskScorer:
             _blocked = bool(_wafs.get("blocked"))
             if _blocked:
                 _ev = _wafs.get("evidence") or "probes were refused or timed out"
+                # Name the address to allow-list, but ONLY if we can establish it.
+                # Detected at runtime rather than hardcoded: a literal in the
+                # report goes stale the first time the VM moves, and a client
+                # would then allow-list an address we no longer use -- worse than
+                # silence, because it looks like it worked. Omitted entirely when
+                # unknown; a plausible guess here is a wasted change request.
+                try:
+                    from egress import egress_ip as _egress_ip
+                    _src = _egress_ip()
+                except Exception:
+                    _src = None
+                _where = (f" (the assessment originates from {_src})" if _src else "")
                 _tail = (
                     f"This is not a transient error: the target's edge refused "
                     f"the assessment ({_ev}). A re-scan from the same source will "
                     f"produce the same result. These sections can only be assessed "
                     f"with the client's cooperation, by allow-listing the "
-                    f"assessment source or supplying the information directly.")
+                    f"assessment source{_where} or supplying the information "
+                    f"directly.")
             else:
                 _tail = "A re-scan is recommended for a complete assessment."
             recommendations.insert(0,
