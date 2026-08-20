@@ -872,10 +872,47 @@ def _check_recommendation_priority(failures):
                    "an UNASSESSED credential check produced a numeric credential "
                    "recommendation — asserting a count nobody measured"))
 
+    # An ACTIVE exposure must outrank a COMPLIANCE gap even when card_severity
+    # rates both categories critical in aggregate. Real 2026-08-20 scan: a
+    # missing privacy policy and an internet-exposed Jupyter Notebook were both
+    # category-critical, and results-dict order put the compliance gap above the
+    # remote-code-execution path.
+    cats3 = {
+        "privacy_compliance":  {"status": "completed", "score": 0,
+                                "issues": ["No privacy policy found — POPIA/GDPR compliance risk"]},
+        "high_risk_protocols": {"status": "completed", "score": 0, "critical_count": 1,
+                                "issues": ["CRITICAL: Jupyter Notebook (port 8888) exposed to internet"]},
+    }
+    _s3, _l3, recs3 = SA.RiskScorer().calculate(dict(cats3), {})
+    exp_i = next((i for i, r in enumerate(recs3) if "critically exposed service" in r), None)
+    pol_i = next((i for i, r in enumerate(recs3) if "privacy policy" in r), None)
+    checks.append(("active_exposure_over_compliance",
+                   exp_i is not None and pol_i is not None and exp_i < pol_i,
+                   f"critically exposed service at {exp_i}, privacy policy at {pol_i} — a "
+                   "finding that names itself CRITICAL is a specific active exposure and "
+                   "must outrank a category-level compliance gap"))
+
+    # Credential exposure has NO card_severity rule; its band must come from the
+    # credential_risk verdict, not fall through to the unknown default.
+    cats4 = {
+        "email_hardening": {"status": "completed", "score": 50,
+                            "issues": ["No MTA-STS policy found"]},
+        "dehashed":        {"status": "completed", "score": 0, "total_entries": 8,
+                            "issues": ["8 credential record(s) found in Dehashed for this domain"]},
+        "credential_risk": {"status": "completed", "risk_level": "HIGH", "assessed": True},
+    }
+    _s4, _l4, recs4 = SA.RiskScorer().calculate(dict(cats4), {})
+    c4 = next((i for i, r in enumerate(recs4) if "leaked credential record" in r), None)
+    m4 = next((i for i, r in enumerate(recs4) if "MTA-STS" in r), None)
+    checks.append(("credential_band_from_verdict",
+                   c4 is not None and m4 is not None and c4 < m4,
+                   "a HIGH credential verdict sorted below email hygiene — dehashed has no "
+                   "card_severity rule, so its band must be taken from credential_risk"))
+
     for label, ok, why in checks:
         if not ok:
             failures.append(f"rec_priority[{label}]: {why}")
-        print(f"  [{'PASS' if ok else 'FAIL'}] rec_priority:{label:<28}")
+        print(f"  [{'PASS' if ok else 'FAIL'}] rec_priority:{label:<32}")
 
 
 def _check_export_switch(failures):

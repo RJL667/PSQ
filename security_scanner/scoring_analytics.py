@@ -1086,21 +1086,33 @@ class RiskScorer:
             from card_severity import category_severity as _cat_sev
         except Exception:                    # pragma: no cover - import safety
             _cat_sev = lambda *_a, **_k: None
-        _BAND = {"critical": 0, "high": 1, "medium": 2, "positive": 4}
+        _BAND = {"critical": 1, "high": 2, "medium": 3, "positive": 5}
         _sev_cache = {}
 
         def _band_for(cat_id, cat, issue):
-            # An issue that announces itself as CRITICAL outranks its category's
-            # aggregate: one critical finding inside an otherwise medium card is
-            # still the thing to do first.
+            # BAND 0: the finding itself announces CRITICAL. A finding-level
+            # marker beats a category aggregate, because several categories rate
+            # "critical" in aggregate for very different reasons -- on a real
+            # 2026-08-20 scan a missing privacy policy and an internet-exposed
+            # Jupyter Notebook were both category-critical, and dict order put
+            # the compliance gap above the remote-code-execution path. An issue
+            # that says CRITICAL is a specific, active exposure; rank it first.
             if str(issue).strip().upper().startswith("CRITICAL"):
                 return 0
+            # Credential exposure has no card_severity rule (category_severity
+            # returns None for "dehashed"), so it would otherwise land in the
+            # UNKNOWN default band and sort below email hygiene. Take the band
+            # from the credential_risk verdict, which is the card the report
+            # actually shows for it.
+            if cat_id in ("dehashed", "credential_risk"):
+                _lvl = str((results.get("credential_risk") or {}).get("risk_level") or "").upper()
+                return {"CRITICAL": 0, "HIGH": 2, "MEDIUM": 3, "LOW": 5}.get(_lvl, 4)
             if cat_id not in _sev_cache:
                 try:
                     _sev_cache[cat_id] = _cat_sev(cat_id, cat)
                 except Exception:
                     _sev_cache[cat_id] = None
-            return _BAND.get(_sev_cache.get(cat_id), 3)
+            return _BAND.get(_sev_cache.get(cat_id), 4)
 
         scored = []
         seen_text = set()                    # DEDUPE ON THE TEXT, NOT THE KEY.
