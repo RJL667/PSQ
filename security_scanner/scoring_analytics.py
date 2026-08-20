@@ -1208,11 +1208,32 @@ class RiskScorer:
         results["_scan_completeness"] = scan_completeness
 
         if failed_checkers:
+            # DO NOT ADVISE A RE-SCAN WHEN A RE-SCAN CANNOT HELP.
+            # bbgroup.co.za, 2026-08-20: two checkers failed and the report said
+            # "a re-scan is recommended". Measured afterwards -- the target's
+            # edge refuses the scanner's egress IP outright (TCP filtered on 80
+            # AND 443 from the scanner, while the same site answered 10 of 10
+            # with HTTP 200 from an ordinary connection). A re-scan from the same
+            # source fails identically, so the advice sent the broker to do
+            # something that could never work, and the real finding -- that the
+            # target will not talk to us at all -- was never stated.
+            _wafs = (waf_apex_status or {})
+            _blocked = bool(_wafs.get("blocked"))
+            if _blocked:
+                _ev = _wafs.get("evidence") or "probes were refused or timed out"
+                _tail = (
+                    f"This is not a transient error: the target's edge refused "
+                    f"the assessment ({_ev}). A re-scan from the same source will "
+                    f"produce the same result. These sections can only be assessed "
+                    f"with the client's cooperation, by allow-listing the "
+                    f"assessment source or supplying the information directly.")
+            else:
+                _tail = "A re-scan is recommended for a complete assessment."
             recommendations.insert(0,
                 f"WARNING: {len(failed_checkers)} checker(s) failed during this scan "
                 f"({', '.join(failed_checkers)}). The risk score is based on "
                 f"{scan_completeness['completeness_pct']}% of available data. "
-                f"A re-scan is recommended for a complete assessment."
+                f"{_tail}"
             )
 
         return risk_score, risk_level, recommendations

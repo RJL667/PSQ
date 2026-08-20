@@ -909,6 +909,29 @@ def _check_recommendation_priority(failures):
                    "a HIGH credential verdict sorted below email hygiene — dehashed has no "
                    "card_severity rule, so its band must be taken from credential_risk"))
 
+    # Do not tell a broker to re-scan when a re-scan cannot help. bbgroup.co.za
+    # 2026-08-20: the target's edge filters the scanner's egress IP on 80 AND
+    # 443, so the two failed checkers were unrecoverable, yet the report advised
+    # a re-scan. Measured, not assumed: 0/5 from the scanner, 10/10 HTTP 200
+    # from an ordinary connection.
+    fail_cats = {"website_security": {"status": "unreachable"},
+                 "third_party_js": {"status": "error", "error": "HTTP no-response"}}
+    _sb, _lb, recs_b = SA.RiskScorer().calculate(
+        dict(fail_cats), {"blocked": True, "kind": "waf_timeout",
+                          "evidence": "12 of 20 probes timed out / failed"})
+    _st, _lt, recs_t = SA.RiskScorer().calculate(dict(fail_cats), {})
+    blocked_msg = recs_b[0] if recs_b else ""
+    transient_msg = recs_t[0] if recs_t else ""
+    checks.append(("blocked_does_not_advise_rescan",
+                   "re-scan is recommended" not in blocked_msg
+                   and "same result" in blocked_msg,
+                   "the scan was refused by the target's edge but the report still "
+                   "advises a re-scan, which cannot succeed from the same source"))
+    checks.append(("transient_still_advises_rescan",
+                   "re-scan is recommended" in transient_msg,
+                   "a genuinely transient failure must still advise a re-scan; the "
+                   "blocked-path wording must not swallow the ordinary case"))
+
     for label, ok, why in checks:
         if not ok:
             failures.append(f"rec_priority[{label}]: {why}")
