@@ -153,6 +153,48 @@ credit-free).
 | Probe-cache SQLite-backed implementation | Interface defined in `http_client.ProbeCache`; default `_NullProbeCache` no-op. Real implementation lands with continuous-monitoring scheduler. |
 | Continuous-monitoring scheduler | Open. Estimated 3-4 week build. Requires probe cache + per-tenant scheduling + delta-finding detection + alert-on-change pipeline. |
 
+### 3b. Historical scans no longer reproduce their own score (OBSERVED, 2026-08-20)
+
+**Found by a safety guard, not by looking for it.** The recommendation backfill
+re-ran the scorer over every completed scan's STORED categories, making no
+provider call, and refused to write any scan whose score moved. Twelve of
+fifty-two moved.
+
+| | |
+|---|---|
+| Scans re-scoring identically | 40 |
+| Scans re-scoring differently | **12** |
+| Typical movement | 14 to 28 points down; one moved +65 |
+
+**Two causes confirmed, both legitimate:**
+
+- `38da8562` phishield.com (218 -> 200): `http_headers` now grades as FAILED
+  where it did not, because `unreachable` was added to `_FAILED_STATUSES` in the
+  blocked-is-not-clean work. Excluded weight 0.045 -> 0.083, so the redistribution
+  differs.
+- `007f19d1` mip.co.za (117 -> 182): identical failed/skipped sets and identical
+  excluded weight, so the movement is in the scoring maths itself, not exclusion.
+
+Neither is a defect. Both are scoring improvements made after those scans ran.
+
+**Why it is recorded here.** A stored scan is an underwriting artefact. A client
+quoted off a 2026-07 score cannot have that number silently restated months
+later, so the backfill deliberately left those twelve alone and only corrected
+the ordering of the action list on the other forty. But it means **a re-quote off
+an old scan is not comparable to a re-quote off a fresh one**, and nothing in the
+product says so.
+
+**Open questions for the owner (not decided):**
+
+1. Should a stored scan carry the SCORING MODEL VERSION it was produced under, so
+   a stale score is visibly stale rather than silently stale? This is cheap to add
+   now and impossible to reconstruct later.
+2. Should re-quoting off a scan older than some threshold require a re-scan?
+3. All twelve are phishield/takealot test scans or have a newer scan for the same
+   domain, so there is no known live exposure today. That is luck, not design.
+
+Ties into 4a: a stable finding identity across re-scans is the same prerequisite.
+
 ### 4a. Risk-register workflow: analyst/client adjudication of findings (GAP, 2026-08-18)
 
 **Owner-raised, explicitly NOT for now.** Recorded here so the continuous-monitoring
