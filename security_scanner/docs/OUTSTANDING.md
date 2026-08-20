@@ -415,6 +415,50 @@ for the same scan:
 - Add whatever survives as gate scenarios, so the dashboard gets the same
   "does not silently degrade" guarantee the PDF has.
 
+**ENUMERATION DONE, 2026-08-20 — `tooling/ui_enumerate.py`.** Static inventory of
+every exported selector: what it reads, and whether it forms its own verdict.
+
+| | |
+|---|---|
+| Selectors | 22 |
+| **Deriving their own verdict** | **17** |
+| Using `isConclusive` | **2** (`getRiskFactors`, `getAttackPath` — both fixed earlier this month) |
+| Deriving from raw category reads with NO guard | **6** |
+
+The six: `getRiskSnapshot`, `getKeyFindings`, `getCriticalAlerts`,
+`getOpenServices`, `getVulnerabilitySummary`, `getVulnerabilityList`.
+
+**DIVERGENCE MEASURED, not inferred.** The selectors were compiled to CommonJS
+and executed against a results object where every category carries
+`status: "error"` — the shape a real scan produces when a WAF refuses us or a
+provider is unavailable. The same object was passed to the PDF's
+`_kill_chain_severities`. **Every phase disagrees:**
+
+| Phase | PDF | Dashboard |
+|---|---|---|
+| Reconnaissance | `UNKNOWN` | `medium`, itemised as "0 external IPs", "0 subdomains" |
+| Initial Access | `UNKNOWN` | `low` |
+| Exploitation | `HIGH` | `low`, "No critical exploitation vector confirmed by current external scan" |
+| Data & Impact | `LOW` | `medium` |
+
+The dashboard states counts as facts ("0 external IPs") that came from an errored
+checker, and asserts "no critical exploitation vector confirmed" where the PDF
+rates the same evidence HIGH. A broker reading the console and a client reading
+the report are looking at different assessments of one scan.
+
+**Also measured:**
+
+- `getVulnerabilitySummary` returns `{available: true, total: 0, critical: 0}`
+  when both `osv_vulns` and `shodan_vulns` errored. `available: true` on an
+  unassessed pair is the false clean in its purest form.
+- `getCriticalFindings` returns `{total: 0}` on a fully blind scan.
+- `getRiskSnapshot` and `getRiskFactors` handle it correctly — proof the pattern
+  is achievable and that the other selectors simply never learned it.
+
+**Next, in order:** guard the six; then re-run the comparison and assert
+phase-by-phase agreement; then land that assertion as a gate so the dashboard
+gets the same "does not silently degrade" guarantee the PDF has.
+
 **Also open from the same review:** the `+xx` impact figure reads as an additive
 contribution to a score but is only `100 - dimension_score` (a display-only
 inversion; the five values summed to 326 on a scan whose overall risk score was
