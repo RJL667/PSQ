@@ -184,14 +184,26 @@ the ordering of the action list on the other forty. But it means **a re-quote of
 an old scan is not comparable to a re-quote off a fresh one**, and nothing in the
 product says so.
 
-**Open questions for the owner (not decided):**
+**OWNER DECISION, 2026-08-20: quotes must NOT be produced off earlier scans.**
+A quote is derived from a fresh scan or it is not produced. That settles question
+2 below and makes question 1 the enabling work rather than a nice-to-have: the
+policy cannot be enforced, or even audited after the fact, unless a stored scan
+records the model it was scored under.
 
-1. Should a stored scan carry the SCORING MODEL VERSION it was produced under, so
-   a stale score is visibly stale rather than silently stale? This is cheap to add
-   now and impossible to reconstruct later.
-2. Should re-quoting off a scan older than some threshold require a re-scan?
-3. All twelve are phishield/takealot test scans or have a newer scan for the same
-   domain, so there is no known live exposure today. That is luck, not design.
+**Remaining, to schedule:**
+
+1. **Stamp the scoring model version onto every scan** so a stale score is
+   visibly stale rather than silently stale. Cheap now, impossible to reconstruct
+   later, and it is the mechanism the decision above depends on. Without it
+   "is this scan current?" is answerable only by re-scoring and comparing, which
+   is exactly the accident that surfaced this.
+2. **Decide where the policy is enforced.** Recording it in a document does not
+   stop anyone. Candidates: the scan record carries a freshness/model field the
+   rating path refuses to quote against, or the report itself states the scan
+   date and model prominently enough that quoting off a stale one is obvious.
+3. All twelve divergent scans are phishield/takealot test scans or have a newer
+   scan for the same domain, so there is no known live exposure today. That is
+   luck, not design, and it is the reason this is schedulable rather than urgent.
 
 Ties into 4a: a stable finding identity across re-scans is the same prerequisite.
 
