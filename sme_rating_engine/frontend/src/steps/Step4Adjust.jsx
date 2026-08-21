@@ -4,6 +4,7 @@ import { optionLabel, coverInstanceCount } from '../lib/options.js';
 import { parseCurrency } from '../lib/format.js';
 import Toggle from '../components/Toggle.jsx';
 import CurrencyInput from '../components/CurrencyInput.jsx';
+import { comparesWithFP, compareAmountFor, compareBasisLabel } from '../lib/comparison.js';
 
 export default function Step4Adjust({ state, patch, dispatch, derived, goToStep }) {
   const options = state.quoteOptions;
@@ -258,7 +259,7 @@ export default function Step4Adjust({ state, patch, dispatch, derived, goToStep 
             {options.map((o) => {
               const calc = derived.optionCalcs[o.id];
               if (!calc) return null;
-              let phishieldPremium = state.competitorHasFP ? calc.annual : calc.annualExFP;
+              let phishieldPremium = compareAmountFor(state, calc);
               const mo = parseCurrency(o.manualOverride);
               if (mo && mo > 0) phishieldPremium = mo;
 
@@ -285,9 +286,9 @@ export default function Step4Adjust({ state, patch, dispatch, derived, goToStep 
                 ? 'Competitive — Phishield is lower'
                 : (Math.abs(deltaPct) <= 5 ? 'Close — within 5% of benchmark' : 'Over benchmark');
               const statusClass = delta <= 0 ? 'delta-green' : (Math.abs(deltaPct) <= 5 ? 'delta-amber' : 'delta-red');
-              const fpLabel = state.competitorHasFP ? '(with FP)' : '(ex-FP)';
+              const fpLabel = '(' + compareBasisLabel(state) + ')';
               const diffText = `Difference: ${delta <= 0 ? '' : '+'}${formatR(Math.abs(delta))} (${delta <= 0 ? '' : '+'}${deltaPct}%)`
-                + (state.competitorHasFP ? '' : `  |  FP benefit included: ${formatR(calc.fpCost)}`);
+                + (comparesWithFP(state) ? '' : `  |  FP benefit included: ${formatR(calc.fpCost)}`);
 
               return (
                 <div className="comparison-bar" key={o.id}>

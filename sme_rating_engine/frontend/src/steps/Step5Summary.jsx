@@ -5,6 +5,7 @@ import { parseCurrency } from '../lib/format.js';
 import { optionLabel } from '../lib/options.js';
 import { buildQuotePdf, pdfBase64 } from '../lib/pdf.js';
 import { saveQuote } from '../lib/api.js';
+import { compareAmountFor, compareBasisLabel } from '../lib/comparison.js';
 
 const QUOTE_TYPE_LABELS = { new: 'New Business', renewal: 'Renewal', competing: 'Competing Quote' };
 const RM_FEE_TITLE = "Our administration platform adds a 6% fee on the captured (input) premium. Capture THIS figure on the platform so the client's final premium equals the engine's calculated premium. Formula: Annual (with FP) ÷ 1.06.";
@@ -223,8 +224,8 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
             const benchStr = benchmark ? formatR(benchmark.premium) : '--';
             const compPrem = compRow ? parseCurrency(compRow.competitorPremium) : 0;
             const compStr = compPrem > 0 ? formatR(compPrem) : '--';
-            const compareAmount = state.competitorHasFP ? calc.annual : calc.annualExFP;
-            const compareLabel = state.competitorHasFP ? 'with FP' : 'excl FP';
+            const compareAmount = compareAmountFor(state, calc);
+            const compareLabel = compareBasisLabel(state);
             let deltaStr = '--';
             let deltaClass = '';
             if (benchmark) {

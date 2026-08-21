@@ -5,6 +5,7 @@ import {
 } from '../rating-data.js';
 import { parseCurrency } from './format.js';
 import { UW_QUESTION_GROUPS, answerLabel } from './uwQuestions.js';
+import { compareAmountFor, compareBasisLabel } from './comparison.js';
 
 // Client quote PDF — layout ported VERBATIM from the legacy vanilla
 // `generatePDF` (sme-rating.js). Coordinates, colours, fonts, boxes, and text
@@ -297,10 +298,10 @@ export function buildQuotePdf({ state, derived, quoteRef, option }) {
       if (pdfBenchmark) compText += pdfBenchmark.label + ': ' + formatR(pdfBenchmark.premium);
       if (compRow && compRow.competitorPremium > 0) compText += '    |    Competitor: ' + formatR(compRow.competitorPremium);
       if (pdfBenchmark) {
-        const pdfCompareAmt = state.competitorHasFP ? calc.annual : calc.annualExFP;
+        const pdfCompareAmt = compareAmountFor(state, calc);
         const d = pdfCompareAmt - pdfBenchmark.premium;
         const pct = Math.round(d / pdfBenchmark.premium * 100);
-        compText += '    |    Delta (' + (state.competitorHasFP ? 'with FP' : 'ex-FP') + '): ' + (d <= 0 ? '' : '+') + formatR(Math.abs(d)) + ' (' + (d <= 0 ? '' : '+') + pct + '%)';
+        compText += '    |    Delta (' + compareBasisLabel(state) + '): ' + (d <= 0 ? '' : '+') + formatR(Math.abs(d)) + ' (' + (d <= 0 ? '' : '+') + pct + '%)';
       }
       doc.text(compText, margin + 2, y);
       y += 6;

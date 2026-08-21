@@ -3,6 +3,7 @@ import { formatR, getItooBenchmark } from '../rating-engine.js';
 import { optionLabel } from '../lib/options.js';
 import Toggle from '../components/Toggle.jsx';
 import CurrencyInput from '../components/CurrencyInput.jsx';
+import { comparesWithFP, compareAmountFor } from '../lib/comparison.js';
 
 // Requested-cover-limit dropdown options (verbatim from the legacy markup).
 const COVER_SELECT_OPTIONS = [
@@ -17,12 +18,13 @@ const COVER_SELECT_OPTIONS = [
 export default function Step3Compare({ state, patch, derived, goToStep }) {
   const options = state.quoteOptions;
   const isMulti = options.length >= 2;
+  const isRenewal = state.quoteType === 'renewal';
   const band = derived.revenueBandIndex;
 
   // Comparison-table column labels (renewal vs new business).
   const benchmarkLabel = state.quoteType === 'renewal' ? 'Existing Policy' : 'Industry Benchmark';
   const deltaLabel = state.quoteType === 'renewal' ? 'Delta vs Existing' : 'Delta vs Industry';
-  const compLabel = state.competitorHasFP ? 'Phishield (with FP)' : 'Phishield (ex-FP)';
+  const compLabel = comparesWithFP(state) ? 'Phishield (with FP)' : 'Phishield (ex-FP)';
 
   // getBenchmark(): existing policy premium for renewals, else IToo industry benchmark.
   const getBenchmark = (ci) => {
@@ -112,10 +114,24 @@ export default function Step3Compare({ state, patch, derived, goToStep }) {
                   options={[{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }]} />
               </div>
               <div className="form-group">
-                <label className="field-label">Does the competitor quote include a FP equivalent?</label>
-                <Toggle value={state.competitorHasFP ? 'yes' : 'no'}
-                  onChange={(v) => patch({ competitorHasFP: v === 'yes' })}
-                  options={[{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }]} />
+                {/* On a renewal the benchmark is the client's own expiring Phishield
+                    policy, which always includes Funds Protect, so there is nothing
+                    for the broker to answer — the comparison is with-FP either way. */}
+                {isRenewal ? (
+                  <>
+                    <label className="field-label">Funds Protect basis</label>
+                    <p className="field-hint" style={{ margin: '6px 0 0' }}>
+                      Existing Phishield policy includes Funds Protect — compared on a with-FP basis.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <label className="field-label">Does the competitor quote include a FP equivalent?</label>
+                    <Toggle value={state.competitorHasFP ? 'yes' : 'no'}
+                      onChange={(v) => patch({ competitorHasFP: v === 'yes' })}
+                      options={[{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }]} />
+                  </>
+                )}
               </div>
             </div>
 
@@ -177,7 +193,7 @@ export default function Step3Compare({ state, patch, derived, goToStep }) {
               {options.map((o) => {
                 const calc = derived.optionCalcs[o.id];
                 if (!calc) return null;
-                const phishieldCompare = state.competitorHasFP ? calc.annual : calc.annualExFP;
+                const phishieldCompare = compareAmountFor(state, calc);
                 const benchmark = getBenchmark(o.coverIndex);
                 const benchStr = benchmark ? formatR(benchmark.premium) : '--';
                 const delta = benchmark ? phishieldCompare - benchmark.premium : null;
