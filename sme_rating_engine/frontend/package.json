@@ -3,14 +3,15 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
-  "description": "Phishield SME Rating Engine — React frontend (VM build). Rating data + engine are extracted verbatim from the legacy vanilla app and locked by a parity gate.",
+  "description": "Phishield SME Rating Engine \u2014 React frontend (VM build). Rating data + engine are extracted verbatim from the legacy vanilla app and locked by a parity gate.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "gen:data": "node tools/gen_rating_data.mjs",
     "parity": "node tools/parity.mjs",
-    "check:uw": "node tools/check_uw_question_sync.mjs"
+    "check:uw": "node tools/check_uw_question_sync.mjs",
+    "test:format": "node tools/test_format.mjs"
   },
   "dependencies": {
     "jspdf": "^2.5.2",

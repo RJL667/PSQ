@@ -37,6 +37,14 @@ def words(path, drop_annexure=False):
             out.extend(pw)
     return out, annexure_pages
 
+# A comparison over zero scenarios is not a pass. If pdf_parity.mjs failed (for
+# example missing node_modules) it writes no PDFs, and reporting "ALL MATCH" on an
+# empty set is a false green — that happened once and was nearly believed.
+if not scenarios:
+    print("PDF PARITY: NO SCENARIOS FOUND in " + OUT)
+    print("  Run `node tools/pdf_parity.mjs` first (and `npm install` if jspdf is missing).")
+    sys.exit(1)
+
 overall_ok = True
 for name in scenarios:
     lw, _ = words(os.path.join(OUT, f"legacy_{name}.pdf"))
