@@ -13,7 +13,8 @@
     "check:uw": "node tools/check_uw_question_sync.mjs",
     "test:format": "node tools/test_format.mjs",
     "test:compare": "node tools/test_comparison.mjs",
-    "test": "npm run test:format && npm run test:compare && npm run check:uw"
+    "test": "npm run test:format && npm run test:compare && npm run test:micro && npm run check:uw",
+    "test:micro": "node tools/test_micro.mjs"
   },
   "dependencies": {
     "jspdf": "^2.5.2",

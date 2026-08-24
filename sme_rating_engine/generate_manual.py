@@ -285,7 +285,7 @@ doc.add_paragraph()
 
 ver = doc.add_paragraph()
 ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = ver.add_run("Version 2.2  |  August 2026\nConfidential \u2014 Internal Use Only")
+run = ver.add_run("Version 2.3  |  August 2026\nConfidential \u2014 Internal Use Only")
 run.font.size = Pt(10)
 run.font.color.rgb = PHISHIELD_GREY
 
@@ -1071,15 +1071,55 @@ doc.add_paragraph("Each option receives a unique quote reference number.", style
 
 add_heading("4.4 Micro SME Pricing", level=2)
 doc.add_paragraph(
-    "Micro SME rates apply when both conditions are met:"
+    "Micro SME is a DISCOUNT, not a separate rating basis. Turnover bands 1 to 3 are all charged at the "
+    "bottom-bracket flat rate, plus a further reduction beneath even that bracket. It applies when both "
+    "conditions are met AND the client's industry is eligible:"
 )
-doc.add_paragraph("Actual Turnover is below R50,000,000 (revenue bands 1\u20133)", style='List Bullet')
+doc.add_paragraph("Actual Turnover is below R50,000,000 (revenue bands 1–3)", style='List Bullet')
 doc.add_paragraph("Cover limit is R5M or below (R1M, R2.5M, or R5M)", style='List Bullet')
 
 doc.add_paragraph(
-    "When Micro SME applies, a badge is shown: 'Micro SME Rates Applied'. These are flat-rate premiums "
-    "that are lower than the standard formula-based rates. Industry modifiers for Software & Technology "
-    "and Finance still apply to Micro SME base premiums."
+    "When Micro SME applies, a badge is shown: 'Micro SME Rates Applied'. Industry modifiers for Software "
+    "& Technology and Finance still apply to Micro SME base premiums, and they apply on the standard path "
+    "too — an industry that is not eligible for Micro SME is not re-rated flat, it moves to the standard "
+    "band calculator with its modifier intact."
+)
+
+add_heading("4.4.1 Industry Eligibility for Micro SME", level=3)
+doc.add_paragraph(
+    "August 2026 change. Micro SME assumes declared revenue is a fair proxy for the size of the business. "
+    "For most of the Finance sector that assumption fails: these businesses declare FEE INCOME, not the "
+    "value they handle, so a modest declared revenue does not mean a small business and the discount was "
+    "being applied to firms that are not small. Software & Technology was restricted on a related basis: "
+    "revenue is a poor guide to a technology business's cyber exposure, which is driven by records held, "
+    "customers reachable and privileged access rather than turnover."
+)
+make_table(
+    ["Industry", "Micro SME eligibility"],
+    [
+        ["Real Estate", "Bands 1–3 (full)"],
+        ["Insurance Agents, Brokers, And Service", "Band 1 only (to R10M)"],
+        ["Software and Technology", "Band 1 only (to R10M)"],
+        ["Holding And Other Investment Offices", "Band 1 only (to R10M)"],
+        ["Depository Institutions", "Not eligible"],
+        ["Non-depository Credit Institutions", "Not eligible"],
+        ["Security And Commodity Brokers, Dealers, Exchanges, And Services", "Not eligible"],
+        ["Insurance Carriers", "Not eligible"],
+        ["All other industries", "Bands 1–3 (full)"],
+    ]
+)
+add_tip_box(
+    "The band-1-only entries are deliberate grace for effective start-ups: a genuinely small firm still "
+    "gets the discount, but it falls away once turnover passes R10,000,000 rather than running all the way "
+    "to R50,000,000.",
+    "note"
+)
+add_tip_box(
+    "Turnover only begins to drive the premium from band 2 onward. Band 1 (R0 to R10M) is itself a flat "
+    "table, so below R10,000,000 an ineligible industry simply moves from one flat rate to another. From "
+    "R10,000,000 upward the standard path uses the turnover formula, which is where removing the Micro SME "
+    "discount produces a premium that tracks the client's actual revenue.",
+    "important"
 )
 
 make_table(
@@ -2198,6 +2238,17 @@ make_table(
          "listing all fourteen questions and the captured Yes / No / Not answered, for underwriter and "
          "capturer audit until the quote store is merged into the ERP. See sections 7.5.1 and 7.6. "
          "No change to any rating logic, premium or underwriting rule."],
+        ["2.3", "August 2026",
+         "Rating change - Micro SME industry eligibility. Micro SME is a discount that assumes declared "
+         "revenue proxies the size of the business. Most Finance sub-industries declare fee income rather "
+         "than the value they handle, so the discount was reaching firms that are not small. Depository "
+         "Institutions, Non-depository Credit Institutions, Security And Commodity Brokers, and Insurance "
+         "Carriers are no longer eligible. Insurance Agents/Brokers, Software and Technology, and Holding "
+         "And Other Investment Offices remain eligible in band 1 only (turnover to R10M) as grace for "
+         "start-ups. Real Estate keeps full eligibility. Industry loading factors are unaffected and apply "
+         "on both the Micro SME and standard paths. See section 4.4.1. Also in this release: the renewal "
+         "premium comparison now always compares on a with-Funds-Protect basis, and currency fields accept "
+         "amounts typed with cents."],
     ]
 )
 

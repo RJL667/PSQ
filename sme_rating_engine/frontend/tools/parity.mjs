@@ -90,6 +90,45 @@ const LD = sandbox.__DATA__;
 const LFP = sandbox.__FPFN__;
 
 // ---------------------------------------------------------------------------
+// INTENDED DIVERGENCE (owner-approved 2026-08-24): most Finance sub-industries
+// no longer qualify for Micro SME rates.
+//
+// Micro SME is a discount — bands 0-2 all charged at the bottom bracket, plus a
+// further cut beneath it. It assumes revenue proxies the size of the business.
+// Finance firms declare FEE INCOME, not the value they handle, so a modest
+// declared revenue does not mean a small business and the discount was being
+// mis-applied. Only Real Estate and Holding And Other Investment Offices keep it
+// (the latter provisionally, pending further debate).
+//
+// The legacy is retired and is NOT being updated, so rather than skipping these
+// grid cells we assert the divergence is EXACTLY the intended one: the new
+// engine must equal what the LEGACY ITSELF computes with its micro branch
+// disabled — i.e. the standard turnover-driven band calculator, with the
+// industry loading still applied. Everything else must still match exactly.
+// Detect the divergence from the ENGINES THEMSELVES rather than restating the
+// eligibility rule here — a second copy of the rule would drift, and this then
+// adapts automatically if eligibility changes again.
+function microDiverges(industryIndex, bandIndex, coverIndex) {
+  if (industryIndex < 0 || bandIndex < 0 || coverIndex < 0) return false;
+  const legacyMicro = L.checkMicroSME(industryIndex, bandIndex, coverIndex) === true;
+  const newMicro = N.checkMicroSME(industryIndex, bandIndex, coverIndex) === true;
+  if (legacyMicro === newMicro) return false;
+  // Every intended change REMOVES micro. If the new engine ever grants micro
+  // where the legacy did not, that is a bug, not a decision — fail loudly.
+  if (!legacyMicro && newMicro) {
+    fail(`micro eligibility WIDENED unexpectedly (ind=${industryIndex} band=${bandIndex} cover=${coverIndex})`);
+  }
+  return legacyMicro && !newMicro;
+}
+/** Run the legacy with its micro branch forced off. */
+const legacyCheckMicro = sandbox.checkMicroSME;
+function legacyNoMicro(fn) {
+  sandbox.checkMicroSME = () => false;
+  try { return fn(); } finally { sandbox.checkMicroSME = legacyCheckMicro; }
+}
+let microDiverged = 0;
+
+// ---------------------------------------------------------------------------
 // 2. Import the new ESM modules
 // ---------------------------------------------------------------------------
 const N = await import(pathToFileURL(resolve(__dirname, '..', 'src', 'rating-engine.js')).href);
@@ -146,7 +185,9 @@ const INDUSTRIES = LD.INDUSTRIES;
 const plainIdx = INDUSTRIES.findIndex((x) => x.main !== 'Finance, Insurance, And Real Estate' && x.sub !== 'Software and Technology' && !x.referForUW);
 const softIdx = INDUSTRIES.findIndex((x) => x.sub === 'Software and Technology');
 const finIdx = INDUSTRIES.findIndex((x) => x.main === 'Finance, Insurance, And Real Estate');
-const industryIdxs = [-1, plainIdx, softIdx, finIdx];
+const finKeepIdx = INDUSTRIES.findIndex((x) => x.sub === 'Real Estate');          // keeps micro in all bands
+const finB0Idx   = INDUSTRIES.findIndex((x) => x.sub === 'Insurance Agents, Brokers, And Service'); // band 0 only
+const industryIdxs = [-1, plainIdx, softIdx, finIdx, finKeepIdx, finB0Idx];
 const bandIdxs = [-1, 0, 1, 2, 3, 4, 5, 6];
 const coverIdxs = [-1, 0, 1, 2, 3, 4, 5, 6];
 const loadings = [0, 0.05, 0.10, 0.15];
@@ -182,9 +223,18 @@ for (const ind of industryIdxs) {
                 uwLoadingPct: load, fpSelections: {}, postureDiscount: 0, discretionaryDiscount: 0,
               };
               const ovA = { fpIndex, postureDiscount: posture, discretionaryDiscount: disc };
-              const la = L.calculatePremium(cover, stateA, ovA);
+              // Where the finance carve-out applies, the legacy's own micro-free
+              // result is the expected answer (see INTENDED DIVERGENCE above).
+              const diverges = microDiverges(ind, band, cover);
+              const la = diverges
+                ? legacyNoMicro(() => L.calculatePremium(cover, stateA, ovA))
+                : L.calculatePremium(cover, stateA, ovA);
               const na = N.calculatePremium(cover, stateA, ovA);
               premChecked++;
+              if (diverges) microDiverged++;
+              if (diverges && na && na.isMicro !== false) {
+                fail(`micro divergence: new engine still micro-rated (ind=${ind} band=${band} cover=${cover})`);
+              }
               if (!eq(la, na)) { firstMismatch = firstMismatch || { mode: 'A', ind, band, cover, fpIndex, load, posture, disc, la, na }; fail(`calculatePremium mode A (ind=${ind} band=${band} cover=${cover} fp=${fpIndex} load=${load} p=${posture} d=${disc})`); if (failures > 8) break outer; }
 
               // Mode B: state fields carry fp + discounts, no optionOverrides
@@ -194,9 +244,12 @@ for (const ind of industryIdxs) {
                 fpSelections: fpIndex === undefined ? {} : { [cover]: fpIndex },
                 postureDiscount: posture, discretionaryDiscount: disc,
               };
-              const lb = L.calculatePremium(cover, stateB, undefined);
+              const lb = diverges
+                ? legacyNoMicro(() => L.calculatePremium(cover, stateB, undefined))
+                : L.calculatePremium(cover, stateB, undefined);
               const nb = N.calculatePremium(cover, stateB, undefined);
               premChecked++;
+              if (diverges) microDiverged++;
               if (!eq(lb, nb)) { firstMismatch = firstMismatch || { mode: 'B', ind, band, cover, fpIndex, load, posture, disc, lb, nb }; fail(`calculatePremium mode B (ind=${ind} band=${band} cover=${cover} fp=${fpIndex} load=${load} p=${posture} d=${disc})`); if (failures > 8) break outer; }
             }
           }
@@ -205,7 +258,8 @@ for (const ind of industryIdxs) {
     }
   }
 }
-console.log(`    ${premChecked} premium evaluations compared`);
+console.log(`    ${premChecked} premium evaluations compared`
+  + ` (${microDiverged} of them the intended micro-SME eligibility divergence)`);
 if (firstMismatch) console.error('    first mismatch: ' + JSON.stringify(firstMismatch).slice(0, 400));
 
 // ---------------------------------------------------------------------------
@@ -321,7 +375,16 @@ for (const band of [0, 1, 3, 6]) {
     for (const start of [0, 2, 4]) {
       for (const tp of [5000, 20000, 60000, 200000]) {
         for (const fp of [150000, 250000, 1000000]) {
-          if (!eq(L.findTargetCoverForRetention(start, tp, fp), N.findTargetCoverForRetention(full, start, tp, fp))) { recoFirst = recoFirst || { fn: 'target', band, ind, start, tp, fp }; fail(`findTargetCoverForRetention(band=${band},start=${start},tp=${tp},fp=${fp})`); }
+          // The retention ladder prices candidate covers internally, so where the
+          // finance carve-out applies its answer legitimately moves with the
+          // premiums. Compare against the legacy running micro-free.
+          // The ladder walks cover indices, so it diverges if ANY cover does.
+          const ladderDiverges = [0, 1, 2].some((c) => microDiverges(ind, band, c));
+          const lTarget = ladderDiverges
+            ? legacyNoMicro(() => L.findTargetCoverForRetention(start, tp, fp))
+            : L.findTargetCoverForRetention(start, tp, fp);
+          if (ladderDiverges) microDiverged++;
+          if (!eq(lTarget, N.findTargetCoverForRetention(full, start, tp, fp))) { recoFirst = recoFirst || { fn: 'target', band, ind, start, tp, fp }; fail(`findTargetCoverForRetention(band=${band},start=${start},tp=${tp},fp=${fp})`); }
           recoChecked++;
         }
       }
@@ -337,7 +400,8 @@ function legacyReco(sc) {
     quoteOptions: [], selectedCovers: [], recommendedCovers: [], activeOptionTab: null,
     renewalPremiumDropTriggered: false, renewalPremiumDropPct: 0, renewalCorporateEscalation: false, renewalRecommendedCoverIndex: -1, renewalBandChanged: false,
   });
-  L.renderRecommendations();
+  if ([0, 1, 2].some((c) => microDiverges(sc.ind, sc.band, c))) legacyNoMicro(() => L.renderRecommendations());
+  else L.renderRecommendations();
   return {
     dropTriggered: S.renewalPremiumDropTriggered, dropPct: S.renewalPremiumDropPct,
     corporateEscalation: S.renewalCorporateEscalation, recommendedCoverIndex: S.renewalRecommendedCoverIndex, bandChanged: S.renewalBandChanged,

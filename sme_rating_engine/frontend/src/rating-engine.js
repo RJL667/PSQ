@@ -56,16 +56,62 @@ export function findRevenueBand(turnover) {
 }
 
 /* ===== Micro SME Detection ===== */
+// Micro SME eligibility.
+//
+// Micro SME is a DISCOUNT, not a separate rating basis: bands 0-2 (turnover up
+// to R50M) are all charged at the bottom bracket, plus a further cut beneath even
+// that bracket (-39% on base at R1M cover, tapering to -1% at R5M). It assumes
+// declared revenue is a fair proxy for the size of the business.
+//
+// Owner decisions 2026-08-24:
+//
+//  * Most of Finance loses the discount entirely. These businesses declare FEE
+//    INCOME, not the value they handle, so a modest revenue does not mean a small
+//    business and the discount was being mis-applied. Real Estate is the sole
+//    full exception — an agency's commission does broadly track its size.
+//  * Insurance Agents/Brokers, Software & Technology and Holding And Other
+//    Investment Offices keep the discount in BAND 0 ONLY (turnover up to R10M).
+//    This is deliberate grace for effective start-ups: a genuinely small firm
+//    still gets the break, but it falls away once turnover passes R10M rather
+//    than running all the way to R50M.
+//
+//    Holding And Other Investment Offices sits here rather than with the full
+//    exceptions because the bucket is mostly fees-on-assets, where revenue is
+//    the least representative figure in the book — but a genuinely tiny passive
+//    holdco (dividends only, a handful of staff, no operational systems) is a
+//    real case and band 0 covers it. The question that would settle it properly
+//    is whether subsidiaries are named insureds; we do not ask it. Noted for a
+//    later pass.
+//
+//    Note that band 0 is itself a FLAT table (SME_PREMIUMS[0]) — turnover only
+//    starts driving premium from band 1 — so this grace costs little precision.
+//
+// Industry loading factors apply on BOTH paths — anything excluded here moves to
+// the standard band calculator WITH its modifier, it is not re-rated flat.
+const MICRO_BAND0_ONLY = [
+  'Insurance Agents, Brokers, And Service',
+  'Software and Technology',
+  'Holding And Other Investment Offices',
+];
+const MICRO_ELIGIBLE_FINANCE_SUBS = [
+  'Real Estate',
+];
+
 export function checkMicroSME(industryIndex, bandIndex, coverIndex) {
   if (industryIndex < 0 || bandIndex < 0 || coverIndex < 0) return false;
 
   const industry = INDUSTRIES[industryIndex];
   const isSmallCover = coverIndex <= 2; // R1M, R2.5M, R5M
-  const isSoftTech = industry.sub === 'Software and Technology';
-  const isFinance = industry.main === 'Finance, Insurance, And Real Estate';
+  if (!isSmallCover) return false;
 
-  // All industries (including S&T and Finance): turnover < R50M AND cover <= R5M
-  return bandIndex <= 2 && isSmallCover;
+  // Start-up grace: discount available only while turnover is under R10M.
+  if (MICRO_BAND0_ONLY.includes(industry.sub)) return bandIndex === 0;
+
+  // Remaining Finance sub-industries: only the carve-out list keeps the discount.
+  const isFinance = industry.main === 'Finance, Insurance, And Real Estate';
+  if (isFinance && !MICRO_ELIGIBLE_FINANCE_SUBS.includes(industry.sub)) return false;
+
+  return bandIndex <= 2;
 }
 
 /* ===== Industry Modifier Lookup ===== */
