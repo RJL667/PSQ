@@ -127,6 +127,18 @@ def apply_risk_score(results: dict, *, waf_apex_status: dict | None = None):
     and compliance summary.
     """
     cat_results = results.setdefault("categories", {})
+    # An OFFLINE re-score (backfill, regen, golden) has no live apex probe to
+    # pass, but the live scan persisted that exact object at
+    # _scan_completeness.waf_status. Without this fallback the blocked-edge
+    # branch in RiskScorer can never fire on a re-score, so a report that
+    # correctly said "the target's edge refused the assessment; a re-scan from
+    # the same source will produce the same result" silently reverts to "a
+    # re-scan is recommended" -- advice that cannot work, which is the exact
+    # defect that branch was added to remove (bbgroup.co.za, 2026-08-20).
+    # Observed on a re-render of that same scan, 2026-09-08.
+    if waf_apex_status is None:
+        waf_apex_status = ((results.get("_scan_completeness") or {})
+                           .get("waf_status") or None)
     scorer = RiskScorer()
     risk_score, risk_level, recommendations = scorer.calculate(
         cat_results, waf_apex_status=waf_apex_status)

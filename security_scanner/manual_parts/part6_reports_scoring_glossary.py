@@ -12,6 +12,7 @@ def build(doc):
     from manual_parts.helpers import (
         add_h1,
         add_h2,
+        add_h3,
         add_body,
         add_bold_body,
         add_bullet,
@@ -595,6 +596,81 @@ def build(doc):
         "file, so there is no secret to intercept in transit. A shared AES "
         "passphrase is offered only as a fallback and must travel on a channel "
         "separate from the file.",
+    )
+
+    # 6.5 Client Meeting Brief & Password Fingerprints ------------------ #
+    add_h2(doc, "6.5 Client Meeting Brief and Password Fingerprints")
+
+    add_body(
+        doc,
+        "The full report is written for the broker and the underwriter. Sitting "
+        "with a client's IT team calls for something different: what to do "
+        "first, which of their accounts are affected, and how each finding was "
+        "reached. The meeting brief is that document, generated from a "
+        "completed scan and intended to be handed over in the room.",
+    )
+    add_body(
+        doc,
+        "It is generated from the Credential Leaks panel of the dashboard, "
+        "under 'Generate meeting brief'. It always contains the prioritised "
+        "findings and remediation sequence, and the affected accounts grouped "
+        "by credential state. It never contains a password.",
+    )
+
+    add_h3(doc, "What a password fingerprint is, and why it is not the password")
+    add_body(
+        doc,
+        "A fingerprint is the first character of a leaked password and its "
+        "length, rendered as 'K... (9 chars)'. Nothing else is disclosed: not "
+        "the remaining characters, not a hash, not a character-class summary. "
+        "Each of those would narrow a guess without helping the person who has "
+        "to make the decision.",
+    )
+    add_body(
+        doc,
+        "The question a client's IT team actually needs answered is whether a "
+        "leaked password is still in rotation, and an account owner can answer "
+        "that from a fingerprint. Printing the password itself would turn a "
+        "briefing note into a credential dump: a document that, if mislaid, "
+        "hands whoever finds it working credentials they did not previously "
+        "have. The fingerprint answers the question and cannot be replayed. "
+        "Where a client formally requests the passwords themselves, the route "
+        "is the consented encrypted export in Section 6.4, not this brief.",
+    )
+
+    add_h3(doc, "Fingerprints are off by default and cost credits")
+    add_body(
+        doc,
+        "The option is unticked every time the panel is opened; it is never "
+        "remembered. It also has a real cost. The scan deliberately persists no "
+        "password material at all, so a fingerprint cannot be read back from "
+        "the stored scan and requires a fresh query against the credential "
+        "source, billed at one credit per page of 100 records. The panel states "
+        "the estimated cost before you commit, for example 'about 3 credits for "
+        "230 records'. With the option left off, generating a brief makes no "
+        "external request and spends nothing.",
+    )
+
+    add_h3(doc, "Audit trail")
+    add_body(
+        doc,
+        "Ticking the option requires a stated reason, which is recorded "
+        "alongside the generating user, the domain, the credit spend and the "
+        "timestamp. The reason is enforced by the server, not merely by the "
+        "browser. The audit row is written before the document is released: if "
+        "it cannot be recorded, a brief containing fingerprints is refused "
+        "rather than produced. A brief without fingerprints still generates, "
+        "because it carries no credential material.",
+    )
+    add_warning(
+        doc,
+        "A brief generated with fingerprints contains credential indicators for "
+        "the client's own accounts. Hand it over in person or send it "
+        "encrypted, and do not circulate it further. Note that the current "
+        "deployment authenticates at the edge only: the recorded username is an "
+        "audit label rather than an authorisation control, so every authorised "
+        "user can generate a brief. Per-user accounts and permissions are "
+        "production work, tracked in the outstanding-items register.",
     )
 
     # ------------------------------------------------------------------ #
@@ -1585,10 +1661,10 @@ def build(doc):
             "rate of 4xx/5xx/timeout responses or the presence of "
             "challenge-page signatures (Cloudflare, Akamai, Imperva, "
             "DataDome, PerimeterX, hCaptcha) crosses threshold. Drives "
-            "the Partial Coverage Notice in the PDF and HTML reports.",
+            "the External Visibility Notice in the PDF and HTML reports.",
         ),
         (
-            "Partial Coverage Notice",
+            "External Visibility Notice",
             "A disclosure block rendered in the PDF and HTML report "
             "when the WAF tracker flags the target apex as protected "
             "during the scan. States explicitly that absence of a "
@@ -1712,6 +1788,9 @@ def build(doc):
         "delivered since the v1.0 initial release. The changes are listed below "
         "with the date each landed.",
     )
+    add_bullet(doc, "2026-09-08: Client meeting brief added (Section 6.5), with OPT-IN password fingerprints. A fingerprint is the first character of a leaked password and its length, which lets an account owner confirm whether a password is still in rotation without the document becoming a credential dump if it is mislaid. Off by default; requires a stated reason that is recorded with the generating user, the domain and the credit spend; refused outright if the audit trail cannot be written. Because the scan deliberately stores no password material, fingerprints require a fresh query and the panel shows the estimated credit cost before the operator commits. Generating a brief without fingerprints makes no external request and spends nothing.")
+    add_bullet(doc, "2026-09-08: The Partial Coverage Notice was renamed the EXTERNAL VISIBILITY NOTICE, and now states explicitly that external visibility (how much of the estate the target allowed the scan to see) is a different measure from scan completeness (how many checkers ran to completion). The two numbers were routinely read as the same thing. A scan can run every check and still see very little. The dashboard label changed from Coverage to Visibility to match.")
+    add_bullet(doc, "2026-09-08: Reports no longer truncate their findings. The per-category findings cap was raised from six to twenty-four, known vulnerabilities on a port are listed in full rather than ending at 'and 1 more', and the credential detail lists every record retained with the scan followed by an honest statement of how many of the total that represents. A report that visibly withholds one finding costs more confidence than the line saves in space.")
     add_bullet(doc, "2026-07-27: Researched breach history now carries scoring weight, on RECENCY rather than count. The dated result supersedes the HIBP count in the same breach-history slot at the same weight (no double-count; HIBP retained as a floor), supplies the Data Breach Resilience recency component that previously depended on a HIBP date absent for almost every South African domain, and adds a repeat-victimisation factor to the Ransomware Susceptibility Index weighted by quarter through the first year, since the post-breach recovery window is itself the period of elevated risk. A scan that could not research the history reports it as UNASSESSED and contributes nothing, never as clean. The Exposure page gained a dedicated Breach History panel showing the verdict, the dated incidents with records and root cause, and the cited sources; the scan form shows whether the web-search key is live before a scan is run.")
     add_bullet(doc, "2026-07-27: Web-corroborated breach discovery added to the breach-history checker (Section 4.6.1). Because HIBP's breaches-by-domain catalogue is thin, the scanner now corroborates breaches from dated open-source intelligence (reputable news and ransomware leak-site listings) and then RESEARCHES the question with a deep, multi-provider answer engine that reads the source pages, iterates on gaps, and cites its sources. This recovers the date a breach actually occurred, the records affected and the root cause, none of which HIBP or a headline scrape provides. Conservative by design and degrades gracefully to a deterministic verdict when the research layer is unavailable.")
     add_bullet(doc, "2026-07-20: Sensitive-credential handling hardened end to end. Leaked account identifiers are now masked at every serving boundary (the API, the interactive dashboard, and every PDF), not only in the report tiers. The encrypted credential export (Section 6.4) was wired to its authorisation flow: a consent attestation plus the authorising user are required, the file is encrypted to the client's key and delivered strictly as a server-issued one-time link that expires and is deleted on first download, and every authorised export is written to an audit trail.")

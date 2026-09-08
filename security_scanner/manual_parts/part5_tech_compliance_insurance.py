@@ -1254,8 +1254,8 @@ def build(doc):
         "of the report states the WAF intervention type, the number and "
         "names of the unverified checkers, the scan coverage percentage, and "
         "the approximate percentage by which the catastrophe rows were "
-        "widened. This closes the loop between the qualitative Partial "
-        "Coverage Notice and the figures, and is recorded under "
+        "widened. This closes the loop between the qualitative External "
+        "Visibility Notice and the figures, and is recorded under "
         "financial_impact.coverage_adjustment in the JSON output for the "
         "FAIS audit trail."
     )
@@ -1787,11 +1787,11 @@ def build(doc):
         "spot-check), 5xx 1h, WAF 6h, rate-limited 30m, timeout 1h."
     )
 
-    add_h2(doc, "WAF Intervention Partial Coverage Notice")
+    add_h2(doc, "WAF Intervention External Visibility Notice")
 
     add_body(doc,
         "When the WAF tracker flags the target apex as protected, the "
-        "scan continues but renders a Partial Coverage Notice in both "
+        "scan continues but renders a External Visibility Notice in both "
         "the PDF report and the HTML dashboard. The notice appears "
         "immediately after the executive summary and again above the "
         "Insurance Analytics section."
