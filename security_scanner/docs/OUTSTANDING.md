@@ -34,9 +34,13 @@ into the budget guard. The guard currently counts HTTP calls and estimates the
 search quota from them (1 search = up to 4 calls); that endpoint reports remaining
 *searches* authoritatively, at no credit cost, and would remove the estimate.
 
-**Related, still open:** the production auth model (see *Enable API auth* in §1) is
-unchanged by the demo gate — edge Basic auth is a stopgap in front of an app that
-still has no authentication of its own.
+**Related, still open:** the production auth model (see *Enable API auth* in §1
+and the full gap in **§4b**) is unchanged by the demo gate — edge Basic auth is a
+stopgap in front of an app that still has no authentication of its own. **Do not
+execute the reversals in this table until §4b is built**: removing the edge gate
+with nothing behind it leaves the scanner open, and the app can now emit client
+credential material (password fingerprints, and the credential export once
+re-enabled).
 
 ### Deferred, flagged for review (not defects — decisions not yet taken)
 
@@ -301,6 +305,51 @@ and the adjudicated view is presented separately, but this is the owner's call.
 REPORTING what the scan found. This item adds a second, human-authored layer on
 top. Doing 5m first is the right order: there is no point building adjudication
 over a display that does not yet provably agree with the scoring path.
+
+### 4b. No application-level user accounts — identity, permissions and audit (GAP, 2026-09-08)
+
+**Owner-approved to defer:** real user accounts are fine "in due course"; all
+currently authorised users get the new functionality in the meantime. Recorded
+here so it is not lost, and because it now gates more than it used to.
+
+**The gap.** The scanner has no authentication of its own. The only gate is the
+Caddy edge Basic auth described in section 0 — a shared-secret prompt in front of
+an app that cannot tell one caller from another. Consequently there is **no user
+identity inside the application, no roles or permissions, no session expiry, and
+no audit trail beyond Caddy's access log**. Revoking access means editing a
+Caddyfile and reloading Caddy.
+
+**Why it matters more now than it did in July.** When the gate went up, everything
+behind it was read-only reporting. It no longer is. The meeting-brief generator
+(2026-09-08) can emit **password fingerprints** for a client's exposed accounts,
+and the encrypted credential export (section 0) releases actual passwords once it
+is re-enabled. Both are actions a production system would restrict to named users
+and log per use. Today the app cannot name the user taking them.
+
+**What is in place as an interim, and its honest limit.** Caddy forwards the
+authenticated username, and the brief generator records it against each
+generation together with whether fingerprints were requested and the stated
+reason. That produces a usable audit trail for the current small, known, internal
+group (`sarel`, `zamani`, `inze`). **It is not an authorisation control:** the app
+trusts a header it cannot verify, every user has identical rights, and anyone who
+reaches the app other than through Caddy is unauthenticated and unlogged. It is
+adequate because the user set is three people who all already have full access,
+and it stops being adequate the moment that is not true.
+
+**What production needs.**
+
+- real accounts with per-user credentials and session expiry, replacing the shared-secret edge gate
+- **roles**, so that viewing a report and releasing client credential material are separable rights rather than the same right
+- a **server-side audit log** of credential-affecting actions (brief with fingerprints, credential export, consent attestation) that does not depend on a forwarded header
+- **individual revocation** that does not require a Caddyfile edit
+
+**Sequencing.** This is the same work as *Enable API auth (`SCANNER_API_KEY`)* in
+section 1 and the reversal of the edge Basic auth in section 0; do not build them
+as three separate things. The trigger is the end of the demo window: taking the
+demo gate off without app auth behind it would leave the scanner open, so
+**section 0's reversal must not be executed until this is built.** Re-enabling the
+encrypted credential export has the same dependency, for a stronger reason — that
+control releases plaintext passwords.
 
 ## 5. Open accuracy items (gap analysis roadmap)
 

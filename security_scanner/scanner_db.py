@@ -239,6 +239,26 @@ MIGRATIONS = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_credexport_domain ON credential_export_audit(domain)",
     ]),
+    ("0005_meeting_brief_audit", [
+        # One row per generated client meeting brief. The brief can optionally
+        # carry password FINGERPRINTS (first character + length) for the client's
+        # own exposed accounts, so who asked for it and why has to be recorded.
+        # No credential data is stored here - not the fingerprints, and certainly
+        # not the passwords they are derived from.
+        """CREATE TABLE IF NOT EXISTS meeting_brief_audit (
+            id            TEXT PRIMARY KEY,
+            scan_id       TEXT,
+            domain        TEXT NOT NULL,
+            generated_by  TEXT,
+            fingerprints  INTEGER DEFAULT 0,
+            reason        TEXT,
+            account_count INTEGER DEFAULT 0,
+            credits_spent INTEGER DEFAULT 0,
+            created_at    TEXT NOT NULL,
+            client_ip     TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_brief_domain ON meeting_brief_audit(domain)",
+    ]),
 ]
 
 
@@ -404,6 +424,27 @@ def record_credential_export(audit_id: str, domain: str, authorised_by: str,
          "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
          (audit_id, domain, authorised_by, 1 if consent else 0, consent_ref, method,
           int(record_count or 0), token, _now(), expires_at, client_ip))
+
+
+def record_meeting_brief(audit_id: str, scan_id: str, domain: str,
+                         generated_by: str, fingerprints: bool, reason: str,
+                         account_count: int, credits_spent: int,
+                         client_ip: str) -> None:
+    """Audit row for a generated client meeting brief. Records who generated it,
+    whether password fingerprints were included and the stated reason - never the
+    fingerprints themselves, and never credential data."""
+    _run("INSERT INTO meeting_brief_audit (id, scan_id, domain, generated_by, "
+         "fingerprints, reason, account_count, credits_spent, created_at, client_ip) "
+         "VALUES (?,?,?,?,?,?,?,?,?,?)",
+         (audit_id, scan_id, domain, generated_by, 1 if fingerprints else 0,
+          reason, int(account_count or 0), int(credits_spent or 0), _now(), client_ip))
+
+
+def meeting_brief_audit(limit: int = 25) -> list:
+    """Most recent brief generations, newest first, for the dashboard audit panel."""
+    return _run("SELECT id, scan_id, domain, generated_by, fingerprints, reason, "
+                "account_count, credits_spent, created_at FROM meeting_brief_audit "
+                f"ORDER BY created_at DESC LIMIT {int(limit)}", fetch="all")
 
 
 def mark_export_downloaded(token: str) -> None:

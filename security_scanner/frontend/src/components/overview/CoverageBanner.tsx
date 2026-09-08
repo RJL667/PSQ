@@ -12,7 +12,7 @@ export default function CoverageBanner({ r, onReview }: { r: Results; onReview?:
   if (!cov.blocked || dismissed) return null
 
   const facts = [
-    cov.coveragePct != null ? `${cov.coveragePct}% assessable coverage` : null,
+    cov.coveragePct != null ? `${cov.coveragePct}% external visibility` : null,
     `${cov.affectedCount} affected checker${cov.affectedCount === 1 ? '' : 's'}`,
     'Active blocking detected',
     cov.probeSummary,
@@ -23,7 +23,7 @@ export default function CoverageBanner({ r, onReview }: { r: Results; onReview?:
       <div className={styles.head}>
         <span className={styles.icon}><ShieldAlert size={16} /></span>
         <div className={styles.headText}>
-          <div className={styles.title}>Partial Scan Coverage — WAF / Bot-Manager Intervention Detected</div>
+          <div className={styles.title}>Partial External Visibility — WAF / Bot-Manager Intervention Detected</div>
           <div className={styles.facts}>
             {facts.map((f, i) => <span key={i} className={styles.fact}>{f}</span>)}
           </div>

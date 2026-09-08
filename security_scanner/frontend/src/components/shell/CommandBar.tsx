@@ -56,8 +56,8 @@ export default function CommandBar() {
 
       <div className={styles.right}>
         {covPct != null && (
-          <div className={styles.coverage} title="Assessable scan coverage">
-            <span className={styles.covLabel}>Coverage</span>
+          <div className={styles.coverage} title="External visibility: how much of the estate the target allowed the scan to see. Separate from scan completeness, which reports how many checkers ran.">
+            <span className={styles.covLabel}>Visibility</span>
             <span className={styles.covValue}>{covPct}%</span>
             <span className={styles.covTrack}>
               <span className={styles.covFill} style={{ width: `${covPct}%`,

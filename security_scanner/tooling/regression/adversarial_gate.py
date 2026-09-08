@@ -1015,6 +1015,129 @@ def _check_recommendation_priority(failures):
         print(f"  [{'PASS' if ok else 'FAIL'}] rec_priority:{label:<32}")
 
 
+def _check_meeting_brief(failures):
+    """The client meeting brief must not spend, and must not print a password.
+
+    Two independent ways this could go wrong, both of which have precedent here:
+      * the fingerprint-free path quietly acquiring an outbound call, which is
+        exactly how the credential export burned ~500 credits from inside a
+        guard test (see _check_export_switch);
+      * the fingerprint renderer widening to something replayable. A fingerprint
+        that leaks more than the first character stops being a recognition aid
+        and becomes a credential.
+    The paid path is never exercised: fetch_fingerprints is stubbed, and the
+    module-level Session.request guard fails the run if anything escapes anyway.
+    """
+    import importlib
+    mb = importlib.import_module("meeting_brief")
+
+    # 1. the renderer reveals first character + length, and nothing else.
+    for pw in ("Kruger2024", "P@ssw0rd!", "a"):
+        fp = mb.fingerprint(pw)
+        shown = mb.render_fingerprint(fp)
+        leaked = (set(fp.keys()) != {"first", "length"}
+                  or (len(pw) > 1 and (pw in shown or pw[1:] in shown)))
+        if leaked:
+            failures.append(
+                f"meeting_brief[fingerprint]: render_fingerprint({pw!r}) -> "
+                f"{shown!r} exposes more than the first character; a fingerprint "
+                "must not be replayable")
+        print(f"  [{'FAIL' if leaked else 'PASS'}] meeting_brief:fingerprint "
+              f"{len(pw)}ch -> {shown}")
+
+    # 2. credits are counted in PAGES, not records (the source bills per search).
+    for n, want in ((100, 1), (101, 2), (230, 3), (10 ** 6, mb.MAX_PAGES)):
+        got = mb.estimate_credits(n)
+        if got != want:
+            failures.append(f"meeting_brief[credits]: estimate_credits({n}) = "
+                            f"{got}, expected {want} (one credit per page of "
+                            f"{mb.PAGE_SIZE}, capped at {mb.MAX_PAGES})")
+    print(f"  [{'PASS' if all(mb.estimate_credits(n) == w for n, w in ((100, 1), (101, 2), (230, 3))) else 'FAIL'}]"
+          f" meeting_brief:credit_estimate    pages-not-records")
+
+    # 3. the fingerprint-free brief makes NO outbound call and prints no password.
+    results = {
+        "domain_scanned": "examplecorp.co.za", "scan_timestamp": "2026-01-01T00:00:00",
+        "recommendations": ["CRITICAL: rotate the exposed role accounts"],
+        "_scan_completeness": {"failed_checkers": [], "waf_affected_checkers": [],
+                               "completeness_pct": 100, "coverage_pct": 100},
+        "categories": {"dehashed": {"status": "completed", "total_entries": 7,
+                                    "breach_details": [
+                                        {"email": "a@examplecorp.co.za",
+                                         "database": "synthetic",
+                                         "has_password": True, "has_hash": False}]}},
+    }
+    before = len(_BLOCKED_EGRESS)
+    pdf = mb.build_brief(results, "examplecorp.co.za")
+    spent = len(_BLOCKED_EGRESS) - before
+    ok = pdf[:4] == b"%PDF" and spent == 0
+    if not ok:
+        failures.append(
+            f"meeting_brief[free_path]: {spent} outbound call(s) during a "
+            "fingerprint-free brief — this path must spend nothing")
+    print(f"  [{'PASS' if ok else 'FAIL'}] meeting_brief:free_path          "
+          f"outbound={spent} pdf={len(pdf)}B")
+
+    # 4. the route refuses fingerprints without a recorded reason.
+    #
+    # fetch_scan is stubbed rather than seeded: _check_datastore_readiness runs
+    # before this and deliberately leaves the store unreachable, so a real lookup
+    # would 500 and the assertion would be measuring the datastore instead of the
+    # reason gate. Stubbing pins the route to the one behaviour under test.
+    app_mod = importlib.import_module("app")
+    import json as _json
+    row = {"id": "gate-synthetic", "domain": "examplecorp.co.za",
+           "status": "completed", "results": _json.dumps(results)}
+    with mock.patch.object(app_mod, "fetch_scan", return_value=row), \
+         mock.patch.object(mb, "fetch_fingerprints",
+                           side_effect=AssertionError("must not be reached")), \
+         app_mod.app.test_client() as c:
+        no_reason = c.post("/api/scan/gate-synthetic/brief",
+                           json={"include_fingerprints": True})
+        blank = c.post("/api/scan/gate-synthetic/brief",
+                       json={"include_fingerprints": True, "reason": "   "})
+        free = c.post("/api/scan/gate-synthetic/brief",
+                      json={"include_fingerprints": False})
+    ok = (no_reason.status_code == 400 and blank.status_code == 400
+          and free.status_code == 200 and free.data[:4] == b"%PDF")
+    if not ok:
+        failures.append(
+            f"meeting_brief[reason_gate]: no_reason={no_reason.status_code} "
+            f"blank={blank.status_code} free={free.status_code} — a fingerprint "
+            "request without a recorded reason must be refused (400), and the "
+            "fingerprint-free brief must still render")
+    print(f"  [{'PASS' if ok else 'FAIL'}] meeting_brief:reason_gate        "
+          f"no_reason={no_reason.status_code} blank={blank.status_code} "
+          f"free={free.status_code}")
+
+    # 5. no audit row, no fingerprints. The audit trail is the only thing standing
+    # behind a credential-bearing document while the app has no auth of its own
+    # (OUTSTANDING 4b); if it cannot be written the document must not be released.
+    # The datastore is genuinely unreachable at this point in the run, so this
+    # asserts the real failure mode rather than a simulated one.
+    with mock.patch.object(app_mod, "fetch_scan", return_value=row), \
+         mock.patch.object(mb, "fetch_fingerprints", return_value={
+             "accounts": [], "records": 0, "credits_spent": 1,
+             "by_domain": {}, "complete": True}), \
+         mock.patch.object(app_mod.scanner_db, "record_meeting_brief",
+                           side_effect=RuntimeError("datastore down")), \
+         app_mod.app.test_client() as c:
+        fp_req = c.post("/api/scan/gate-synthetic/brief",
+                        json={"include_fingerprints": True, "reason": "gate"})
+        free_req = c.post("/api/scan/gate-synthetic/brief",
+                          json={"include_fingerprints": False})
+    ok = (fp_req.status_code == 503 and fp_req.data[:4] != b"%PDF"
+          and free_req.status_code == 200)
+    if not ok:
+        failures.append(
+            f"meeting_brief[audit_required]: fingerprints={fp_req.status_code} "
+            f"free={free_req.status_code} — with the audit write failing, a "
+            "fingerprint brief must be refused (503) while a fingerprint-free "
+            "brief still renders")
+    print(f"  [{'PASS' if ok else 'FAIL'}] meeting_brief:audit_required     "
+          f"fingerprints={fp_req.status_code} free={free_req.status_code}")
+
+
 def _check_export_switch(failures):
     # Two halves, deliberately: reloading app to re-read the env would re-run
     # init_db() against whatever DB the env points at, so instead patch the flag
@@ -2913,6 +3036,7 @@ def main():
     _check_breach_intel(failures)
     _check_key_probe(failures)
     _check_datastore_readiness(failures)
+    _check_meeting_brief(failures)
     _check_export_switch(failures)
     _check_shared_hosting_attribution(failures)
     _check_checker_wiring(failures)

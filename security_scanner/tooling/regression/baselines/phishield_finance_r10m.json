@@ -920,7 +920,7 @@
           "rsi_reduction": null,
           "severity": "medium",
           "source": "recommendation",
-          "title": "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on 90% of available data. A re-scan is recommended for a complete assessment."
+          "title": "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on scan completeness of 90% (how many checkers ran to completion; separate from external visibility, which reports how much the target allowed us to see). A re-scan is recommended for a complete assessment."
         }
       ],
       "rsi_improvement": 0.441,
@@ -1071,7 +1071,7 @@
   },
   "overall_risk_score": 282,
   "recommendations": [
-    "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on 90% of available data. A re-scan is recommended for a complete assessment.",
+    "WARNING: 3 checker(s) failed during this scan (exposed_admin, tech_stack, privacy_compliance). The risk score is based on scan completeness of 90% (how many checkers ran to completion; separate from external visibility, which reports how much the target allowed us to see). A re-scan is recommended for a complete assessment.",
     "Immediately investigate and remediate the critically exposed service.",
     "Implement MTA-STS to force TLS for inbound email and prevent downgrade attacks.",
     "Configure TLS-RPT (add _smtp._tls TXT record) to receive reports about email TLS delivery failures.",

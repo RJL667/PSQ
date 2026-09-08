@@ -392,10 +392,14 @@ def cat_dns(d, S):
         if p.get("insurance_risk"):
             rows.append(("  Insurance risk", p["insurance_risk"]))
         if p.get("osv_vulns"):
-            osv_ids = [v.get("id", "") for v in p["osv_vulns"][:5]]
-            rows.append(("  OSV.dev CVEs", ", ".join(osv_ids)))
-            if len(p["osv_vulns"]) > 5:
-                rows.append(("", f"...and {len(p['osv_vulns']) - 5} more"))
+            # Same reasoning as issues_cell: name the CVEs. A port whose CVE
+            # list is truncated forces the reader back to the raw data to find
+            # out what was withheld.
+            _ids = [v.get("id", "") for v in p["osv_vulns"]]
+            _show = _ids if len(_ids) <= 15 else _ids[:12]
+            rows.append(("  OSV.dev CVEs", ", ".join(_show)))
+            if len(_ids) > len(_show):
+                rows.append(("", f"and {len(_ids) - len(_show)} further CVE(s) on this port"))
     fb = "Minimal attack surface — only essential ports are exposed." if len(high) == 0 and len(ports) <= 2 else (f"{len(high)} high-risk port(s) exposed — each is a potential entry point for attackers." if high else f"{len(ports)} ports open — review whether all exposed services are necessary.")
     parts = build_cat_card("DNS & Open Ports", col, f"{len(ports)} open port(s)", rows, dns.get("issues", []), S, fallback=fb)
 
@@ -1310,12 +1314,17 @@ def cat_dehashed(d, S):
         parts.append(Paragraph("<b>Breach Details</b>", S["cat_title"]))
         parts.append(Spacer(1, 1 * mm))
         detail_lines = []
-        for i, det in enumerate(details[:10]):
+        # Show every retained record. These are the accounts a client has to
+        # act on; a truncated list means someone has to ask for the rest.
+        for i, det in enumerate(details):
             pw_flag = " [PASSWORD EXPOSED]" if det.get("has_password") else (" [HASH EXPOSED]" if det.get("has_hash") else "")
             user_str = f" (user: {det['username']})" if det.get("username") else ""
             detail_lines.append(f"{det.get('database', 'Unknown')}: {det.get('email', 'N/A')}{user_str}{pw_flag}")
-        if len(details) > 10:
-            detail_lines.append(f"...and {len(details) - 10} more records")
+        _total = int(dh.get("total_entries") or 0)
+        if _total > len(details):
+            detail_lines.append(
+                f"{len(details)} of {_total} records are retained with the scan; "
+                "the complete set is available as an encrypted export on request")
         for line in detail_lines:
             parts.append(Paragraph(f"\u2022 {line}", S["body"]))
         parts.append(Spacer(1, 2 * mm))
@@ -2969,7 +2978,7 @@ def loss_exposure_scenarios_block(d, S):
             f"been widened by approximately {infl_pct}% to reflect this "
             f"uncertainty. The most-likely and median figures are unchanged. "
             f"Absence of a finding in the affected checkers does not confirm "
-            f"absence of the underlying risk — see the Partial Coverage Notice."
+            f"absence of the underlying risk — see the External Visibility Notice."
         )
         blocks += [Spacer(1, 2 * mm), Paragraph(cov_txt, S["body_muted"])]
 
@@ -3434,15 +3443,21 @@ def waf_coverage_notice(results, S):
     }.get(kind, "WAF intervention")
 
     body = (
-        "<b>Partial Coverage Notice.</b> The target domain's protective "
+        "<b>External Visibility Notice.</b> The target domain's protective "
         f"infrastructure intervened during this scan. Detected pattern: "
         f"<b>{kind_label}</b> ({waf.get('evidence', '')}). "
-        f"Of the assessable checkers, approximately <b>{coverage}%</b> "
-        f"returned data; {len(affected)} checker(s) were affected. "
+        f"<b>External visibility: {coverage}%</b> - the proportion of the "
+        f"assessable checkers that the target allowed to return data; "
+        f"{len(affected)} checker(s) were affected. This is a DIFFERENT "
+        "measure from scan completeness, which is quoted with the "
+        "recommendations and reports how many checkers ran to completion. "
+        "A scan can run every check (high completeness) and still see little "
+        "of the estate (low visibility), which is exactly what happened here. "
         "Findings in affected sections below carry a per-card disclaimer. "
         "Absence of a finding in those sections does NOT confirm absence "
         "of the underlying risk - it indicates the scanner could not "
-        "verify it. Coverage of this scan is therefore <b>partial</b>; "
+        "verify it. External visibility for this scan is therefore "
+        "<b>partial</b>; "
         "this is a property of the target's defensive posture, not a "
         "scanner limitation. A rescan from a different source IP, or "
         "coordination with the target's security team, may be required "
@@ -3473,7 +3488,7 @@ def waf_card_disclaimer(checker_name, results, S):
         f"intervened during the {checker_name} checker run ({waf.get('evidence', '')}). "
         "Findings in this card may be incomplete; an absence of a finding "
         "here does not confirm absence of the underlying risk. See the "
-        "top-level Partial Coverage Notice for details.</i>"
+        "top-level External Visibility Notice for details.</i>"
     )
     return [
         Spacer(1, 1.5 * mm),

@@ -1170,6 +1170,138 @@ def download_pdf(scan_id: str):
     )
 
 
+def _brief_user() -> str:
+    """The authenticated operator, as forwarded by the edge proxy.
+
+    HONEST LIMIT: the app has no authentication of its own (OUTSTANDING 4b). Caddy
+    performs Basic auth and forwards the username in `X-Auth-User`; the app cannot
+    verify that header, so this is an AUDIT LABEL, not an authorisation decision.
+    Nothing is gated on the value. It is adequate only because the user set is a
+    handful of internal staff who all already hold identical access, and it stops
+    being adequate the moment that is not true.
+    """
+    u = (request.headers.get("X-Auth-User") or "").strip()
+    # Keep it to a plausible username so a spoofed header cannot inject markup or
+    # newlines into the audit row or the PDF footer.
+    return u[:64] if re.fullmatch(r"[A-Za-z0-9._@-]{1,64}", u or "") else ""
+
+
+@app.route("/api/scan/<scan_id>/brief/options", methods=["GET"])
+def brief_options(scan_id: str):
+    """What the brief generator can offer for this scan, for the dashboard panel.
+
+    Credit-free: reports the *estimated* cost of a fingerprint pull from the
+    record count already stored on the scan. Nothing is queried."""
+    row = fetch_scan(scan_id)
+    if not row:
+        return jsonify({"error": "Scan not found"}), 404
+    try:
+        results = json.loads(row["results"]) if row["results"] else {}
+    except Exception:
+        results = {}
+    dh = (results.get("categories", {}) or {}).get("dehashed", {}) or {}
+    total = dh.get("total_entries")
+    from card_severity import NON_CONCLUSIVE_STATUSES
+    from meeting_brief import estimate_credits
+    conclusive = dh.get("status") not in NON_CONCLUSIVE_STATUSES
+    return jsonify({
+        "scan_id": scan_id,
+        "domain": row["domain"],
+        "user": _brief_user(),
+        "fingerprints_available": bool(conclusive and total and DEHASHED_API_KEY),
+        "fingerprints_unavailable_reason": (
+            "" if (conclusive and total and DEHASHED_API_KEY)
+            else ("credential source not configured" if not DEHASHED_API_KEY
+                  else ("the credential check did not complete on this scan"
+                        if not conclusive else "no credential records for this domain"))),
+        "estimated_credits": estimate_credits(total) if isinstance(total, int) else None,
+        "record_count": total if isinstance(total, int) else None,
+    })
+
+
+@app.route("/api/scan/<scan_id>/brief", methods=["POST"])
+@require_api_key
+@rate_limited(_scan_limiter)
+def generate_brief(scan_id: str):
+    """Generate the client meeting brief for a completed scan.
+
+    Password fingerprints are OPT-IN and are the only part of this that spends
+    money or touches a third party: the scan stores no password material, so a
+    fingerprint requires a fresh paged query at one credit per page. With
+    `include_fingerprints` false (the default) this route makes no outbound
+    request at all."""
+    row = fetch_scan(scan_id)
+    if not row:
+        return jsonify({"error": "Scan not found"}), 404
+    if row["status"] != "completed":
+        return jsonify({"error": "Brief requires a completed scan"}), 409
+
+    data = request.get_json(force=True, silent=True) or {}
+    want_fp = bool(data.get("include_fingerprints"))
+    reason = str(data.get("reason", "")).strip()[:200]
+    if want_fp and not reason:
+        return jsonify({"error": "A reason is required when password fingerprints "
+                                 "are included; it is recorded in the audit trail."}), 400
+    if want_fp and not DEHASHED_API_KEY:
+        return jsonify({"error": "Credential source not configured — fingerprints "
+                                 "cannot be produced."}), 503
+
+    results = json.loads(row["results"])
+    domain = row["domain"]
+    from meeting_brief import build_brief, fetch_fingerprints
+
+    fp_data, credits = None, 0
+    if want_fp:
+        try:
+            fp_data = fetch_fingerprints(domain, DEHASHED_API_KEY)
+            credits = fp_data["credits_spent"]
+        except Exception as e:
+            # Never silently downgrade to a fingerprint-free brief: the operator
+            # asked for fingerprints for a reason and would not notice their
+            # absence in a PDF that otherwise looks complete.
+            return jsonify({"error": "Fingerprint pull failed: %s" % str(e)[:160]}), 502
+
+    user = _brief_user()
+
+    # Write the audit row BEFORE releasing the document. For a fingerprint brief
+    # the audit trail is the whole justification for allowing it at all under the
+    # current edge-only auth (OUTSTANDING 4b) — if it cannot be recorded, the
+    # control is gone and the document must not be released. A fingerprint-free
+    # brief carries no credential material, so a failed audit is logged and the
+    # brief still goes out.
+    try:
+        import secrets
+        scanner_db.record_meeting_brief(
+            secrets.token_hex(8), scan_id, domain, user, want_fp, reason,
+            len(fp_data["accounts"]) if fp_data else 0, credits,
+            request.remote_addr or "")
+    except Exception:
+        app.logger.exception("meeting-brief audit row failed")
+        if want_fp:
+            return jsonify({"error": "The audit trail could not be written, so a "
+                                     "brief containing password fingerprints was "
+                                     "not produced. Generate without fingerprints, "
+                                     "or retry once the datastore is available."}), 503
+
+    pdf_bytes = build_brief(results, domain, fingerprint_data=fp_data,
+                            generated_by=user)
+
+    date_str = str(results.get("scan_timestamp", ""))[:10]
+    return send_file(
+        io.BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True,
+        download_name="meeting-brief-%s-%s.pdf" % (domain, date_str))
+
+
+@app.route("/api/brief-audit", methods=["GET"])
+def brief_audit():
+    """Recent brief generations, for the audit panel under the generator."""
+    try:
+        rows = scanner_db.meeting_brief_audit(limit=25)
+    except Exception:
+        return jsonify({"entries": [], "error": "audit unavailable"}), 200
+    return jsonify({"entries": [dict(r) for r in rows]})
+
+
 @app.route("/api/history/<path:domain>", methods=["GET"])
 def scan_history(domain: str):
     domain = domain.lower().strip()

@@ -307,14 +307,30 @@ def _colour_issue(text: str) -> str:
     return t
 
 
-def issues_cell(issues: list, S, fallback: str = "") -> Paragraph:
+def issues_cell(issues: list, S, fallback: str = "", limit: int = 24) -> Paragraph:
+    """Render a category's findings.
+
+    The cap used to be 6. On a real client report that hid a single CVE behind
+    "...and 1 more", which costs more confidence than the line saves in space:
+    a technical report exists to be complete, and a reader who can see one
+    finding withheld reasonably wonders what else is. Measured on a live scan,
+    only 1 of 21 categories carried more than 6 issues, and it carried 7.
+
+    A generous ceiling still guards against a pathological card, since a host
+    with eighty CVEs would otherwise run for pages. The tail is never trimmed
+    when the remainder is trivial, because hiding one or two items is the worst
+    of both outcomes.
+    """
     if not issues:
         msg = fallback or "No issues detected"
         colour = "#6b7280" if fallback else "#16a34a"  # grey for context, green for clean
         return Paragraph(f"<font color='{colour}'>{msg}</font>", S["body"])
-    lines = "<br/>".join(f"\u2022 {_colour_issue(i)}" for i in issues[:6])
-    if len(issues) > 6:
-        lines += f"<br/>\u2022 \u2026and {len(issues) - 6} more"
+    shown = issues if len(issues) <= limit + 3 else issues[:limit]
+    lines = "<br/>".join(f"\u2022 {_colour_issue(i)}" for i in shown)
+    hidden = len(issues) - len(shown)
+    if hidden:
+        lines += (f"<br/>\u2022 \u2026and {hidden} further finding(s) of the same kind, "
+                  "listed in the detailed section for this category")
     return Paragraph(lines, S["issue"])
 
 

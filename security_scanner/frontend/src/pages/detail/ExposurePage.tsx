@@ -4,6 +4,7 @@ import { getResults } from '../../data/results'
 import { cat, CATEGORY_LABELS } from '../../data/selectors'
 import { isConclusive } from '../../data/checkerState'
 import CredentialExportPortal from '../../components/overview/CredentialExportPortal'
+import MeetingBriefPanel from '../../components/overview/MeetingBriefPanel'
 import BreachIntelPanel from '../../components/detail/BreachIntelPanel'
 import type { Results, CategoryBase } from '../../types/results'
 import type { KVRow } from '../../components/detail/parts'
@@ -148,6 +149,7 @@ export default function ExposurePage({ r = getResults()! }: { r?: Results }) {
               ]} />
               <IssueList issues={dehashed?.issues as string[]} />
               {((dehashed?.total_entries as number) ?? 0) > 0 && <CredentialExportPortal />}
+              <MeetingBriefPanel />
             </>
           ) : (
             // Suppress the counts entirely: a failed lookup returns 0 records, and

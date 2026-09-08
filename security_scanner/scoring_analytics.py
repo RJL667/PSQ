@@ -1245,7 +1245,9 @@ class RiskScorer:
             recommendations.insert(0,
                 f"WARNING: {len(failed_checkers)} checker(s) failed during this scan "
                 f"({', '.join(failed_checkers)}). The risk score is based on "
-                f"{scan_completeness['completeness_pct']}% of available data. "
+                f"scan completeness of {scan_completeness['completeness_pct']}% "
+                f"(how many checkers ran to completion; separate from external "
+                f"visibility, which reports how much the target allowed us to see). "
                 f"{_tail}"
             )
 
