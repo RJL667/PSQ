@@ -469,9 +469,15 @@ def _check_datastore_readiness(failures):
             import scanner_db
             scanner_db.configure(database_url=os.environ.get("DATABASE_URL"),
                                  sqlite_path=":memory:")
+            # The reachability probe (2026-09-08) is stubbed REACHABLE here on
+            # purpose: these scenarios assert the CONFIGURED-BACKEND logic, and the
+            # DSN above points at a database that does not exist in the gate, so an
+            # unstubbed probe would fail them for a reason they are not testing.
+            # Reachability gets its own scenarios below.
             with mock.patch("websearch.check_key_cached",
                             return_value={"status": "active",
                                           "key_fingerprint": "test", "cached": True}), \
+                 mock.patch.object(scanner_db, "ping", return_value=(True, "")), \
                  app_mod.app.test_client() as client:
                 resp = client.get("/health/providers")
                 body = resp.get_json() or {}
@@ -489,6 +495,48 @@ def _check_datastore_readiness(failures):
                 "database while every health check reports green")
         print(f"  [{'PASS' if ok else 'FAIL'}] datastore:{label:<22} "
               f"{got_status} degraded={got_degraded} http={resp.status_code}")
+    # REACHABILITY -- the half the configured-backend check cannot see.
+    # 2026-09-01 09:35:21: both application databases stopped and nothing
+    # noticed for a week, because this endpoint reported
+    # {"backend": "postgres", "status": "postgres"} throughout -- that is what
+    # .env said. The scanner 500'd on every history request and the rating
+    # engine failed 11 quote saves in front of a user over two days. A
+    # readiness endpoint that stays green through an outage is worse than none,
+    # because it is the thing a monitor trusts.
+    import scanner_db as _sdb
+    for label, ping_result, want_deg, want_status in (
+            ("reachable", (True, ""), False, "sqlite"),
+            ("UNREACHABLE", (False, "OperationalError: connection refused"),
+             True, "unreachable"),
+    ):
+        with mock.patch.dict(os.environ, {"SCANNER_ALLOW_SQLITE": "1"}, clear=False):
+            os.environ.pop("DATABASE_URL", None)
+            _sdb.configure(database_url=None, sqlite_path=":memory:")
+            with mock.patch("websearch.check_key_cached",
+                            return_value={"status": "active",
+                                          "key_fingerprint": "t", "cached": True}), \
+                 mock.patch.object(_sdb, "ping", return_value=ping_result), \
+                 app_mod.app.test_client() as client:
+                resp = client.get("/health/providers")
+                body = resp.get_json() or {}
+        ds = (body.get("providers") or {}).get("datastore", {})
+        got_deg = "datastore" in (body.get("degraded") or [])
+        impact_ok = "UNREACHABLE" in (body.get("impact") or "")
+        ok = (ds.get("status") == want_status and got_deg == want_deg
+              and resp.status_code == (503 if want_deg else 200))
+        if want_deg:
+            ok = ok and impact_ok
+        if not ok:
+            failures.append(
+                f"datastore_reach[{label}]: status={ds.get('status')!r} "
+                f"(want {want_status!r}), degraded={got_deg} (want {want_deg}), "
+                f"http={resp.status_code}, operator-impact="
+                f"{'present' if impact_ok else 'MISSING'} - a readiness endpoint "
+                "that stays green while the database is gone is worse than none, "
+                "and flipping a flag without telling the operator what it means "
+                "leaves them guessing at data loss")
+        print(f"  [{'PASS' if ok else 'FAIL'}] datastore_reach:{label:<13} "
+              f"{ds.get('status')} degraded={got_deg} http={resp.status_code}")
     # leave the module pointed somewhere harmless for any later check
     import scanner_db
     scanner_db.configure(database_url=None, sqlite_path=":memory:")
