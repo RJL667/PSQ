@@ -1326,12 +1326,25 @@ def health_providers():
         pg = backend == "postgres"
         allow_sqlite = os.environ.get("SCANNER_ALLOW_SQLITE", "").strip().lower() \
             in ("1", "true", "yes")
+        # AND CAN WE ACTUALLY REACH IT? The check above answers "what is
+        # configured" and never touches the database, which is exactly why it
+        # missed the 2026-09-01 outage: both application databases were stopped
+        # for a week while this endpoint reported {"backend": "postgres",
+        # "status": "postgres"} the entire time, because that is what .env said.
+        # The rating engine failed in front of a user for two days. A monitor
+        # pointed here would have seen green throughout.
+        reachable, reach_err = scanner_db.ping()
         providers["datastore"] = {
-            "status": "postgres" if pg else ("sqlite" if allow_sqlite
-                                             else "sqlite_fallback"),
+            "status": ("postgres" if pg else ("sqlite" if allow_sqlite
+                                              else "sqlite_fallback"))
+                      if reachable else "unreachable",
             "backend": backend,
+            "reachable": reachable,
         }
-        if not pg and not allow_sqlite:
+        if not reachable:
+            providers["datastore"]["error"] = reach_err
+            degraded.append("datastore")
+        elif not pg and not allow_sqlite:
             degraded.append("datastore")
     except Exception as e:
         providers["datastore"] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
@@ -1367,6 +1380,12 @@ def health_providers():
                 "and new ones land in the wrong store. Restore DATABASE_URL (see "
                 "deploy/deploy_vm.sh, which reconstructs it from secrets.env) and "
                 "restart. If SQLite is intended, set SCANNER_ALLOW_SQLITE=1.")
+        if "datastore" in degraded and not (providers.get("datastore") or {}).get("reachable", True):
+            impacts.append(
+                "The scan datastore is UNREACHABLE. Scans cannot be stored or "
+                "retrieved and every history/report request will fail. Existing "
+                "data is not lost -- the database is not answering. Check the "
+                "database service is running before anything else.")
         spent = [n for n in ("dehashed", "intelx") if n in degraded]
         if spent:
             impacts.append(

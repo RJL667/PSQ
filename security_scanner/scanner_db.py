@@ -73,6 +73,31 @@ def configured_backend() -> str:
     return "postgres" if _cfg["url"] else "sqlite"
 
 
+def ping(timeout: float = 3.0) -> "tuple[bool, str]":
+    """Can the configured datastore actually be REACHED right now?
+
+    configured_backend() answers "what is configured", deliberately without
+    touching the database. That catches a clobbered DATABASE_URL silently
+    dropping the service onto SQLite, which is what it was written for, but it
+    cannot see a correctly-configured Postgres that is simply not there.
+
+    On 2026-09-01 both application databases stopped and nothing noticed for a
+    week: /health/providers reported {"backend": "postgres", "status":
+    "postgres"} throughout, because that is what the .env said, while every
+    query returned "connection refused". The rating engine failed in front of a
+    user for two days. A readiness endpoint that stays green through an outage
+    is worse than none, because it is the thing a monitor trusts.
+
+    Returns (ok, detail). Never raises: a probe that can fail the request it is
+    meant to describe is not a probe.
+    """
+    try:
+        row = _run("SELECT 1 AS ok", fetch="one")
+        return (bool(row), "" if row else "query returned no row")
+    except Exception as e:
+        return (False, f"{type(e).__name__}: {str(e)[:160]}")
+
+
 @contextmanager
 def _conn():
     """Yield a (connection, is_pg) pair; commit on success, rollback on error.
