@@ -136,7 +136,9 @@ def ingest():
     dest = UPLOAD_DIR / (uuid.uuid4().hex + "_" + name)
     f.save(str(dest))
     try:
-        result = document_extract.extract(str(dest), name)
+        result = document_extract.extract(str(dest), name,
+                                          user_id=request.headers.get("x-user-id") or "",
+                                          conversation_id=request.headers.get("x-conversation-id") or "")
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": f"Extraction error: {exc}"}), 500
 
@@ -171,7 +173,8 @@ def map_assessment_route():
         path = UPLOAD_DIR / stored
         if not path.exists():
             return jsonify({"ok": False, "error": "Uploaded file not found — re-upload the form."}), 404
-        ex = document_extract.extract(str(path), stored)
+        ex = document_extract.extract(str(path), stored, user_id=user_id or "",
+                                      conversation_id=conv_id or "")
         if not ex.get("ok"):
             return jsonify({"ok": False, "error": ex.get("error", "Extraction failed.")}), 422
         # Do NOT map a document that has un-read (scanned) pages — nothing may slip through.

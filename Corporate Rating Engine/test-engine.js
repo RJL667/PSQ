@@ -33,9 +33,11 @@ const r = Engine.computePremium(example);
 
 function approx(got, want, tol = 1) { return Math.abs(got - want) <= tol; }
 const checks = [
-  ["Final premium", r.finalPremium, 457460.93],
-  ["Base premium", r.basePremium, 457460.93],
-  ["Funds Protect (R2M)", r.fundsProtect, 24420],
+  // Oracle updated 2026-10-15: Funds Protect tables re-read from the workbook ('Look Up Tables' rows 69-75).
+  // Old FP R2M cost 24,420 -> 26,640; premium moves by (26,640-24,420)/0.94 = 2,361.70.
+  ["Final premium",         r.finalPremium,       459822.63],
+  ["Base premium",          r.basePremium,        459822.63],
+  ["Funds Protect (R2M)",   r.fundsProtect,       26640],
   ["Expected breach cost", r.expectedBreachCost, 28332757.38],
   ["Maturity multiplier", r.maturityMultiplier, 1.0],
 ];

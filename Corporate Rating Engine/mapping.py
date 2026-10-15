@@ -201,7 +201,7 @@ def claude_map(assessment_text, extra_terms=None, sid=None, user_id=None):
     }).encode("utf-8")
     headers = {
         "content-type": "application/json",
-        "x-api-key": _proxy_key(),  # proxy owns the real Claude credential
+        "x-api-key": _proxy_key(),              # proxy owns the real Claude credential
         "anthropic-version": "2023-06-01",
         "x-redact-org": "1",                     # org mode: force-redact company / people names
     }
