@@ -1,0 +1,9 @@
+[Unit]
+Description=Deploy the approved corporate rater commit from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/corp-rater-autodeploy
+TimeoutStartSec=600
