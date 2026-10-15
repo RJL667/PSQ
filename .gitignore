@@ -65,3 +65,6 @@ backups/
 tmp/
 # Personal email signature assets (kept in the workspace, not the public repo)
 email-signature/
+.secrets/
+.tmp/
+casebook/
