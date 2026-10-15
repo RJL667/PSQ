@@ -57,3 +57,11 @@ security_scanner/scans/_dehashed_cache/
 # address lands in the repo -- it did, in 61bcf37.
 security_scanner/scans/_egress_ip.json
 security_scanner/scans/_dehashed_probe.json
+.computer/
+.vgexec/
+attachments/
+backups/
+# Local scratch: server pulls, deploy manifests, sample proposal PDFs
+tmp/
+# Personal email signature assets (kept in the workspace, not the public repo)
+email-signature/

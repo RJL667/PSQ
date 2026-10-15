@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Phishield Corporate — Casebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="corporate-rating.css"/>
+<style>
+  .cb-grid { display:grid; grid-template-columns: 340px 1fr; gap:20px; align-items:start; }
+  @media (max-width: 960px) { .cb-grid { grid-template-columns: 1fr; } }
+  .cb-list { display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow:auto; }
+  .cb-item { padding:10px 12px; border:1px solid rgba(255,255,255,0.08); border-radius:10px; cursor:pointer; }
+  .cb-item:hover, .cb-item.active { border-color: var(--accent, #1FB4D7); }
+  .cb-item .t { font-weight:600; }
+  .cb-item .s { font-size:12px; color: var(--text-muted); margin-top:2px; }
+  .cb-form { display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px; }
+  .cb-form label { font-size:12px; color: var(--text-muted); display:block; margin-bottom:3px; }
+  .cb-form input, .cb-form select, .cb-form textarea { width:100%; box-sizing:border-box; }
+  .cb-form .full { grid-column: 1 / -1; }
+  .v-match { color: var(--success, #2ec4b6); } .v-mismatch { color: var(--danger, #e63946); } .v-partial, .v-no_actual, .v-not_assessed { color: var(--text-muted); }
+  .cb-q { display:grid; grid-template-columns: 60px 1fr 260px 90px; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:13px; }
+  .cb-q .src { font-size:11px; color: var(--text-muted); }
+  .cb-q.changed { background: rgba(31,180,215,0.06); }
+  .cb-docs td, .cb-checks td { font-size:13px; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo-area">
+      <div class="shield-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div>
+        <h1><span class="brand-accent">Phishield</span> Casebook</h1>
+        <p class="header-tagline">Past deals as test cases: what the rater says against what was actually quoted</p>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Rating Engine</a>
+      <a href="assessment.html">Assessment Ingestion</a>
+      <a href="casebook.html" class="active">Casebook</a>
+    </nav>
+  </div>
+</header>
+
+<div class="main-container">
+  <div class="cb-grid">
+    <div class="glass-card">
+      <div class="step-header"><h2>Cases</h2><p>One case per past deal. Files copied into the casebook folder on the server appear here too.</p></div>
+      <div class="btn-row" style="margin-top:0"><button class="btn btn-primary" id="btn-new">+ New case</button><button class="btn" id="btn-refresh">Refresh</button></div>
+      <div id="cb-summary" class="field-hint" style="margin:8px 0"></div>
+      <div class="cb-list" id="cb-list"></div>
+    </div>
+
+    <div class="glass-card" id="cb-detail">
+      <div class="step-header"><h2>Select or create a case</h2>
+        <p>Drop the proposal form (any insurer's version, a scan or a Word file) and the quote or terms that actually went out. Record the real outcome, process, then correct anything the rater read wrongly. Every correction is kept as a labelled example for form mapping.</p></div>
+      <div class="section-title">Most-corrected questions</div>
+      <div id="cb-learnings" class="field-hint">—</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="corporate-data.js"></script>
+<script src="corporate-engine.js"></script>
+<script src="casebook.js"></script>
+</body>
+</html>

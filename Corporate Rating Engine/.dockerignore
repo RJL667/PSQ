@@ -1,0 +1,10 @@
+# Client working files (the source workbook + proposal form) never go into the image.
+_source/
+tools/
+__pycache__/
+*.pyc
+ingest_uploads/
+quote_pdfs/
+corporate_quotes.db*
+*.xlsx
+node_modules/
