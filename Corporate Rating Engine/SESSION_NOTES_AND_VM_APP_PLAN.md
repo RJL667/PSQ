@@ -11,18 +11,18 @@ supersedes it where they differ.
 
 **Where each tool runs**
 
-| Tool | Runs as | Port | Public path | Database |
-|---|---|---|---|---|
-| Security scanner (`phishield-scanner`) | host systemd unit, root | :8001 | `apps.phishield.com/scanner/` | Postgres `phishield_scanner` on `phishield-scanner-pg` :5544 |
-| SME rating engine (`sme-rating-engine`) | host systemd unit | :8002 | `apps.phishield.com/smerating/` | Postgres `sme_rating` on `sme-rating-pg` :5545 |
-| Corporate rating engine (`corp-rating`) | host systemd unit (authored 12 Oct) | :8003 | `apps.phishield.com/corprating/` | SQLite `/opt/corp-rating/data/corporate_quotes.db` |
+| Tool | Runs as | Public path | Data store |
+|---|---|---|---|
+| Security scanner | host service | `/scanner/` | its own Postgres database |
+| SME rating engine | host service | `/smerating/` | its own Postgres database |
+| Corporate rating engine | host service (authored 12 Oct) | `/corprating/` | SQLite on the host |
 
-Source for the first two rows: `veilguard/deploy/DEPLOYMENT.md` in veilguard-stack. Source for the
-third: `veilguard/deploy/corp-rating/` (install script, unit file, Caddy and compose patches).
+Hostnames, ports, service names and database names are kept in the private deployment docs, not in
+this public repo.
 Whether the corporate unit is live on the VM was **not re-checked this session**.
 
-**Bridge that already exists.** `corp-rating-mcp` is an MCP server (FastMCP, port 8813) registered
-as a *system* app in `cc_apps_catalog` (`register_app.sql`). It calls the engine over HTTP and
+**Bridge that already exists.** `corp-rating-mcp` is an MCP server registered
+as a *system* app in Veilguard's app catalog. It calls the engine over HTTP and
 exposes `assess_proposal_form`, `questionnaire_schema`, `map_assessment`, `list_quotes`,
 `get_quote` and `create_quote`. It forwards the conversation and user ids for audit and redaction.
 There is no equivalent bridge yet for the scanner or the SME engine.
@@ -45,8 +45,8 @@ There is no equivalent bridge yet for the scanner or the SME engine.
 5. **Public URL** is the `/corprating/` path, behind the same staff sign-in as `/scanner`, with
    `/health` left open for uptime probes.
 6. **Packaging.** July chose "own container" in the compose stack. On 12 October this changed to a
-   **host systemd unit** on :8003, matching the SME engine on :8002. The container is put in a
-   `retired` compose profile and the MCP bridge is pointed at `host.docker.internal:8003`.
+   **host service**, matching the SME engine. The container is retired and the MCP bridge points
+   at the host service.
 7. **Claude billing.** Claude API (Console key, pay as you go) is separate from the Max
    subscription. The org sits under the insurer; billing on the consulting company's card.
 8. **Nothing is committed, pushed or deployed** until the owner says so.
@@ -72,7 +72,7 @@ There is no equivalent bridge yet for the scanner or the SME engine.
 
 | # | Item | State |
 |---|---|---|
-| 1 | Confirm the corporate host unit is live: `/corprating/health` returns 200 and the MCP bridge reaches :8003 | not verified this session |
+| 1 | Confirm the corporate host unit is live: the health route returns 200 and the MCP bridge reaches it | not verified this session |
 | 2 | Live Claude mapping through the pii-proxy on a **sample** form, then a real one | path built, live run not recorded |
 | 3 | OCR execution for scanned forms, inside the closed environment (redaction server or app-side `rapidocr-onnxruntime`) | detection done, execution open |
 | 4 | Gap-report PDF in the "True View" layout (scorecard plus threat surface), attached to the quote | open |
@@ -89,8 +89,8 @@ Source: `veilguard/docs/agentic-platform/WORKSPACE_APPS_SPEC.md` and `services/c
 
 There are **two kinds** of app.
 
-**System apps.** A row in `cc_apps_catalog` with `kind='system'`, pointing at an MCP server the
-operator runs (for example `corp-rating-mcp` on :8813). They appear in the dashboard gallery and
+**System apps.** A system entry in the app catalog, pointing at an MCP server the
+operator runs (for example `corp-rating-mcp`). They appear in the dashboard gallery and
 their tools are available in chat. This is how the corporate bridge works today.
 
 **Workspace apps (built by the agent).** Flow: `app_templates`, `app_scaffold`, edit, `app_test`,
@@ -101,7 +101,7 @@ workspace** VM under a supervisor (`vg-appd`). The facts that matter for this pl
   port**, so a workspace app cannot serve a web UI such as the rating wizard.
 - Egress is **default deny**. Only hosts declared in the manifest are reachable.
 - The VM **cannot reach the host's internal ports** (the "hostwall"). That rules out direct access
-  to the pii-proxy, `sme-rating-pg`, `phishield-scanner-pg` or `127.0.0.1:8003`.
+  to the pii-proxy, the engine databases or the engines' internal ports.
 - v1 dependencies are **the template lockfile only** (`mcp`, `httpx`, `pydantic`). PyMuPDF,
   openpyxl and the Flask stack cannot be installed in the app.
 - The VM suspends after 30 minutes idle and hibernates after an hour. VM slots are capped at 8.
@@ -122,7 +122,7 @@ web UIs stay at `/scanner`, `/smerating` and `/corprating`.
 
 **Option B: Engines on the host, bridge built as a workspace app in the Apps VM.**
 Scaffold from `mcp-python-fastmcp@1` and call the engines through their public HTTPS URLs, with
-`apps.phishield.com:443` as the only egress host and a service token as the app's secret.
+the public engine host as the only egress host and a service token as the app's secret.
 - Gives the review card, per-tool approval and the sandbox for the bridge itself.
 - Needs a machine-to-machine token on each engine's API, because the Caddy staff sign-in is
   basic-auth for people.
@@ -145,4 +145,4 @@ databases, corporate quotes in SQLite (or Postgres, if item 7 is done).
 
 Which option to build: **A** (fastest, uses the existing pattern), **B** (bridge in the sandbox,
 needs service tokens on three APIs), or **C** (a new VM platform). Before building, confirm item 1
-in section 4, because both A and B depend on the corporate unit being live on :8003.
+in section 4, because both A and B depend on the corporate unit being live on the host.
