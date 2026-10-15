@@ -167,3 +167,18 @@ def test_blank_proposal_form_reads_as_unanswered():
         pytest.skip("client proposal form not present (_source/ is gitignored)")
     f = q.read_form(str(pdfs[0]))
     assert f["ok"] and f["answers"] == {} and f["form_version_match"] == 1.0
+
+
+def test_incomplete_forms_are_rated_average(example):
+    sparse = {k: v for i, (k, v) in enumerate(example.items()) if i % 3 == 0}
+    r = q.assess(sparse)
+    assert r["completeness"]["pct"] < q.RATE_ON_ANSWERS_MIN
+    assert r["rating_band"]["basis"] == "average"
+    assert r["rating_band"]["band"] == "Moderate" and r["rating_band"]["multiplier"] == 1.0
+    assert q.assess(sparse, {"rating_basis": "answers"})["rating_band"]["basis"] == "answers"
+
+
+def test_complete_forms_are_rated_on_their_answers(example):
+    r = q.assess(example, CONFIRMED)
+    assert r["rating_band"]["basis"] == "answers"
+    assert r["premium_modifier"] == 0.75

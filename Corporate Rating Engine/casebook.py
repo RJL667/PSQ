@@ -94,7 +94,7 @@ def _load(case_id):
 
 # --------------------------------------------------------------------------- metadata
 _ACTUAL_KEYS = ("decision", "maturity_band", "premium", "cover", "excess", "conditions", "notes")
-_INPUT_KEYS = ("subIndustry", "turnover", "cover", "excess", "mdr", "fpAdjustableAmount")
+_INPUT_KEYS = ("subIndustry", "turnover", "cover", "excess", "mdr", "fpAdjustableAmount", "riskBursary")
 _TOP_KEYS = ("client", "insurer", "form_type", "broker", "quoted_on", "notes")
 
 
@@ -134,7 +134,8 @@ def _merge_meta(case, patch):
         for k in _INPUT_KEYS:
             if k in patch["rating_inputs"]:
                 v = patch["rating_inputs"][k]
-                ri[k] = _num(v) if k in ("turnover", "cover", "excess", "fpAdjustableAmount") else v
+                ri[k] = (_num(v) if k in ("turnover", "cover", "excess", "fpAdjustableAmount")
+                     else bool(v) if k == "riskBursary" else v)
         case["rating_inputs"] = ri
     if isinstance(patch.get("context"), dict):
         case["context"] = {k: patch["context"][k] for k in ("funds_protect", "soe", "public_sector")

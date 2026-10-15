@@ -27,10 +27,14 @@
       name: b.name,
       included: b.name !== "PCI Fines and Penalties" && b.name !== "Computer Crime",
       sublimitRatio: 1,
+      excessIncluded: true,
     })),
     fpMode: "standard", fpAdjustableAmount: 0,
+    // BI and Contingent BI carry a TIME excess (waiting period, 12-hour steps), not the rand excess.
+    // Recorded on the quote only: the workbook does not price it (underwriter, 2026-10-15).
+    biWaitingHours: 12, cbiWaitingHours: 12,
     mdr: "No MDR", discretionary: 0,
-    quoteType: "new",
+    quoteType: "new", riskBursary: false,
     renewalCover: 0, renewalPremium: 0, renewalFP: 0,
     competitorName: "", competitorPremium: 0, competitorLimit: 0, competitorHasFP: false,
     options: [], activeOption: 0,
@@ -56,7 +60,10 @@
 
   function initDropdowns() {
     fillSelect($("cover"), D.COVER_OPTIONS.map((c) => ({ v: c, l: zar0(c) })), "v", "l", state.cover);
-    fillSelect($("excess"), D.EXCESS_OPTIONS.map((c) => ({ v: c, l: zar0(c) })), "v", "l", state.excess);
+    // Excess is a free amount (any rand value). The presets are suggestions only; the workbook's
+    // R500k dropdown steps forced anything below R500k to be rated at R0.
+    fillDatalist($("excess-presets"), [0, 25000, 50000, 100000, 150000, 200000, 250000].concat(D.EXCESS_OPTIONS.filter((c) => c >= 500000 && c <= 10000000)));
+    $("excess").value = groupNum(String(state.excess)) || "0";
     fillSelect($("vat"), D.VAT_OPTIONS.map((v) => ({ v: v, l: pct(v) })), "v", "l", state.vat);
     fillSelect($("mdr"), D.MDR_OPTIONS, "label", "label", state.mdr);
     fillSelect($("renewal-cover"), D.COVER_OPTIONS.map((c) => ({ v: c, l: zar0(c) })), "v", "l", state.cover);
@@ -137,6 +144,9 @@
       tr.innerHTML =
         `<td class="bt-name">${b.name}</td>` +
         `<td><label class="toggle"><input type="checkbox" data-i="${i}" class="bt-inc" ${b.included ? "checked" : ""}><span class="slider"></span></label></td>` +
+      (b.name === "Business Interruption Loss"
+        ? `<td class="bt-sub" title="BI carries a time excess (waiting period), set below the table">time</td>`
+        : `<td><label class="toggle" title="Excess applies to this benefit"><input type="checkbox" data-i="${i}" class="bt-exc" ${b.excessIncluded !== false ? "checked" : ""}><span class="slider"></span></label></td>`) +
         `<td><select class="form-select bt-ratio" data-i="${i}">${ratioOpts}</select></td>` +
         `<td><input class="form-input bt-ratio-free" data-i="${i}" type="number" min="0" max="100" step="1" value="${+(b.sublimitRatio * 100).toFixed(2)}" style="padding:6px 8px;width:62px"></td>` +
         `<td class="bt-sub" data-sub="${i}">${zar0(b.sublimitRatio * state.cover)}</td>`;
@@ -146,6 +156,11 @@
       const i = +e.target.dataset.i;
       state.benefits[i].included = e.target.checked;
       e.target.closest("tr").className = e.target.checked ? "" : "excluded";
+      recompute();
+    }));
+    // Excess Included (workbook column E): a benefit without the excess earns no share of the excess credit.
+    body.querySelectorAll(".bt-exc").forEach((cb) => cb.addEventListener("change", (e) => {
+      state.benefits[+e.target.dataset.i].excessIncluded = e.target.checked;
       recompute();
     }));
     body.querySelectorAll(".bt-ratio").forEach((sel) => sel.addEventListener("change", (e) => setBenefitRatio(+e.target.dataset.i, parseFloat(e.target.value), "dropdown")));
@@ -172,20 +187,53 @@
     });
   }
 
+  // ---------- Funds Protect vs Computer Crime ----------
+  // Underwriter 2026-10-15: Funds Protect covers more than Computer Crime, so Computer Crime is always
+  // unticked when Funds Protect is included. With no Funds Protect, Computer Crime is ticked and the
+  // Funds Protect cost is left out. The Computer Crime toggle follows the Funds Protect basis.
+  function waitText() {
+    return state.biWaitingHours + "h BI / " + state.cbiWaitingHours + "h CBI (time excess, not priced)";
+  }
+  function benefitsFor(fpMode) {
+    return state.benefits.map((b) => b.name === "Computer Crime" ? Object.assign({}, b, { included: fpMode === "none" }) : b);
+  }
+  function fpText(mode, amount) {
+    return mode === "none" ? "Not included (Computer Crime instead)" : mode === "adjustable" ? zar0(amount) + " (adjustable)" : "Standard (10% of cover)";
+  }
+  function syncFundsProtectUI() {
+    const i = state.benefits.findIndex((b) => b.name === "Computer Crime");
+    if (i >= 0) {
+      state.benefits[i].included = state.fpMode === "none";
+      const cb = document.querySelector(`.bt-inc[data-i="${i}"]`);
+      if (cb) {
+        cb.checked = state.benefits[i].included; cb.disabled = true;
+        const tr = cb.closest("tr"); tr.className = cb.checked ? "" : "excluded"; tr.title = "Set by the Funds Protect basis";
+      }
+    }
+    $("fp-mode").querySelectorAll(".pill").forEach((x) => x.classList.toggle("selected", x.dataset.fp === state.fpMode));
+    $("fp-adjustable-group").style.display = state.fpMode === "adjustable" ? "block" : "none";
+    $("fp-crime-hint").textContent = state.fpMode === "none"
+      ? "No Funds Protect: Computer Crime is ticked instead, and the Funds Protect cost is left out of the premium."
+      : "Funds Protect covers more than Computer Crime, so Computer Crime stays unticked while Funds Protect is included.";
+  }
+
   // ---------- compute ----------
   function buildInputs() {
     return {
       turnover: state.turnover, cover: state.cover, subIndustry: state.subIndustry,
       maturityOverride: state.maturityOverride || "N/A", posture: null, vat: state.vat,
-      benefits: state.benefits, excess: state.excess,
+      benefits: benefitsFor(state.fpMode), excess: state.excess,
       fpAdjustableAmount: state.fpMode === "adjustable" ? state.fpAdjustableAmount : 0,
-      mdr: state.mdr, discretionary: state.discretionary,
+      fundsProtect: state.fpMode !== "none",
+      biWaitingHours: state.biWaitingHours, cbiWaitingHours: state.cbiWaitingHours,
+      mdr: state.mdr, discretionary: state.discretionary, riskBursary: state.riskBursary,
     };
   }
   // --- quote options (up to 3) ---
   function optCfgFromBase() { return { cover: state.cover, fpMode: state.fpMode, fpAdjustableAmount: state.fpAdjustableAmount }; }
   function optionInputsFor(o) {
-    return Object.assign(buildInputs(), { cover: o.cover, fpAdjustableAmount: o.fpMode === "adjustable" ? o.fpAdjustableAmount : 0 });
+    return Object.assign(buildInputs(), { cover: o.cover, fpAdjustableAmount: o.fpMode === "adjustable" ? o.fpAdjustableAmount : 0,
+      fundsProtect: o.fpMode !== "none", benefits: benefitsFor(o.fpMode) });
   }
   function activeInputs() {
     if (state.step === 4 && state.options.length) return optionInputsFor(state.options[state.activeOption] || state.options[0]);
@@ -233,6 +281,38 @@
     } else {
       $("fp-warning").style.display = "none";
     }
+    // Excess credit, priced continuously from the expected loss (no R500k steps)
+    const eh = $("excess-hint");
+    if (eh) eh.textContent = lastResult && lastResult.ok
+      ? `Excess credit ${pct(lastResult.excessCredit)} off the premium` +
+      (lastResult.excessShare < 1 ? ` (${pct(lastResult.excessCreditFull)} × ${pct(lastResult.excessShare)} of benefits carrying the excess)` : "") +
+      ` · expected industry breach cost ${zar0(lastResult.expectedBreachCost)}`
+      : "Type any amount; the credit is priced from the expected loss.";
+  }
+
+  // Quote basis (underwriter, 2026-10-15): quotes are given WITHOUT the 6% RM fee (final / 1.06).
+  // Aon is the exception: quote the full premium (no RM fee) and show the 10% risk bursary on top.
+  function renderQuoteBasis(r) {
+    const box = document.querySelector(".exrm-box");
+    const lab = box && box.querySelector(".kv-label"), note = box && box.querySelector(".exrm-note");
+    if (r.riskBursary) {
+      $("hp-exrm").textContent = zar0(r.finalPremium);
+      $("hp-exrm-monthly").textContent = `+ Aon risk bursary ${zar0(r.bursaryAmount)} (10% of net premium) · total incl. bursary ${zar0(r.premiumInclBursary)}`;
+      if (lab) lab.textContent = "QUOTE THIS FIGURE · Aon: full premium, no RM fee";
+      if (note) note.textContent = "Aon quotes carry no 6% RM fee. Quote the full premium and show the risk bursary: 10% of the net premium (80% of the full premium). Wording: \"This quotation includes a 10% risk bursary based on net premium.\"";
+    } else {
+      $("hp-exrm").textContent = zar0(r.premiumExRM);
+      $("hp-exrm-monthly").textContent = `${zar0(r.monthlyExRM)} / month · before the 6% RM fee`;
+      if (lab) lab.textContent = "QUOTE THIS FIGURE · premium without RM fee (capture on admin platform)";
+      if (note) note.textContent = "Quotes are given without the RM fee. The administration platform adds a 6% RM fee to this figure, which yields the final premium shown above.";
+    }
+  }
+  function quoteBasisLines(r) {
+    return r.riskBursary
+      ? ["Quote basis: Aon, full premium, no RM fee", "Quoted premium: " + zar0(r.finalPremium),
+         "Aon risk bursary (10% of net premium): " + zar0(r.bursaryAmount), "Total incl. risk bursary: " + zar0(r.premiumInclBursary)]
+      : ["Quote basis: without the 6% RM fee (admin platform adds it)",
+         "Quoted premium (without RM fee): " + zar0(r.premiumExRM) + " (" + zar0(r.monthlyExRM) + "/month)"];
   }
 
   // ---------- step 4 render ----------
@@ -241,6 +321,7 @@
     const warn = $("quote-warning");
     if (!r || !r.ok) { warn.innerHTML = `<div class="banner danger"><span class="b-icon">&#9888;</span><span>${(r && r.error) || "Complete all inputs to generate a quote."}</span></div>`; return; }
     let warnHtml = r.warning ? `<div class="banner warn"><span class="b-icon">&#9888;</span><span>${r.warning}</span></div>` : "";
+    (r.benefitWarnings || []).forEach((w) => { warnHtml += `<div class="banner warn"><span class="b-icon">&#9888;</span><span>${w}</span></div>`; });
     if (r.fpBelowMin) warnHtml += `<div class="banner warn"><span class="b-icon">&#9888;</span><span>Funds Protect sub-limit is below 10% of the cover amount.</span></div>`;
     warn.innerHTML = warnHtml;
 
@@ -249,13 +330,12 @@
     $("hp-amount").textContent = zar0(r.finalPremium);
     $("hp-vat-note").textContent = `(incl. ${pct(state.vat)} VAT)`;
     $("hp-monthly").textContent = `${zar0(r.monthly)} / month`;
-    $("hp-exrm").textContent = zar0(r.premiumExRM);
-    $("hp-exrm-monthly").textContent = `${zar0(r.monthlyExRM)} / month · before the 6% RM fee`;
+    renderQuoteBasis(r);
     renderBenchmarkCompare(r);
 
     const kv = [
       ["Base premium", zar2(r.basePremium), "before discounts"],
-      ["Funds Protect", zar0(r.fundsProtect), state.fpMode === "adjustable" ? "adjustable" + (r.fpInterpolated ? " (interp.)" : "") : "standard (10% of cover)"],
+      ["Funds Protect", zar0(r.fundsProtect), state.fpMode === "none" ? "not included · Computer Crime instead" : state.fpMode === "adjustable" ? "adjustable" + (r.fpInterpolated ? " (interp.)" : "") : "standard (10% of cover)"],
       ["Sophos MDR discount", r.mdrDiscount ? "−" + zar0(r.mdrAmount) : "—", r.mdrDiscount ? pct(r.mdrDiscount) + " — " + state.mdr : "No MDR"],
       ["Discretionary", r.discretionary ? (r.discretionary >= 0 ? "−" : "+") + zar0(Math.abs(r.discretionaryAmount)) : "—", r.discretionary ? pct(Math.abs(r.discretionary)) + (r.discretionary >= 0 ? " discount" : " loading") : "none"],
       ["Premium ex-Funds Protect", zar0(r.exFP), ""],
@@ -285,10 +365,12 @@
       ["Annual turnover", zar0(state.turnover)],
       ["Cover amount", zar0(state.cover)],
       ["Excess", zar0(state.excess) + " (" + state.excessType + ")"],
+      ["BI / CBI waiting period", waitText()],
       ["Cyber maturity", state.maturityOverride + " (×" + r.maturityMultiplier + ")"],
-      ["Funds Protect", state.fpMode === "adjustable" ? zar0(state.fpAdjustableAmount) + " (adjustable)" : "Standard (10% of cover)"],
+      ["Funds Protect", fpText(state.fpMode, state.fpAdjustableAmount)],
       ["Sophos MDR", state.mdr + (r.mdrDiscount ? " (−" + pct(r.mdrDiscount) + ")" : "")],
       ["Discretionary", r.discretionary ? pct(Math.abs(r.discretionary)) + (r.discretionary >= 0 ? " discount" : " loading") : "None"],
+      ["Quote basis", r.riskBursary ? "Aon: full premium + " + zar0(r.bursaryAmount) + " risk bursary, no RM fee" : "Without 6% RM fee: " + zar0(r.premiumExRM)],
     ];
     if (state.quoteType === "renewal" && state.renewalPremium) recap.push(["Existing premium", zar0(state.renewalPremium)]);
     if (state.quoteType === "competing" && state.competitorPremium) recap.push(["Competitor", (state.competitorName || "—") + " · " + zar0(state.competitorPremium)]);
@@ -362,6 +444,7 @@
       const monthly = res.ok ? zar0(res.monthly) + " / mo" : "";
       const coverOpts = D.COVER_OPTIONS.map((c) => `<option value="${c}" ${c === o.cover ? "selected" : ""}>${zar0(c)}</option>`).join("");
       const fpOpts = `<option value="standard" ${o.fpMode === "standard" ? "selected" : ""}>Standard (10%)</option>` +
+        `<option value="none" ${o.fpMode === "none" ? "selected" : ""}>No FP (Computer Crime)</option>` +
         fpAmts.map((a) => `<option value="${a}" ${o.fpMode === "adjustable" && o.fpAdjustableAmount === a ? "selected" : ""}>FP ${zar0(a)}</option>`).join("");
       return `<div class="opt-card ${i === state.activeOption ? "active" : ""}" data-opt="${i}">
         <div class="opt-head"><span class="opt-title">Option ${i + 1}</span>${state.options.length > 1 ? `<button class="opt-remove" data-rm="${i}" title="Remove">✕</button>` : ""}</div>
@@ -381,7 +464,7 @@
     }));
     bar.querySelectorAll(".opt-fp").forEach((sel) => sel.addEventListener("change", (e) => {
       const i = +e.target.dataset.opt, v = e.target.value;
-      if (v === "standard") { state.options[i].fpMode = "standard"; state.options[i].fpAdjustableAmount = 0; }
+      if (v === "standard" || v === "none") { state.options[i].fpMode = v; state.options[i].fpAdjustableAmount = 0; }
       else { state.options[i].fpMode = "adjustable"; state.options[i].fpAdjustableAmount = parseNum(v); }
       i === state.activeOption ? selectOption(i) : renderOptionsBar();
     }));
@@ -392,6 +475,7 @@
     state.activeOption = i;
     const o = state.options[i];
     state.cover = o.cover; state.fpMode = o.fpMode; state.fpAdjustableAmount = o.fpAdjustableAmount;
+    syncFundsProtectUI();
     if ($("cover")) $("cover").value = o.cover;
     recompute(); renderOptionsBar();
   }
@@ -446,7 +530,7 @@
     const r = o ? E.computePremium(optionInputsFor(o)) : lastResult;
     if (!r || !r.ok) { if (!forSave) toast("Complete the quote first", "error"); return null; }
     const oCover = o ? o.cover : state.cover;
-    const oFP = (o ? o.fpMode : state.fpMode) === "adjustable" ? zar0(o ? o.fpAdjustableAmount : state.fpAdjustableAmount) + " (adj.)" : "Standard 10%";
+    const oFP = fpText(o ? o.fpMode : state.fpMode, o ? o.fpAdjustableAmount : state.fpAdjustableAmount);
     const multi = state.options.length > 1;
     const baseRef = state.quoteRef || (state.quoteRef = genRef());
     const ref = (multi && optIdx != null) ? baseRef + "-Opt" + (optIdx + 1) : baseRef;
@@ -480,7 +564,7 @@
     const details = [
       ["Quote type", qtLabel], ["Industry", state.subIndustry],
       ["Annual turnover", zar0(state.turnover)], ["Cover amount", zar0(oCover)],
-      ["Excess", zar0(state.excess) + " (" + state.excessType + ")"], ["Cyber maturity", state.maturityOverride + " (×" + r.maturityMultiplier + ")"],
+      ["Excess", zar0(state.excess) + " (" + state.excessType + ")"], ["BI / CBI waiting period", waitText()], ["Cyber maturity", state.maturityOverride + " (×" + r.maturityMultiplier + ")"],
       ["Funds Protect", oFP], ["Sophos MDR", state.mdr],
     ];
     doc.setFontSize(9);
@@ -513,9 +597,15 @@
     doc.setFontSize(15); doc.setTextColor(20, 20, 20);
     doc.text(zar0(r.finalPremium), W - M - 14, y + 23, { align: "right" });
     doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(80, 80, 80);
-    doc.text("Premium without RM fee (admin input): " + zar0(r.premiumExRM) + "  ·  " + zar0(r.monthlyExRM) + "/month", M + 14, y + 45);
+    doc.setFont("helvetica", "bold");
+    doc.text(r.riskBursary
+      ? "QUOTED (Aon, full premium, no RM fee): " + zar0(r.finalPremium) + " · risk bursary " + zar0(r.bursaryAmount) + " · total " + zar0(r.premiumInclBursary)
+      : "QUOTED premium without RM fee (admin input): " + zar0(r.premiumExRM) + " · " + zar0(r.monthlyExRM) + "/month", M + 14, y + 45);
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5); doc.setTextColor(130, 130, 130);
-    doc.text("The administration platform adds a 6% RM fee to this input figure to reach the final premium.", M + 14, y + 58);
+    doc.text(r.riskBursary
+      ? "Aon: no 6% RM fee. Risk bursary = 10% of the net premium (80% of the full premium)."
+      : "Quotes exclude the RM fee. The administration platform adds 6% to this figure to reach the final premium.", M + 14, y + 58);
     y += 84; pageBreak();
 
     // Benchmark
@@ -570,6 +660,7 @@
         quote_ref: ref, company_name: state.companyName, website: state.website,
         sub_industry: state.subIndustry, turnover: state.turnover, cover: o.cover, excess: state.excess,
         vat: state.vat, maturity: state.maturityOverride, fp_mode: o.fpMode, fp_adjustable: o.fpAdjustableAmount,
+        bi_waiting_hours: state.biWaitingHours, cbi_waiting_hours: state.cbiWaitingHours,
         mdr: state.mdr, benefits: state.benefits, final_premium: res.finalPremium, base_premium: res.basePremium,
         pdf_base64: generatePDF(true, multi ? i : null),
         inputs: optionInputsFor(o),
@@ -598,6 +689,7 @@
       `Cyber maturity: ${state.maturityOverride}   Sophos MDR: ${state.mdr}` + (r.discretionary ? `   Discretionary: ${pct(Math.abs(r.discretionary))} ${r.discretionary >= 0 ? "discount" : "loading"}` : ""),
       `Base premium: ${zar2(r.basePremium)}`,
       `FINAL ANNUAL PREMIUM (incl. ${pct(state.vat)} VAT): ${zar0(r.finalPremium)}   (${zar0(r.monthly)}/month)`,
+      ...quoteBasisLines(r),
     ];
     navigator.clipboard.writeText(lines.join("\n")).then(() => toast("Quote copied to clipboard", "success"), () => toast("Copy failed", "error"));
   }
@@ -616,12 +708,26 @@
     initIndustrySelect();
     initMaturityCards();
     initBenefitsTable();
+    syncFundsProtectUI();
+    // BI / CBI waiting periods (time excess, 12-hour steps). Recorded only; no effect on the premium.
+    const waitOpts = [12, 24, 36, 48, 60, 72, 96, 120, 144, 168].map((h) => ({ v: h, l: h + " hours" }));
+    [["bi-wait", "biWaitingHours"], ["cbi-wait", "cbiWaitingHours"]].forEach(([id, key]) => {
+      const el = $(id);
+      if (!el) return;
+      fillSelect(el, waitOpts, "v", "l", state[key]);
+      el.value = String(state[key]);
+      el.addEventListener("change", (e) => { state[key] = parseInt(e.target.value, 10) || 12; recompute(); });
+    });
 
     $("company-name").addEventListener("input", (e) => (state.companyName = e.target.value));
     $("company-website").addEventListener("input", (e) => (state.website = e.target.value));
     $("turnover").addEventListener("input", (e) => { state.turnover = parseNum(e.target.value); e.target.value = groupNum(e.target.value); recompute(); });
     $("cover").addEventListener("change", (e) => { state.cover = parseNum(e.target.value); refreshBenefitSublimits(); checkExcess(); recompute(); });
-    $("excess").addEventListener("change", (e) => { state.excess = parseNum(e.target.value); checkExcess(); recompute(); });
+    $("excess").addEventListener("input", (e) => {
+      state.excess = parseNum(e.target.value);
+      if (e.target.value.trim() !== "") e.target.value = groupNum(e.target.value) || "0";
+      checkExcess(); recompute();
+    });
     $("excess-type").addEventListener("change", (e) => (state.excessType = e.target.value));
     $("vat").addEventListener("change", (e) => { state.vat = parseFloat(e.target.value); recompute(); });
     $("mdr").addEventListener("change", (e) => { state.mdr = e.target.value; recompute(); });
@@ -629,6 +735,7 @@
 
     $("fp-mode").querySelectorAll(".pill").forEach((p) => p.addEventListener("click", () => {
       state.fpMode = p.dataset.fp;
+      syncFundsProtectUI();
       $("fp-mode").querySelectorAll(".pill").forEach((x) => x.classList.toggle("selected", x === p));
       $("fp-adjustable-group").style.display = state.fpMode === "adjustable" ? "block" : "none";
       if (state.fpMode === "adjustable") {
@@ -659,6 +766,12 @@
     $("competitor-fp").querySelectorAll(".pill").forEach((p) => p.addEventListener("click", () => {
       state.competitorHasFP = p.dataset.cfp === "yes";
       $("competitor-fp").querySelectorAll(".pill").forEach((x) => x.classList.toggle("selected", x === p));
+      recompute();
+    }));
+
+    $("risk-bursary").querySelectorAll(".pill").forEach((p) => p.addEventListener("click", () => {
+      state.riskBursary = p.dataset.rb === "yes";
+      $("risk-bursary").querySelectorAll(".pill").forEach((x) => x.classList.toggle("selected", x === p));
       recompute();
     }));
 

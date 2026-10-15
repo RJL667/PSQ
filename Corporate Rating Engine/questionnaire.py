@@ -892,6 +892,28 @@ def _clean(v):
     return v
 
 
+# Rating basis (underwriter, 2026-10-15). The questionnaire posture sets the maturity band only when
+# the client answered (nearly) all of our questions: our own form filled in completely, or a
+# competitor form that asks the same things. Otherwise the client is rated Average (Moderate, x1.00)
+# on the assumption that the minimum conditions are in place. Questions a form does not ask are
+# found out through the conditions gate; they are never penalised in the band.
+RATE_ON_ANSWERS_MIN = 0.9
+AVERAGE_BAND = {"band": "Moderate", "multiplier": 1.0}
+
+
+def rating_band(multiplier, band, completeness_pct, context=None):
+    """The band the premium uses. context rating_basis: 'answers' or 'average' forces either basis."""
+    basis = (context or {}).get("rating_basis")
+    pct = round((completeness_pct or 0.0) * 100)
+    if basis == "answers" or (basis != "average" and (completeness_pct or 0.0) >= RATE_ON_ANSWERS_MIN):
+        return {"band": band, "multiplier": multiplier, "basis": "answers",
+                "note": "Band from the questionnaire posture (%d%% of applicable questions answered)." % pct}
+    return dict(AVERAGE_BAND, basis="average", questionnaire_band=band, questionnaire_multiplier=multiplier,
+                note="Only %d%% of our applicable questions are answered, so the client is rated Average on the "
+                     "assumption that the minimum conditions are in place. The questionnaire band (%s) is "
+                     "indicative only." % (pct, band))
+
+
 def assess(answers, context=None):
     """Score a client's answers exactly as the workbook would, then apply the conditions gate.
 
@@ -935,11 +957,13 @@ def assess(answers, context=None):
                                "choices": m["_choices"].get(q["row"], [])})
 
     gate = conditions(norm, context)
+    rating = rating_band(multiplier, band, (n_ans / n_app) if n_app else 0.0, context)
     return {
         "ok": posture is not None,
         "posture": round(posture, 6) if posture is not None else None,
         "maturity": {"multiplier": multiplier, "band": band},
-        "premium_modifier": multiplier if gate["status"] == "ready" else None,
+        "rating_band": rating,
+        "premium_modifier": rating["multiplier"] if gate["status"] == "ready" else None,
         "mdr": mdr_assessment(norm, context),
         "status": gate["status"],
         "conditions": gate,

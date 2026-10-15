@@ -119,6 +119,7 @@
         <div><label>Excess</label><input id="r-excess" value="${ri.excess != null ? esc(ri.excess) : ""}"/></div>
         <div><label>Funds Protect amount (blank = standard)</label><input id="r-fp" value="${ri.fpAdjustableAmount != null ? esc(ri.fpAdjustableAmount) : ""}"/></div>
         <div class="full"><label>MDR</label><select id="r-mdr">${opt(mdrs, ri.mdr || "No MDR")}</select></div>
+        <div class="full"><label><input type="checkbox" id="r-bursary" style="width:auto"${ri.riskBursary ? " checked" : ""}/> Aon: quoted at full premium + 10% risk bursary (no RM fee)</label></div>
         <div><label><input type="checkbox" id="c-soe" style="width:auto"${ctx.soe ? " checked" : ""}/> State-owned entity</label></div>
         <div><label><input type="checkbox" id="c-public" style="width:auto"${ctx.public_sector ? " checked" : ""}/> Public sector</label></div>
       </div>
@@ -161,7 +162,8 @@
       },
       rating_inputs: {
         subIndustry: $("r-ind").value, turnover: $("r-turnover").value, cover: $("r-cover").value,
-        excess: $("r-excess").value, fpAdjustableAmount: $("r-fp").value, mdr: $("r-mdr").value,
+          excess: $("r-excess").value, fpAdjustableAmount: $("r-fp").value, mdr: $("r-mdr").value,
+          riskBursary: $("r-bursary").checked,
       },
       context: { soe: $("c-soe").checked, public_sector: $("c-public").checked },
     };
@@ -209,6 +211,7 @@
       maturityOverride: maturity.label || "N/A", posture: maturity.posture != null ? maturity.posture : null,
       benefits, excess: ri.excess != null ? ri.excess : 1000000,
       fpAdjustableAmount: ri.fpAdjustableAmount || 0, mdr: ri.mdr || "No MDR", discretionary: 0,
+      riskBursary: !!ri.riskBursary,
     });
     return r && r.ok ? r : null;
   }
@@ -219,9 +222,12 @@
     const label = bandLabel(a && a.maturity && a.maturity.band);
     const rater = a && a.ok ? priceWith(label ? { label } : { posture: a.posture }) : null;
     const atActual = actual.maturity_band ? priceWith({ label: bandLabel(actual.maturity_band) || actual.maturity_band }) : null;
+    // Compare like with like: the real quote is the figure the underwriter quoted (ex RM fee, or Aon full premium).
+    const q = (r) => r && r.quotedPremium;
     const diff = (p) => (p && actual.premium) ? ` <span class="${Math.abs(p / actual.premium - 1) <= 0.05 ? "v-match" : "v-mismatch"}">(${p >= actual.premium ? "+" : ""}${Math.round((p / actual.premium - 1) * 100)}% vs real)</span>` : "";
-    if (rater) rows.push(`<tr><td>Rater premium at its own maturity band</td><td>${zar0(rater.finalPremium)}${diff(rater.finalPremium)}</td></tr>`);
-    if (atActual) rows.push(`<tr><td>Rater premium at the band actually applied</td><td>${zar0(atActual.finalPremium)}${diff(atActual.finalPremium)}</td></tr>`);
+    const basis = (r) => r.riskBursary ? "Aon full premium, bursary " + zar0(r.bursaryAmount) : "without 6% RM fee";
+    if (rater) rows.push(`<tr><td>Rater quoted figure at its own maturity band (${basis(rater)})</td><td>${zar0(q(rater))}${diff(q(rater))}</td></tr>`);
+    if (atActual) rows.push(`<tr><td>Rater quoted figure at the band actually applied (${basis(atActual)})</td><td>${zar0(q(atActual))}${diff(q(atActual))}</td></tr>`);
     if (actual.premium) rows.push(`<tr><td>Premium actually quoted</td><td>${zar0(actual.premium)}</td></tr>`);
     if (!rater && !atActual) rows.push(`<tr><td colspan="2" class="field-hint">Add sub-industry, turnover and cover under pricing inputs to reprice this case.</td></tr>`);
     return rows.join("");

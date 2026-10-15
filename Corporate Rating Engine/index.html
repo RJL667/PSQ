@@ -70,8 +70,17 @@
             <div class="pill" data-qt="renewal">Renewal</div>
             <div class="pill" data-qt="competing">Competing Quote</div>
           </div>
-          <div class="field-hint" id="market-badge" style="display:none"></div>
+        <div class="field-hint" id="market-badge" style="display:none"></div>
+      </div>
+
+      <div class="form-group">
+        <label class="field-label">Broker basis</label>
+        <div class="pill-group" id="risk-bursary">
+          <div class="pill selected" data-rb="no">Standard: quote without 6% RM fee</div>
+          <div class="pill" data-rb="yes">Aon: full premium + 10% risk bursary, no RM fee</div>
         </div>
+        <div class="field-hint">Aon quotes show the full premium and the risk bursary (10% of the net premium). All other quotes are given without the RM fee.</div>
+      </div>
 
         <div class="form-grid">
           <div class="form-group">
@@ -113,8 +122,10 @@
             <select class="form-select" id="excess-type"><option value="Per Event">Per Event</option></select>
           </div>
           <div class="form-group">
-            <label class="field-label" for="excess">Excess (Deductible)</label>
-            <select class="form-select" id="excess"></select>
+          <label class="field-label" for="excess">Excess (Deductible)</label>
+          <div class="input-prefix"><span class="pfx">R</span><input class="form-input" id="excess" type="text" inputmode="numeric" list="excess-presets" placeholder="any amount, e.g. 100,000"/></div>
+          <datalist id="excess-presets"></datalist>
+          <div class="field-hint" id="excess-hint"></div>
           </div>
           <div class="form-group">
             <label class="field-label" for="vat">VAT</label>
@@ -213,10 +224,22 @@
 
         <div class="section-title">Insuring Clauses</div>
         <table class="benefits-table">
-          <thead><tr><th>Benefit</th><th style="width:74px">Included</th><th style="width:104px">Ratio</th><th style="width:88px">% (free)</th><th style="width:140px">Sub-limit</th></tr></thead>
+          <thead><tr><th>Benefit</th><th style="width:74px">Included</th><th style="width:74px" title="Does the excess apply to this benefit?">Excess</th><th style="width:104px">Ratio</th><th style="width:88px">% (free)</th><th style="width:140px">Sub-limit</th></tr></thead>
           <tbody id="benefits-body"></tbody>
         </table>
         <div class="field-hint">Pick a preset ratio or type any percentage (0–100%) in the free field — the sub-limit recalculates instantly.</div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="field-label" for="bi-wait">Business Interruption waiting period</label>
+              <select class="form-select" id="bi-wait"></select>
+            </div>
+            <div class="form-group">
+              <label class="field-label" for="cbi-wait">Contingent BI waiting period</label>
+              <select class="form-select" id="cbi-wait"></select>
+            </div>
+          </div>
+          <div class="field-hint">BI and Contingent BI carry a time excess in 12-hour steps instead of the rand excess. It is shown on the quote but not priced yet; rating a longer waiting period needs a security scan of the client.</div>
 
         <div class="section-title">Funds Protect</div>
         <div class="form-grid">
@@ -224,8 +247,10 @@
             <label class="field-label">Funds Protect Basis</label>
             <div class="pill-group" id="fp-mode">
               <div class="pill selected" data-fp="standard">Standard (10% of cover)</div>
-              <div class="pill" data-fp="adjustable">Adjustable amount</div>
-            </div>
+            <div class="pill" data-fp="adjustable">Adjustable amount</div>
+            <div class="pill" data-fp="none">No Funds Protect (Computer Crime instead)</div>
+          </div>
+          <div class="field-hint" id="fp-crime-hint">Funds Protect covers more than Computer Crime, so Computer Crime stays unticked while Funds Protect is included.</div>
           </div>
           <div class="form-group" id="fp-adjustable-group" style="display:none">
             <label class="field-label" for="fp-adjustable">Adjustable FP Sub-limit (from R500,000)</label>

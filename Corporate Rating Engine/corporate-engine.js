@@ -13,6 +13,9 @@
             (typeof require !== "undefined" ? require("./corporate-data.js") : null);
   if (!D) throw new Error("CORP_DATA not loaded");
   const K = D.CONSTANTS;
+  // Aon risk bursary, workbook 'Summary & Input Flieds' E36 = C36 + C36*0.8*0.1:
+  // 10% of the net premium (80% of the final). Aon quotes carry no RM fee.
+  const BURSARY_RATE = 0.1, BURSARY_NET_SHARE = 0.8;
 
   // Exact-match lookup (mirrors XLOOKUP(...,,0) with match-mode 0)
   function xlookup(key, keys, vals, dflt) {
@@ -112,7 +115,7 @@
     push("Adjusted premium (ransomware incl.)", C16, "zar");
 
     // Benefits D19..D27 -> D28 (baseline), H28 (sub-limit adjusted)
-    let Dsum = 0, Hsum = 0;
+    let Dsum = 0, Hsum = 0, HsumExcess = 0;
     const benefitRows = [];
     for (const b of inp.benefits || []) {
       let d = 0;
@@ -121,9 +124,14 @@
       }
       const ratio = b.sublimitRatio != null ? b.sublimitRatio : 1;
       const h = b.included && ratio ? d * Math.sqrt(ratio) : 0;
-      Dsum += d;
-      Hsum += h;
-      benefitRows.push({ name: b.name, included: !!b.included, contribution: d, ratio, adjusted: h, subLimit: ratio * inp.cover });
+    // Excess applies to this benefit unless explicitly switched off (workbook column "Excess Included").
+    // Business Interruption has its own TIME excess (waiting period, 12-hour steps), which the workbook
+    // does not price. Its loading stays in the rand-excess credit exactly as the workbook does.
+    const excessIncluded = b.name === "Business Interruption Loss" || b.excessIncluded !== false;
+    Dsum += d;
+    Hsum += h;
+    if (excessIncluded) HsumExcess += h;
+    benefitRows.push({ name: b.name, included: !!b.included, excessIncluded, contribution: d, ratio, adjusted: h, subLimit: ratio * inp.cover });
     }
     push("Σ benefit contributions", Hsum, "pct");
 
@@ -142,13 +150,25 @@
       warning = "Selected cover may result in partial self-insurance. Please review your cover amount.";
       C38 = 0;
     }
-    push("Excess / self-insurance credit", C38, "pct", warning || "");
-    const C48 = C31 * (1 - C38);
+  // Any rand amount is accepted (the workbook only offered R500k steps). The credit is then scaled to the
+  // share of the benefit loading that actually carries the excess: a benefit with no excess gets no credit.
+  // With the excess on every included benefit (the workbook default) this equals the workbook exactly.
+  const excessShare = Hsum > 0 ? HsumExcess / Hsum : 1;
+  const C38full = C38;
+  C38 = C38full * excessShare;
+  push("Excess / self-insurance credit", C38, "pct", warning || (excessShare < 1 ? pctStr(C38full) + " × " + pctStr(excessShare) + " of benefits carrying the excess" : ""));
+  const C48 = C31 * (1 - C38);
     push("Premium after excess credit", C48, "zar");
 
-    // Funds Protect: adjustable (>0) else standard (10% of cover)
-    let fp = 0, fpKind = "None", fpInterpolated = false, fpBelowMin = false;
-    if (inp.fpAdjustableAmount && inp.fpAdjustableAmount > 0) {
+  // Funds Protect: none (Computer Crime instead), adjustable (>0), else standard (10% of cover).
+  // Underwriter 2026-10-15: Funds Protect covers more than Computer Crime, so the two never go together.
+  // With Funds Protect the Computer Crime benefit is left out; without it, Computer Crime is added
+  // and the Funds Protect cost is left out of the premium.
+  const fundsProtectIncluded = inp.fundsProtect !== false;
+  let fp = 0, fpKind = "None", fpInterpolated = false, fpBelowMin = false;
+  if (!fundsProtectIncluded) {
+    fpKind = "Not included (Computer Crime benefit instead)";
+  } else if (inp.fpAdjustableAmount && inp.fpAdjustableAmount > 0) {
       const fr = fpAdjustableCost(inp.fpAdjustableAmount);
       fp = fr.cost; fpInterpolated = fr.interpolated;
       fpBelowMin = inp.fpAdjustableAmount < 0.10 * inp.cover;
@@ -158,6 +178,12 @@
       fpKind = "Standard FP (10% of cover)";
     }
     push("Funds Protect contribution", fp, "zar", fpKind);
+  const crime = (inp.benefits || []).find((b) => b.name === "Computer Crime");
+  const benefitWarnings = [];
+  if (fundsProtectIncluded && crime && crime.included)
+    benefitWarnings.push("Computer Crime is ticked while Funds Protect is included. Funds Protect already covers it; untick Computer Crime.");
+  if (!fundsProtectIncluded && !(crime && crime.included))
+    benefitWarnings.push("No Funds Protect on this quote, so Computer Crime should be ticked.");
 
     // Depository-institution modifier (only for Depository Institutions sub-industry)
     let depository = 0;
@@ -190,6 +216,11 @@
     }
     push("Final premium", finalPremium, "zar");
 
+    const riskBursary = !!inp.riskBursary;
+    const bursaryAmount = riskBursary ? finalPremium * BURSARY_NET_SHARE * BURSARY_RATE : 0;
+    const premiumInclBursary = finalPremium + bursaryAmount;
+    if (riskBursary) push("Aon risk bursary", bursaryAmount, "zar", "10% of net premium (80% of final); no RM fee");
+
     // Summary-row derivations (on the final, post-discretionary premium)
     const monthly = finalPremium / 12;
     // "Premium without RM Fee" — the figure captured on the admin platform, which then adds
@@ -204,6 +235,11 @@
       ok: true, warning,
       finalPremium, premiumPreDiscretionary: premiumPreDisc, basePremium: C53, fundsProtect: fp,
       monthly, premiumExRM, monthlyExRM, exFP, smeEquivalent, smeRatio,
+      riskBursary, bursaryAmount, premiumInclBursary,
+    fundsProtectIncluded, benefitWarnings, excessCredit: C38, excessCreditFull: C38full, excessShare,
+      // The figure the underwriter quotes: without the 6% RM fee, or for Aon the full premium (bursary shown on top).
+      quotedPremium: riskBursary ? finalPremium : premiumExRM,
+      quoteBasis: riskBursary ? "aon_full_plus_bursary" : "ex_rm_fee",
       mdrDiscount, mdrAmount: C56, discretionary, discretionaryAmount,
       fpInterpolated, fpBelowMin, depositoryModifier: depository, expectedBreachCost: C45,
       industry: ind, maturityMultiplier: maturityMult, benefitRows, vat, steps,

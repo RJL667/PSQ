@@ -64,5 +64,26 @@ for (const cover of [5000000, 10000000, 100000000]) {
   }
 }
 
+// Real quotes reproduced from the underwriter's workbook snapshots (case b1_02, Premier, 2026-10-15).
+console.log("\n=== Real quotes (workbook snapshots) ===");
+const hotels = "Services - Hotels, Rooming Houses, Camps, And Other Lodging Places";
+const hotelSub = CORP_DATA.INDUSTRIES.find((i) => /Hotels/.test(i.sub)).sub;
+const essEndpoints = CORP_DATA.MDR_OPTIONS.find((m) => m.discount === 0.15).label;
+for (const [id, cover, base, mdrAmt, final, exRM] of [
+  ["Premier R5M", 5000000, 189892.03, 28483.80, 161408.22, 152271.91],
+  ["Premier R10M", 10000000, 236638.33, 35495.75, 201142.58, 189757.15],
+]) {
+  const q = Engine.computePremium({
+    turnover: 1137000000, cover, subIndustry: hotelSub || hotels, maturityOverride: "Moderate", vat: 0.15,
+    benefits: benefitsAllButPCIandCrime, excess: 500000, fpAdjustableAmount: 0, mdr: essEndpoints,
+  });
+  for (const [label, got, want] of [["base", q.basePremium, base], ["MDR discount", q.mdrAmount, mdrAmt],
+    ["final", q.finalPremium, final], ["without RM fee", q.premiumExRM, exRM]]) {
+    const ok = approx(got, want, 0.01);
+    allOk = allOk && ok;
+    console.log(`  [${ok ? "OK " : "XX "}] ${(id + " " + label).padEnd(30)} got=${got.toFixed(2).padStart(12)} want=${want.toFixed(2)}`);
+  }
+}
+
 console.log("\n" + (allOk ? "ALL CHECKS PASSED ✓" : "*** CHECKS FAILED ***"));
 process.exit(allOk ? 0 : 1);
