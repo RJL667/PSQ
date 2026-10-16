@@ -110,16 +110,40 @@ def test_clients_clients_outage_threshold_is_scored_on_its_own_answer(example):
 def test_failed_conditions_block_quote_and_posture_drops(example):
     w = dict(example)
     w.update({152: "No", 40: "Monthly", 121: "no"})
-    r = q.assess(w, CONFIRMED)
+    r = q.assess(w, dict(CONFIRMED, assume_conditions=False))
     assert r["status"] == "conditions_not_met"
     assert {"backups_weekly", "password_policy", "edr"} <= {c["id"] for c in r["conditions"]["not_met"]}
     assert r["premium_modifier"] is None
     assert r["posture"] < q.assess(example, CONFIRMED)["posture"]
 
 
+def test_conditions_of_cover_are_assumed_met_in_the_posture(example):
+    # Underwriter 2026-10-16: a client that incepts must meet the conditions, so the posture is scored
+    # with the condition rows as Yes; the unmet ones become the 'subject to' list.
+    w = dict(example)
+    w.update({152: "No", 40: "Monthly", 121: "no"})
+    r = q.assess(w, CONFIRMED)
+    full = q.assess(example, CONFIRMED)
+    assert r["status"] == "conditions_not_met"
+    assert {"backups_weekly", "password_policy", "edr"} <= set(r["subject_to"])
+    assert set(r["assumed_for_conditions"]) == {"40", "121", "152"}
+    # Underwriter 2026-10-16: weekly is the norm; bi-weekly is an underwriter relaxation, never assumed.
+    assert r["assumed_for_conditions"]["40"]["assumed"] == "Weekly"
+    assert r["posture_as_answered"] < r["posture"]
+    assert r["posture"] <= full["posture"]
+    assert r["premium_modifier"] == r["rating_band"]["multiplier"]  # quoted subject to conditions
+    assert r["answers"]["152"] == "No"  # the client's own answer is kept
+    # limited to the conditions the quote lists
+    r2 = q.assess(w, dict(CONFIRMED, quote_conditions=["edr"]))
+    assert set(r2["assumed_for_conditions"]) == {"152"}
+    assert r2["premium_modifier"] is None
+    # MDR conditions are never assumed (they drive the discount)
+    assert all(a["condition"] != "sophos_mdr" for a in r["assumed_for_conditions"].values())
+
+
 def test_posture_bands_follow_the_price_sheet(example):
     half = {k: ("No" if (k % 2 and v == "Yes") else v) for k, v in example.items()}
-    r = q.assess(half)
+    r = q.assess(half, {"assume_conditions": False})
     assert r["posture"] < 0.6
     assert r["maturity"]["multiplier"] == 1.25
 

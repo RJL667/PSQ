@@ -32,7 +32,9 @@
     fpMode: "standard", fpAdjustableAmount: 0,
     // BI and Contingent BI carry a TIME excess (waiting period, 12-hour steps), not the rand excess.
     // Recorded on the quote only: the workbook does not price it (underwriter, 2026-10-15).
-    biWaitingHours: 12, cbiWaitingHours: 12,
+    // Default 24h for both (underwriter, 2026-10-16): 12h only if the client states 12h or for a
+    // smaller business; 36h / 48h if the client ticked it. BI and CBI match unless the client asks otherwise.
+    biWaitingHours: 24, cbiWaitingHours: 24,
     mdr: "No MDR", discretionary: 0,
     quoteType: "new", riskBursary: false,
     renewalCover: 0, renewalPremium: 0, renewalFP: 0,

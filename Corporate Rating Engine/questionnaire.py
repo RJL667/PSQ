@@ -619,7 +619,10 @@ CONDITIONS = (
     {"id": "entities_minimum",
      "text": "The controls declared on the proposal form are at a minimum the level of all listed entities",
      "confirm": True},
+    # Underwriter 2026-10-16: regular backups at least every 7 to 14 days meet this condition.
     {"id": "backups_weekly", "text": "Data backups are done at least weekly",
+     # Underwriter 2026-10-16: weekly is the norm. Bi-weekly is a relaxation only for low-connectivity
+     # risks (e.g. manufacturing) or little PII / PHR / employee data, decided by the underwriter.
      "all": ((40, ("Daily", "Weekly"), "backups performed"),)},
     {"id": "backups_isolated", "text": "A separate backup set is immutable or isolated from production",
      "all": ((46, ("Yes",), "immutable"),)},
@@ -914,6 +917,52 @@ def rating_band(multiplier, band, completeness_pct, context=None):
                      "indicative only." % (pct, band))
 
 
+# Conditions of cover are assumed in place for the posture (underwriter, 2026-10-16). A quote that
+# lists conditions of cover is only bound once the client meets them, so the posture is scored as if
+# the condition rows were answered Yes. The gate still reports the conditions the answers do not meet;
+# they become the 'subject to' list on the quote. MDR conditions are never assumed, because MDR
+# answers also drive the MDR discount. context: assume_conditions=False turns this off;
+# quote_conditions=[ids] limits it to the conditions the quote actually lists.
+def _assumable(cond, ctx):
+    if "all" not in cond or "infer" in cond:
+        return False
+    when = cond.get("when")
+    if when == "funds_protect" and not ctx.get("funds_protect", True):
+        return False
+    if when == "public_or_soe":
+        return False
+    return True
+
+
+def assumed_condition_answers(norm, context=None):
+    """{row: {"answered": value, "assumed": value, "condition": id}} for condition rows not met."""
+    ctx = dict(context or {})
+    if ctx.get("assume_conditions", True) is False:
+        return {}
+    wanted = ctx.get("quote_conditions")
+    out = {}
+    for cond in CONDITIONS:
+        if wanted is not None and cond["id"] not in wanted:
+            continue
+        if not _assumable(cond, ctx):
+            continue
+        for check in cond["all"]:
+            # Only rows the client answered against the condition. Unanswered rows stay blank: they
+            # count against completeness and are asked for through the gate, never guessed.
+            if _check(norm, check) == "failed":
+                # the weakest accepted answer (e.g. 'Weekly' rather than 'Daily' for backups)
+                out[check[0]] = {"answered": norm.get(check[0]), "assumed": check[1][-1],
+                                 "condition": cond["id"]}
+    return out
+
+
+def _posture_of(m, answers):
+    qs = m["questionnaire_sheet"]
+    book = _Book(m["sheets"], {(qs, "G%d" % r): answers.get(r) for r in m["_q"]})
+    v = book.value(qs, m.get("posture_cell", "H282"))
+    return None if isinstance(v, XLError) else float(_num(v))
+
+
 def assess(answers, context=None):
     """Score a client's answers exactly as the workbook would, then apply the conditions gate.
 
@@ -924,7 +973,10 @@ def assess(answers, context=None):
     m = _model()
     qs, ps = m["questionnaire_sheet"], m["price_sheet"]
     norm, rejected = normalise(answers)
-    inputs = {(qs, "G%d" % r): norm.get(r) for r in m["_q"]}  # unanswered = blank, never the example
+    assumed = assumed_condition_answers(norm, context)
+    scored = dict(norm)
+    scored.update({r: a["assumed"] for r, a in assumed.items()})
+    inputs = {(qs, "G%d" % r): scored.get(r) for r in m["_q"]}  # unanswered = blank, never the example
     book = _Book(m["sheets"], inputs)
 
     posture_v = book.value(qs, m.get("posture_cell", "H282"))
@@ -958,12 +1010,25 @@ def assess(answers, context=None):
 
     gate = conditions(norm, context)
     rating = rating_band(multiplier, band, (n_ans / n_app) if n_app else 0.0, context)
+    # Quoted subject to conditions: the modifier stands when every unmet condition was assumed in place.
+    assumed_ids = {a["condition"] for a in assumed.values()}
+    subject_to = [c["id"] for c in gate["not_met"]]
+    modifier = None
+    if gate["status"] == "ready":
+        modifier = rating["multiplier"]
+    elif (gate["status"] == "conditions_not_met" and set(subject_to) <= assumed_ids
+          and not gate["information_required"]):
+        modifier = rating["multiplier"]
+    as_answered = _posture_of(m, norm) if assumed else posture
     return {
         "ok": posture is not None,
         "posture": round(posture, 6) if posture is not None else None,
+        "posture_as_answered": round(as_answered, 6) if as_answered is not None else None,
+        "assumed_for_conditions": {str(r): a for r, a in sorted(assumed.items())},
+        "subject_to": subject_to,
         "maturity": {"multiplier": multiplier, "band": band},
         "rating_band": rating,
-        "premium_modifier": rating["multiplier"] if gate["status"] == "ready" else None,
+        "premium_modifier": modifier,
         "mdr": mdr_assessment(norm, context),
         "status": gate["status"],
         "conditions": gate,

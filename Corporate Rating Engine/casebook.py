@@ -23,6 +23,7 @@ from werkzeug.utils import secure_filename
 
 import document_extract
 import questionnaire
+import read_confidence
 
 ALLOWED_EXT = {"pdf", "docx", "xlsx", "xlsm", "txt", "md", "csv",
                "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}
@@ -357,8 +358,16 @@ def process(case_id):
 
     assessment = None
     if answers:
+        # Every answer carries a read confidence: exact for fillable-form fields and underwriter review,
+        # computed for scanned ticks (read_confidence.py). The assessment reports a form-level
+        # confidence, the posture range and the answers to check first.
+        records = []
+        for row, v in answers.items():
+            src = sources.get(row)
+            records.append({"row": row, "value": v, "doc": src,
+                            "source": "review" if src == "review" else "fillable_form"})
         try:
-            assessment = questionnaire.assess(answers, ctx)
+            assessment = read_confidence.assess_with_confidence(records, ctx, sims=200)
         except Exception as exc:  # noqa: BLE001
             assessment = {"ok": False, "error": "Assessment error: %s" % exc}
         if form_meta.get("conflicts") and assessment.get("status") == "ready":
