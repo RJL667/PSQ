@@ -836,6 +836,11 @@ def _condition_status(cond, answers, ctx):
             return "met", ""
         if "failed" in res:
             return "not_met", ""
+        # Underwriter 2026-10-16: a minimum-condition question the client left blank is read as No.
+        # It goes on the quote as a condition of cover and is confirmed with the client.
+        if _assumable(cond, ctx) and all(_left_blank(ctx, c[0]) for c, r in zip(cond["all"], res)
+                                         if r == "unanswered"):
+            return "not_met", BLANK_NOTE
         return "unanswered", ""
     groups = [[_check_applicable(answers, c) for c in g] for g in cond["any"]]
     vg = cond.get("validate_group")
@@ -850,6 +855,21 @@ def _condition_status(cond, answers, ctx):
     if all("failed" in g for g in groups):
         return "not_met", ""
     return "unanswered", ""
+
+
+BLANK_NOTE = ("Left blank on the proposal form: quoted as a condition of cover; confirm with the client")
+
+
+def _left_blank(ctx, row):
+    """context left_blank: True = every unanswered row was asked on the form (our own form);
+    a list = only those rows were asked and left blank. Rows a form never asked stay
+    'information required' (ask the broker)."""
+    v = ctx.get("left_blank")
+    if v is True:
+        return True
+    if isinstance(v, (list, tuple, set)):
+        return row in {int(str(x).lstrip("Rr")) for x in v}
+    return False
 
 
 def _condition_rows(cond):
@@ -872,6 +892,8 @@ def conditions(answers, context=None):
                 "answers": {r: answers.get(r) for r in _condition_rows(cond)}}
         if note:
             item["note"] = note
+        if note == BLANK_NOTE:
+            item["left_blank"] = True
         bucket = {"met": "met", "not_met": "not_met", "not_applicable": "not_applicable"}.get(
             status, "information_required")
         out[bucket].append(item)
@@ -949,10 +971,15 @@ def assumed_condition_answers(norm, context=None):
         for check in cond["all"]:
             # Only rows the client answered against the condition. Unanswered rows stay blank: they
             # count against completeness and are asked for through the gate, never guessed.
-            if _check(norm, check) == "failed":
+            st = _check(norm, check)
+            if st == "failed":
                 # the weakest accepted answer (e.g. 'Weekly' rather than 'Daily' for backups)
                 out[check[0]] = {"answered": norm.get(check[0]), "assumed": check[1][-1],
                                  "condition": cond["id"]}
+            elif st == "unanswered" and _left_blank(ctx, check[0]):
+                # left blank = read as No: a condition of cover, so the posture is not penalised
+                out[check[0]] = {"answered": None, "assumed": check[1][-1],
+                                 "condition": cond["id"], "left_blank": True}
     return out
 
 
@@ -1002,7 +1029,7 @@ def assess(answers, context=None):
         if not q.get("scored") or not _applicable(q, norm):
             continue
         n_app += 1
-        if norm.get(q["row"]) is not None:
+        if norm.get(q["row"]) is not None or (assumed.get(q["row"]) or {}).get("left_blank"):
             n_ans += 1
         else:
             unanswered.append({"row": q["row"], "section": q.get("section"), "question": q["text"],
@@ -1026,6 +1053,7 @@ def assess(answers, context=None):
         "posture_as_answered": round(as_answered, 6) if as_answered is not None else None,
         "assumed_for_conditions": {str(r): a for r, a in sorted(assumed.items())},
         "subject_to": subject_to,
+        "confirm_with_client": [c["id"] for c in gate["not_met"] if c.get("left_blank")],
         "maturity": {"multiplier": multiplier, "band": band},
         "rating_band": rating,
         "premium_modifier": modifier,
@@ -1194,6 +1222,9 @@ def assess_form(pdf_path, answers=None, context=None):
     for k, v in (answers or {}).items():
         merged[int(str(k).lstrip("Rr"))] = v
     ctx = dict(context or {})
+    if form["answers"]:
+        # our own form asks every row, so an unanswered condition row was left blank
+        ctx.setdefault("left_blank", True)
     if form.get("declaration_signed"):
         ctx["confirmed"] = list(set(ctx.get("confirmed") or []) | {"entities_minimum"})
     result = assess(merged, ctx)

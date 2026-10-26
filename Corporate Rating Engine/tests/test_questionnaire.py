@@ -206,3 +206,29 @@ def test_complete_forms_are_rated_on_their_answers(example):
     r = q.assess(example, CONFIRMED)
     assert r["rating_band"]["basis"] == "answers"
     assert r["premium_modifier"] == 0.75
+
+
+def test_blank_minimum_condition_is_a_condition_of_cover_not_a_penalty(example):
+    # Underwriter 2026-10-16: a minimum-condition question left blank is read as No, quoted as a
+    # condition of cover and confirmed with the client. The posture is not penalised.
+    full = q.assess(example, CONFIRMED)
+    blank = {k: v for k, v in example.items() if k != 69}
+    r = q.assess(blank, dict(CONFIRMED, left_blank=True))
+    assert "vuln_remediation" in r["subject_to"]
+    assert r["confirm_with_client"] == ["vuln_remediation"]
+    assert r["assumed_for_conditions"]["69"]["left_blank"] is True
+    assert r["posture"] == full["posture"]
+    assert r["completeness"]["answered"] == full["completeness"]["answered"]
+    assert r["premium_modifier"] == r["rating_band"]["multiplier"]
+    # a form that never asked the question: ask the broker, nothing assumed
+    r = q.assess(blank, CONFIRMED)
+    assert "vuln_remediation" in {c["id"] for c in r["conditions"]["information_required"]}
+    assert r["confirm_with_client"] == [] and "69" not in r["assumed_for_conditions"]
+    # only the listed rows count as left blank
+    r = q.assess(blank, dict(CONFIRMED, left_blank=[69]))
+    assert r["confirm_with_client"] == ["vuln_remediation"]
+    # MDR is never assumed from a blank
+    gov = {k: v for k, v in example.items() if k not in (256, 257)}
+    gov[13] = "Government"
+    r = q.assess(gov, dict(CONFIRMED, left_blank=True))
+    assert "sophos_mdr" not in r["confirm_with_client"]
