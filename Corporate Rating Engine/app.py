@@ -19,10 +19,13 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 import document_extract
+import corp_db
+import engine_runner
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "corporate_quotes.db"))
-PDF_DIR = BASE_DIR / "quote_pdfs"
+# PDFs live outside the code tree in production (PDF_DIR in .env) so a deploy never wipes them.
+PDF_DIR = Path(os.environ.get("PDF_DIR", str(BASE_DIR / "quote_pdfs")))
 UPLOAD_DIR = BASE_DIR / "ingest_uploads"
 
 app = Flask(__name__, static_folder=None)  # no blanket static serving: see public_file()
@@ -42,6 +45,15 @@ def get_db():
 
 
 def init_db():
+    """Quote store: Postgres (schema corp) when DATABASE_URL is set, else SQLite at DB_PATH."""
+    try:
+        corp_db.init_schema()
+        print("Corporate quote store ready (%s)" % ("postgres" if corp_db.is_pg() else DB_PATH))
+    except Exception as exc:  # noqa: BLE001 - never stop the rater from serving
+        print(f"Corporate quote store init deferred ({exc})")
+
+
+def _legacy_init_db():
     with get_db() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS quotes (
@@ -277,99 +289,209 @@ def assess_route():
 
 
 # --------------------------------------------------------------------------
-# API: save quote
+# API: quote store (Postgres schema corp in production; see corp_db.py)
+# Every route that prices a quote saves here: the rater's Save button (source rater_ui),
+# quotes priced by Veilguard (source veilguard) and back-filled history (backfill_*).
+# The server reruns the engine on the saved inputs and keeps its own figures.
 # --------------------------------------------------------------------------
+PASS_THROUGH = (
+    "quote_ref", "base_ref", "option_no", "source", "pricing_method", "company_name", "website",
+    "broker", "policy_ref", "main_industry", "sub_industry", "turnover", "cover", "excess", "vat",
+    "maturity", "fp_mode", "fp_adjustable", "fp_authorised", "fp_unauthorised",
+    "bi_waiting_hours", "cbi_waiting_hours", "mdr", "discretionary", "risk_bursary", "quote_type",
+    "benefits", "base_premium", "final_premium", "premium_ex_rm", "monthly", "quoted_premium",
+    "inputs", "result", "conditions", "endorsements", "posture", "basis", "instruction_text",
+    "instruction_sent_at", "thread_id", "message_id", "admin_quote_number", "admin_quote_files",
+    "status", "notes", "created_by", "created_at", "status_history",
+)
+BACKFILL_ONLY = ("created_at", "status_history")  # a live save never rewrites its own timeline
+CALC_TOLERANCE = 1.0  # rand
+
+
+def _save_quote_pdf(company, quote_ref, pdf_b64):
+    if not pdf_b64:
+        return None
+    dt = datetime.now()
+    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in (company or "")).strip() or "Unknown"
+    folder = PDF_DIR / str(dt.year) / f"{dt.month:02d}" / safe
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{secure_filename(quote_ref) or 'quote'}.pdf"
+    try:
+        raw = base64.b64decode(pdf_b64.split(",", 1)[-1])
+        if not raw.startswith(b"%PDF"):
+            raise ValueError("not a PDF")
+        path.write_bytes(raw)
+        return str(path.relative_to(PDF_DIR))
+    except Exception as exc:  # noqa: BLE001
+        print(f"PDF save error: {exc}")
+        return None
+
+
+def build_record(data, by=""):
+    """Normalise a save payload into a quote-store record and recalculate it on the server."""
+    rec = {k: data[k] for k in PASS_THROUGH if k in data and data[k] is not None}
+    rec.setdefault("source", "rater_ui")
+    rec.setdefault("pricing_method", "engine")
+    if not str(rec["source"]).startswith("backfill"):
+        for k in BACKFILL_ONLY:
+            rec.pop(k, None)
+    if rec["source"] not in corp_db.SOURCES:
+        raise ValueError(f"unknown source {rec['source']!r}")
+    if rec["pricing_method"] not in corp_db.PRICING_METHODS:
+        raise ValueError(f"unknown pricing_method {rec['pricing_method']!r}")
+    rec["quote_ref"] = rec.get("quote_ref") or f"CRE-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:4]}"
+    rec.setdefault("company_name", "Unknown")
+    res = rec.get("result") if isinstance(rec.get("result"), dict) else {}
+    # The rater UI posts option refs as BASE-OptN and keeps quote type / discretionary in result.
+    if "option_no" not in rec:
+        opt = res.get("option")
+        if not opt and "-Opt" in rec["quote_ref"]:
+            tail = rec["quote_ref"].rsplit("-Opt", 1)[1]
+            opt = int(tail) if tail.isdigit() else None
+        rec["option_no"] = opt or 1
+    if "base_ref" not in rec:
+        ref = rec["quote_ref"]
+        rec["base_ref"] = ref.rsplit("-Opt", 1)[0] if "-Opt" in ref else ref
+    if "quote_type" not in rec and res.get("quoteType"):
+        rec["quote_type"] = res["quoteType"]
+    if "discretionary" not in rec and res.get("discretionary") is not None:
+        rec["discretionary"] = res["discretionary"]
+    rec.setdefault("created_by", by)
+
+    inputs = rec.get("inputs") if isinstance(rec.get("inputs"), dict) else None
+    rec["engine_version"] = None
+    if not inputs:
+        rec["calc_check"] = "no_inputs"
+        return rec
+    try:
+        er = engine_runner.compute(inputs)
+        rec["engine_version"] = engine_runner.version()
+    except Exception as exc:  # noqa: BLE001
+        rec["calc_check"] = f"engine_error: {exc}"[:200]
+        return rec
+    if not er.get("ok"):
+        rec["calc_check"] = f"engine_error: {er.get('error', 'unknown')}"[:200]
+        return rec
+    rec["engine_premium"] = er["finalPremium"]
+    if rec["pricing_method"] != "engine":
+        # SME +20%, hybrid, manual or historical: the engine figure is kept for reference only.
+        rec["calc_check"] = "not_engine_priced"
+        return rec
+    client = rec.get("final_premium")
+    if client in (None, "", 0):
+        rec["calc_check"] = "server_only"
+    else:
+        rec["calc_check"] = "match" if abs(float(client) - er["finalPremium"]) <= CALC_TOLERANCE else "mismatch"
+    # Store the server's own figures; the client's are kept in result for the audit trail.
+    res = dict(res)
+    if client not in (None, ""):
+        res["client_final_premium"] = client
+    res["engine"] = {k: er.get(k) for k in ("finalPremium", "basePremium", "premiumExRM", "monthly",
+                                             "monthlyExRM", "quotedPremium", "quoteBasis", "fundsProtect",
+                                             "mdrDiscount", "maturityMultiplier", "warning")}
+    res["steps"] = er.get("steps")
+    rec["result"] = res
+    rec["final_premium"] = er["finalPremium"]
+    rec["base_premium"] = er["basePremium"]
+    rec["premium_ex_rm"] = er["premiumExRM"]
+    rec["monthly"] = er["monthly"]
+    rec["quoted_premium"] = er["quotedPremium"]
+    rec.setdefault("benefits", inputs.get("benefits"))
+    return rec
+
+
 @app.route("/api/quotes", methods=["POST"])
 def save_quote():
-    data = request.get_json(force=True)
-    quote_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    quote_ref = data.get("quote_ref") or f"CRE-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:4]}"
-    company = data.get("company_name", "Unknown")
-
-    # Optional client-rendered PDF (base64) — archived under quote_pdfs/YYYY/MM/Company/
-    pdf_filename = None
-    pdf_b64 = data.get("pdf_base64")
-    if pdf_b64:
-        dt = datetime.now()
-        safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in company).strip() or "Unknown"
-        folder = PDF_DIR / str(dt.year) / f"{dt.month:02d}" / safe
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{quote_ref}.pdf"
-        try:
-            path.write_bytes(base64.b64decode(pdf_b64))
-            pdf_filename = str(path.relative_to(BASE_DIR))
-        except Exception as exc:
-            print(f"PDF save error: {exc}")
-
-    with get_db() as conn:
-        conn.execute("""
-            INSERT INTO quotes (
-                id, quote_ref, company_name, website, sub_industry, turnover, cover,
-                excess, vat, maturity, fp_mode, fp_adjustable, mdr, benefits,
-                base_premium, final_premium, inputs, result, pdf_filename,
-                status, created_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            quote_id, quote_ref, company, data.get("website", ""), data.get("sub_industry", ""),
-            data.get("turnover", 0), data.get("cover", 0), data.get("excess", 0), data.get("vat", 0),
-            data.get("maturity", ""), data.get("fp_mode", ""), data.get("fp_adjustable", 0),
-            data.get("mdr", ""), json.dumps(data.get("benefits", [])),
-            data.get("base_premium", 0), data.get("final_premium", 0),
-            json.dumps(data.get("inputs", {})), json.dumps(data.get("result", {})),
-            pdf_filename, "final", data.get("created_by", ""), now, now,
-        ))
-
-    return jsonify({"id": quote_id, "quote_ref": quote_ref, "pdf_path": pdf_filename,
-                    "message": "Quote saved"}), 201
+    data = request.get_json(force=True, silent=True) or {}
+    by = _reviewer()
+    try:
+        rec = build_record(data, by)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    pdf = _save_quote_pdf(rec["company_name"], rec["quote_ref"], data.get("pdf_base64"))
+    if pdf:
+        rec["pdf_filename"] = pdf
+    try:
+        row, created = corp_db.save(rec, by=by, note=data.get("status_note", ""))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "id": row["id"], "quote_ref": row["quote_ref"], "created": created,
+                    "calc_check": row.get("calc_check"), "final_premium": row.get("final_premium"),
+                    "quoted_premium": row.get("quoted_premium"), "pdf_path": row.get("pdf_filename"),
+                    "message": "Quote saved" if created else "Quote updated"}), (201 if created else 200)
 
 
 @app.route("/api/quotes", methods=["GET"])
 def list_quotes():
-    company = request.args.get("company", "")
-    limit = int(request.args.get("limit", 100))
-    query = ("SELECT id, quote_ref, company_name, sub_industry, turnover, cover, "
-             "final_premium, status, created_at FROM quotes WHERE 1=1")
-    params = []
-    if company:
-        query += " AND company_name LIKE ?"
-        params.append(f"%{company}%")
-    query += " ORDER BY created_at DESC LIMIT ?"
-    params.append(limit)
-    with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
-    return jsonify([dict(r) for r in rows])
+    a = request.args
+    rows = corp_db.list_quotes(company=a.get("company", ""), status=a.get("status", ""),
+                               source=a.get("source", ""), base_ref=a.get("base_ref", ""),
+                               limit=min(int(a.get("limit", 100)), 1000))
+    return jsonify(rows)
 
 
 @app.route("/api/quotes/<quote_id>", methods=["GET"])
 def get_quote(quote_id):
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,)).fetchone()
+    row = corp_db.get(quote_id) or corp_db.get_by_ref(quote_id)
     if not row:
         return jsonify({"error": "Quote not found"}), 404
-    return jsonify(dict(row))
+    return jsonify(row)
+
+
+@app.route("/api/quotes/<quote_id>/status", methods=["POST", "PATCH"])
+def quote_status(quote_id):
+    """Move a quote along priced -> instructed -> quoted -> approved -> bound (or declined...)."""
+    data = request.get_json(force=True, silent=True) or {}
+    extra = {k: data[k] for k in ("admin_quote_number", "admin_quote_files", "instruction_text",
+                                  "instruction_sent_at", "thread_id", "message_id", "conditions",
+                                  "endorsements", "notes", "policy_ref") if k in data}
+    try:
+        row = corp_db.set_status(quote_id, data.get("status", ""), by=_reviewer() or data.get("by", ""),
+                                 note=data.get("note", ""), fields=extra)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if not row:
+        return jsonify({"error": "Quote not found"}), 404
+    return jsonify({"ok": True, "id": row["id"], "status": row["status"],
+                    "status_history": row.get("status_history")})
 
 
 @app.route("/api/quotes/<quote_id>", methods=["DELETE"])
 def archive_quote(quote_id):
-    now = datetime.now(timezone.utc).isoformat()
-    with get_db() as conn:
-        res = conn.execute("UPDATE quotes SET status='archived', updated_at=? WHERE id=?", (now, quote_id))
-        if res.rowcount == 0:
-            return jsonify({"error": "Quote not found"}), 404
+    row = corp_db.set_status(quote_id, "archived", by=_reviewer(), note="archived from the rater")
+    if not row:
+        return jsonify({"error": "Quote not found"}), 404
     return jsonify({"message": "Quote archived", "id": quote_id})
 
 
 @app.route("/api/quotes/<quote_id>/pdf", methods=["GET"])
 def download_pdf(quote_id):
-    with get_db() as conn:
-        row = conn.execute("SELECT pdf_filename FROM quotes WHERE id = ?", (quote_id,)).fetchone()
-    if not row or not row["pdf_filename"]:
+    row = corp_db.get(quote_id)
+    if not row or not row.get("pdf_filename"):
         return jsonify({"error": "PDF not found"}), 404
-    pdf_path = BASE_DIR / row["pdf_filename"]
-    if not pdf_path.exists():
-        return jsonify({"error": "PDF file missing"}), 404
-    return send_file(str(pdf_path), mimetype="application/pdf", as_attachment=True, download_name=pdf_path.name)
+    for base in (PDF_DIR, BASE_DIR):  # BASE_DIR: PDFs saved by the pre-Postgres build
+        p = (base / row["pdf_filename"]).resolve()
+        if p.is_file() and str(p).startswith(str(base.resolve())):
+            return send_file(str(p), mimetype="application/pdf", as_attachment=True, download_name=p.name)
+    return jsonify({"error": "PDF file missing"}), 404
+
+
+@app.route("/api/export/quotes", methods=["GET"])
+def export_quotes():
+    """Read-only feed for the ERP: full records changed after `since` (ISO time), oldest first.
+    Page with next_since until has_more is false."""
+    since = request.args.get("since", "")
+    limit = min(int(request.args.get("limit", 200)), 1000)
+    product = request.args.get("product", "corporate")
+    if product == "sme":
+        rows = corp_db.list_sme(since=since, limit=limit)
+    elif product == "corporate":
+        rows = corp_db.list_quotes(since=since, limit=limit, full=True, ascending=True)
+    else:
+        return jsonify({"ok": False, "error": "product must be corporate or sme"}), 400
+    return jsonify({"product": product, "count": len(rows), "has_more": len(rows) == limit,
+                    "next_since": rows[-1]["updated_at"] if rows else since,
+                    "engine_version": engine_runner.version(), "quotes": rows})
 
 
 # --------------------------------------------------------------------------

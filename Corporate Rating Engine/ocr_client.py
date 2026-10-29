@@ -37,6 +37,9 @@ def ocr_bytes(
     *,
     user_id: str = "",
     conversation_id: str = "",
+    model: str = "",
+    thinking_budget: int = -1,
+    max_output_tokens: int = 0,
 ) -> str:
     """OCR a PDF or image; return the markdown transcription.
 
@@ -53,7 +56,14 @@ def ocr_bytes(
     doc_key = "image_url" if mime.startswith("image/") else "document_url"
     payload = json.dumps(
         {
-            "model": os.environ.get("GEMINI_OCR_MODEL", "gemini-2.5-flash"),
+            "model": model or os.environ.get("GEMINI_OCR_MODEL", "gemini-2.5-flash"),
+            # [OCR_SPEED_2026-10-29] optional; the shim passes it to Gemini as
+            # thinkingConfig.thinkingBudget (0 = no thinking, much faster). -1 = model default.
+            **({"thinking_budget": thinking_budget} if thinking_budget >= 0 else {}),
+            # The shim makes ONE Gemini attempt with this timeout (instead of 3 x 180 s) when
+            # the caller hedges its own calls; ignored by a shim that predates the option.
+            **({"timeout_s": max(5.0, timeout - 5.0)} if timeout < 180.0 else {}),
+            **({"max_output_tokens": int(max_output_tokens)} if max_output_tokens > 0 else {}),
             "image_limit": 0,
             "include_image_base64": False,
             "document": {

@@ -804,7 +804,9 @@ def _condition_status(cond, answers, ctx):
     if when == "funds_protect" and not ctx.get("funds_protect", True):
         return "not_applicable", "Funds Protect is not part of this quote"
     if when == "public_or_soe":
-        if ctx.get("soe") or ctx.get("public_sector"):
+        if ctx.get("soe") or ctx.get("public_sector") \
+                or str(ctx.get("industry") or "").startswith("Public Administration"):
+            # Underwriter 2026-10-29: a risk rated as public administration always carries the condition.
             pass
         else:
             bt = answers.get(13)
@@ -995,7 +997,8 @@ def assess(answers, context=None):
 
     answers: {row: value} — "Yes"/"No"/True/False, a dropdown value, or a list for multi-select rows.
     context: {"funds_protect": bool (default True), "soe": bool, "public_sector": bool,
-              "confirmed": [condition ids confirmed by the broker/underwriter]}
+             "industry": rated sub-industry label (Public Administration makes the Sophos MDR condition apply),
+             "confirmed": [condition ids confirmed by the broker/underwriter]}
     """
     m = _model()
     qs, ps = m["questionnaire_sheet"], m["price_sheet"]

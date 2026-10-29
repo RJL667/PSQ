@@ -167,6 +167,15 @@ def test_sophos_condition_only_for_public_or_soe(example):
     assert "sophos_mdr" in {c["id"] for c in r["conditions"]["not_met"]}
 
 
+def test_sophos_condition_applies_to_public_admin_industry(example):
+    # Underwriter 2026-10-29: rated as public administration means the MDR condition applies,
+    # even when the form says Private (e.g. a provincially owned theatre).
+    priv = {**example, 13: "Private", 256: "No", 258: "No"}
+    ctx = dict(CONFIRMED, industry="Public Administration - Executive, Legislative, And General Government, Except Finance")
+    r = q.assess(priv, ctx)
+    assert "sophos_mdr" in {c["id"] for c in r["conditions"]["not_met"]}
+
+
 def test_funds_protect_payment_controls_skipped_when_not_quoted(example):
     w = {**example, 277: "No"}
     r = q.assess(w, dict(CONFIRMED, funds_protect=False))

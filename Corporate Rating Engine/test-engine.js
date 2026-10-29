@@ -85,5 +85,22 @@ for (const [id, cover, base, mdrAmt, final, exRM] of [
   }
 }
 
+// Public administration: Sophos MDR condition flagged automatically, discount capped at 15% (underwriter 2026-10-29).
+console.log("\n=== Public administration MDR flag ===");
+{
+  const paSub = CORP_DATA.INDUSTRIES.find((i) => i.main === "Public Administration").sub;
+  const complete = CORP_DATA.MDR_OPTIONS.reduce((a, m) => (m.discount > a.discount ? m : a));
+  const base = { turnover: 97606799, cover: 5000000, subIndustry: paSub, maturityOverride: "Moderate", vat: 0.15,
+    benefits: benefitsAllButPCIandCrime, excess: 100000, fpAdjustableAmount: 0 };
+  const none = Engine.computePremium({ ...base, mdr: "No MDR" });
+  const capped = Engine.computePremium({ ...base, mdr: complete.label });
+  const priv = Engine.computePremium({ ...example, mdr: "No MDR" });
+  for (const [label, ok] of [
+    ["no MDR: condition required + warning", none.mdrConditionRequired && none.benefitWarnings.some((w) => /Sophos MDR condition/.test(w))],
+    ["top tier capped at 15%", capped.mdrCapped && capped.mdrDiscount === 0.15],
+    ["private risk not flagged", !priv.mdrConditionRequired && !priv.benefitWarnings.some((w) => /Sophos MDR/.test(w))],
+  ]) { allOk = allOk && ok; console.log(`  [${ok ? "OK " : "XX "}] ${label}`); }
+}
+
 console.log("\n" + (allOk ? "ALL CHECKS PASSED ✓" : "*** CHECKS FAILED ***"));
 process.exit(allOk ? 0 : 1);

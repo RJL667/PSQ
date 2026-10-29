@@ -26,6 +26,7 @@
   }
 
   // --- table accessors ---
+  const PUBLIC_ADMIN_MDR_CAP = 0.15;
   function industryByLabel(label) {
     return D.INDUSTRIES.find((r) => r.sub === label) || null;
   }
@@ -200,10 +201,24 @@
     // C53 — base premium (pre-discount), C56/C57 — MDR discount & final
     const C53 = ((C48 + fp) / (1 - K.RISK_MGMT_FEE)) * (depository > 0 ? depository : 1);
     push("Base premium", C53, "zar", depository > 0 ? "incl. depository ×" + depository : "incl. 6% risk-mgmt fee");
-    const mdrDiscount = xlookup(inp.mdr || "No MDR", D.MDR_OPTIONS.map((m) => m.label), D.MDR_OPTIONS.map((m) => m.discount), 0) || 0;
+    let mdrDiscount = xlookup(inp.mdr || "No MDR", D.MDR_OPTIONS.map((m) => m.label), D.MDR_OPTIONS.map((m) => m.discount), 0) || 0;
+    // Underwriter 2026-10-15 / 2026-10-29: every public administration risk (SOEs, municipalities,
+    // government-owned entities) carries the Sophos MDR condition of cover, and the MDR discount is
+    // capped at 15%. The MDR route is tried first; the No MDR price is the fallback if the client pushes back.
+    const mdrConditionRequired = ind.main === "Public Administration";
+    let mdrCapped = false;
+    if (mdrConditionRequired) {
+      if (mdrDiscount === 0) {
+        benefitWarnings.push("Public administration risk: put the Sophos MDR condition of cover on the quote (Sophos MDR Complete on all access devices and the entire network, with endpoints deployed, or a comparable MDR programme the client must specify) and price with the MDR discount, capped at " + pctStr(PUBLIC_ADMIN_MDR_CAP) + ". Keep this No MDR price as the fallback if the client pushes back.");
+      } else if (mdrDiscount > PUBLIC_ADMIN_MDR_CAP) {
+        benefitWarnings.push("MDR discount capped at " + pctStr(PUBLIC_ADMIN_MDR_CAP) + " for public administration (selected tier allows " + pctStr(mdrDiscount) + ").");
+        mdrDiscount = PUBLIC_ADMIN_MDR_CAP;
+        mdrCapped = true;
+      }
+    }
     const C56 = C53 * mdrDiscount;
     const premiumPreDisc = C53 - C56; // C57 — final before any discretionary adjustment
-    if (mdrDiscount > 0) push("Sophos MDR discount", -C56, "zar", pctStr(mdrDiscount) + " — " + inp.mdr);
+    if (mdrDiscount > 0) push("Sophos MDR discount", -C56, "zar", pctStr(mdrDiscount) + " — " + inp.mdr + (mdrCapped ? " (public administration cap)" : ""));
 
     // Discretionary adjustment (positive = discount, negative = loading), applied to the final premium.
     const discretionary = inp.discretionary || 0;
@@ -240,7 +255,7 @@
       // The figure the underwriter quotes: without the 6% RM fee, or for Aon the full premium (bursary shown on top).
       quotedPremium: riskBursary ? finalPremium : premiumExRM,
       quoteBasis: riskBursary ? "aon_full_plus_bursary" : "ex_rm_fee",
-      mdrDiscount, mdrAmount: C56, discretionary, discretionaryAmount,
+      mdrDiscount, mdrAmount: C56, mdrConditionRequired, mdrCapped, discretionary, discretionaryAmount,
       fpInterpolated, fpBelowMin, depositoryModifier: depository, expectedBreachCost: C45,
       industry: ind, maturityMultiplier: maturityMult, benefitRows, vat, steps,
     };
