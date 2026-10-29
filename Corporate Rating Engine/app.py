@@ -359,6 +359,16 @@ def build_record(data, by=""):
     rec.setdefault("created_by", by)
 
     inputs = rec.get("inputs") if isinstance(rec.get("inputs"), dict) else None
+    # Store the engine's own sub-industry label so the ERP sees one spelling per industry.
+    sub = rec.get("sub_industry") or (inputs or {}).get("subIndustry")
+    if sub:
+        try:
+            lab = engine_runner.resolve_industry(sub, rec.get("main_industry") or (inputs or {}).get("mainIndustry") or "")
+        except Exception:  # noqa: BLE001
+            lab = None
+        if lab:
+            rec["sub_industry"] = lab
+            rec["main_industry"] = lab.partition("-")[0].strip() or rec.get("main_industry")
     rec["engine_version"] = None
     if not inputs:
         rec["calc_check"] = "no_inputs"
