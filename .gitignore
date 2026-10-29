@@ -67,4 +67,26 @@ tmp/
 email-signature/
 .secrets/
 .tmp/
-casebook/
+# Casebook: client forms, quotes, threads and results stay local. Only the pipeline code,
+# its helper tools and the scrubbed rule notes are tracked.
+casebook/*
+!casebook/pipeline/
+!casebook/tools/
+!casebook/quote_check/
+!casebook/conditions_template.md
+!casebook/underwriting_nuances.md
+casebook/pipeline/**/*
+!casebook/pipeline/**/
+!casebook/pipeline/**/*.py
+!casebook/pipeline/**/*.mjs
+casebook/pipeline/**/__pycache__/
+# client-case regression harnesses (they name the cases they score)
+casebook/pipeline/email/regress.py
+casebook/pipeline/forms/score_conditions.py
+casebook/pipeline/forms/score_scan_rows.py
+casebook/tools/*
+!casebook/tools/build_backfill.py
+!casebook/tools/form_ocr.sh
+casebook/quote_check/*
+!casebook/quote_check/check_quote.py
+!casebook/quote_check/README.md
