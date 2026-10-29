@@ -295,7 +295,7 @@ def assess_route():
 # The server reruns the engine on the saved inputs and keeps its own figures.
 # --------------------------------------------------------------------------
 PASS_THROUGH = (
-    "quote_ref", "base_ref", "option_no", "source", "pricing_method", "company_name", "website",
+    "quote_ref", "base_ref", "option_no", "product", "source", "pricing_method", "company_name", "website",
     "broker", "policy_ref", "main_industry", "sub_industry", "turnover", "cover", "excess", "vat",
     "maturity", "fp_mode", "fp_adjustable", "fp_authorised", "fp_unauthorised",
     "bi_waiting_hours", "cbi_waiting_hours", "mdr", "discretionary", "risk_bursary", "quote_type",
