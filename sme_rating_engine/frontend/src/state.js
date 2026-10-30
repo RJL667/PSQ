@@ -11,6 +11,7 @@ export const initialState = {
   turnoverCurrent: '',
   employeeCount: '',
   websiteAddress: '',
+  sensitiveRecords: '',    // healthcare only: sensitive (special personal information) records held
   uwAnswers: {},        // { 'q1-1': true|false, ... }
   uwEndpointVendor: '',
   uwPriorInsurer: '',

@@ -76,6 +76,31 @@ export default function Step1Client({ state, patch, dispatch, derived, onNext })
           </div>
         )}
 
+        {/* Healthcare on SME: sensitive records question + loading disclosure */}
+        {derived.healthcare && (
+          <div className="turnover-info" style={{ display: 'block' }} aria-live="polite">
+            <div className="turnover-info-text">
+              <div className="turnover-bracket"><strong>Healthcare</strong>: {derived.healthcare.reason}</div>
+              {derived.healthcare.eligible && (
+                <>
+                  <div className="form-group" style={{ marginTop: 8 }}>
+                    <label className="field-label" htmlFor="sensitive-records">Number of sensitive (special personal information, e.g. health) records held</label>
+                    <CurrencyInput className="form-input" id="sensitive-records" type="text" inputMode="numeric" placeholder="e.g. 15,000"
+                      value={state.sensitiveRecords} onChange={(v) => patch({ sensitiveRecords: v })} />
+                  </div>
+                  <div className="turnover-actual">
+                    Loadings: +20% healthcare data-subject loading on the full premium
+                    {derived.recordsLoading && derived.recordsLoading.factor > 1
+                      ? `; sensitive records loading +${((derived.recordsLoading.factor - 1) * 100).toFixed(1)}% on the base premium (${derived.sensitiveRecords.toLocaleString('en-ZA')} vs ${derived.recordsLoading.expected.toLocaleString('en-ZA')} expected)`
+                      : `; no records loading at or below ${derived.recordsLoading ? derived.recordsLoading.expected.toLocaleString('en-ZA') : ''} records`}.
+                    Micro rates still apply at R1M-R5M cover. MFA on privileged accounts and VPN + MFA on remote logins are conditions of cover.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Employees + Website */}
         <div className="form-grid">
           <div className="form-group">

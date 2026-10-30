@@ -233,7 +233,7 @@ def parse_quote_text(text, source=''):
 
     # endorsements and conditions
     e0 = next((i for i, l in enumerate(L) if l == 'Quote Endorsements'), None)
-    c0 = next((i for i, l in enumerate(L) if l.startswith('The above rate is under the assumption')), None)
+    c0 = next((i for i, l in enumerate(L) if re.match(r'The above rates? (?:is|are) under the assumption', l)), None)
     c1 = next((i for i, l in enumerate(L) if l.startswith('Conditions of Cover Funds Protect')
                or l.startswith('Valid from') or l == 'ITEMS ON COVER'), None) if c0 is not None else None
     endo = ' '.join(L[e0 + 1:(c0 if c0 is not None else e0 + 12)]) if e0 is not None else ''

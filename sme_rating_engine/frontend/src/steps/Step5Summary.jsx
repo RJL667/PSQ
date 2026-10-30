@@ -59,7 +59,7 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
   const deltaLabel = state.quoteType === 'renewal' ? 'Delta vs Existing' : 'Delta vs Industry';
 
   // Conditions of cover: Q1 baseline controls, then FP conditions, then prior claim.
-  let allConditions = [...(uw.q1Conditions || []), ...(uw.fpConditions || [])];
+  let allConditions = [...(uw.q1Conditions || []), ...(uw.fpConditions || []), ...(uw.hcConditions || [])];
   if (state.priorClaim) allConditions.push('Prior claim: additional underwriting required');
 
   function downloadPdf(o) {
@@ -102,7 +102,10 @@ export default function Step5Summary({ state, patch, derived, goToStep }) {
       revenueBand: derived.bandLabel, employeeCount: parseInt(state.employeeCount, 10) || 0,
       quoteType: state.quoteType, marketCondition: 'Softening market for 2026',
       priorClaim: state.priorClaim, uwAnswers: state.uwAnswers, uwOutcome: uw.outcome,
-      uwLoadingPct: uw.loadingPct, uwConditions: allConditions, endorsements: state.endorsements,
+      uwLoadingPct: uw.loadingPct, uwConditions: allConditions,
+      endorsements: [state.endorsements, derived.healthcare && derived.healthcare.eligible
+        ? `Healthcare on SME (turnover below R15M): +20% data-subject loading on the full premium; sensitive records declared ${derived.sensitiveRecords.toLocaleString('en-ZA')} vs ${derived.recordsLoading.expected.toLocaleString('en-ZA')} expected, records loading x${derived.recordsLoading.factor.toFixed(4)}.`
+        : ''].filter(Boolean).join('\n'),
       coverSelections: options.map((o) => {
         const calc = derived.optionCalcs[o.id] || {};
         const fp = getAvailableFPOptions(COVER_LIMITS[o.coverIndex].key)[o.fpIndex];

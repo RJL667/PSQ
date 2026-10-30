@@ -147,8 +147,10 @@ function buildCtx(rec) {
     flags.push(`Records loading x${load.toFixed(3)} (${method}, ${ratio.toFixed(1)}x typical) on Third Party Claims and Data Restoration only; method pending a ruling.`);
   }
   const subTail = sub.split(" - ").slice(1).join(" - ");
-  const smeIdx = SD.INDUSTRIES.findIndex((i) => i.sub.toLowerCase() === subTail.toLowerCase());
-  const smeRefer = publicAdmin || /health/i.test(subTail) || (smeIdx >= 0 && SD.INDUSTRIES[smeIdx].referForUW);
+  let smeIdx = SD.INDUSTRIES.findIndex((i) => i.sub.toLowerCase() === subTail.toLowerCase());
+ if (smeIdx < 0 && /health/i.test(subTail)) smeIdx = SD.INDUSTRIES.findIndex((i) => i.sub === "Healthcare Services");
+ const hcStatus = smeIdx >= 0 ? S.healthcareSmeStatus(smeIdx, rec.turnover) : null;
+  const smeRefer = publicAdmin || (hcStatus ? !hcStatus.eligible : (smeIdx >= 0 && SD.INDUSTRIES[smeIdx].referForUW));
   const ctx = {
     rec, flags, sub, ind, posture, smePosture, pci, fundsProtect, benefits, publicAdmin, load,
     turnover: rec.turnover, limits: rec.limits.map(Number),
@@ -212,6 +214,8 @@ function tblCol(arr, L) {
 }
 const tableExFp = (b, L) => tblCol(TBL[b].map((v, i) => v - TBL_STD_FP[i]), L);
 
+// Micro eligibility and the healthcare SME path come from the SME rater engine itself (owner rule: the raters are
+// the source of truth; never re-implement their rules here).
 // SME price on ACTUAL turnover with the corporate quote's Funds Protect (authorised limit), micro exclusion applied.
 function smeQuote(ctx, turnover, L) {
   const flags = [];
@@ -227,12 +231,14 @@ function smeQuote(ctx, turnover, L) {
     const key = SD.COVER_LIMITS[ci].key;
     bandIdx = S.findRevenueBand(turnover);
     const micro = !ctx.microExcluded && !ctx.group && S.checkMicroSME(ctx.smeIdx, bandIdx, ci);
-    if (micro) {
+ const hcEngine = !ctx.group && (ctx.rec.product === "sme") && S.isHealthcare(ctx.smeIdx);
+    if (micro || hcEngine) {
       const fpIndex = S.fpIndexForLimit(key, fpA);
       const st = { revenueBandIndex: bandIdx, industryIndex: ctx.smeIdx, actualTurnover: turnover, uwLoadingPct: ctx.smeUw,
-        postureDiscount: ctx.smePosture, discretionaryDiscount: ctx.smeDiscretionary, fpSelections: { [ci]: fpIndex } };
+        postureDiscount: ctx.smePosture, discretionaryDiscount: ctx.smeDiscretionary, fpSelections: { [ci]: fpIndex },
+ sensitiveRecords: (ctx.rec.records && ctx.rec.records.declared) || 0 };
       const c = S.calculatePremium(ci, st, { fpIndex });
-      return { total: c.annual, ex: c.annual / RM, basis: "SME rater, Micro table", micro: true, fpCost: c.fpCost, flags };
+      return { total: c.annual, ex: c.annual / RM, basis: c.isMicro ? "SME rater, Micro table" : `SME rater, healthcare path (standard band ${bandIdx + 1}, +20% data-subject loading` + (c.recordsLoading > 1 ? `, records loading x${c.recordsLoading}` : "") + ")", micro: c.isMicro, breakdown: c.breakdown, fpCost: c.fpCost, flags };
     }
     const F = SD.PREMIUM_FORMULAS[key];
     base = bandIdx === 0 ? SD.SME_PREMIUMS[0][ci] - SD.getBaseFPCost(key) : F.rateCoeffs[bandIdx - 1] * turnover + F.adjustments[bandIdx - 1];

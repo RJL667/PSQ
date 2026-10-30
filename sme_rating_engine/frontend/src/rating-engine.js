@@ -99,10 +99,11 @@ const MICRO_ELIGIBLE_FINANCE_SUBS = [
 
 export function checkMicroSME(industryIndex, bandIndex, coverIndex) {
   if (industryIndex < 0 || bandIndex < 0 || coverIndex < 0) return false;
-
   const industry = INDUSTRIES[industryIndex];
   const isSmallCover = coverIndex <= 2; // R1M, R2.5M, R5M
   if (!isSmallCover) return false;
+  // Healthcare keeps Micro (owner decision 2026-10-30): the healthcare loadings
+  // and conditions are added on top of whichever path applies.
 
   // Start-up grace: discount available only while turnover is under R10M.
   if (MICRO_BAND0_ONLY.includes(industry.sub)) return bandIndex === 0;
@@ -112,6 +113,55 @@ export function checkMicroSME(industryIndex, bandIndex, coverIndex) {
   if (isFinance && !MICRO_ELIGIBLE_FINANCE_SUBS.includes(industry.sub)) return false;
 
   return bandIndex <= 2;
+}
+
+/* ===== Healthcare on SME (owner decision 2026-10-30) ===== */
+// Healthcare is normally referred (corporate product). It may be rated on SME when
+// turnover is below R15M, cover limits stay inside the SME table, and:
+// * the normal SME path applies: Micro rates at R1M-R5M cover (every healthcare
+//   band below R15M is Micro-eligible), the standard band calculator above that;
+//   * a sensitive-records loading applies when the declared count of sensitive
+//     (special personal information) records exceeds the expected average. It is
+//     the corporate method carried onto the SME base: 1 + log10(declared / expected)
+//     on the Third Party Claims + Data Restoration Costs share of the premium
+//     (corporate benefit contributions 0.1872 + 0.1292 = 0.3164);
+//   * a +20% healthcare data-subject loading applies to the full premium incl.
+//     Funds Protect, before posture/discretionary adjustments;
+//   * MFA on privileged accounts and VPN + MFA on remote logins are conditions of cover.
+// Every loading is disclosed as its own line in the breakdown.
+export const HEALTHCARE_SME = {
+  maxTurnover: 15_000_000,          // eligible below R15M
+  dataSubjectLoading: 0.20,         // +20% on the full premium
+  recordsShare: 0.1872435421779968 + 0.12921351877572507, // TP claims + data restoration
+  expectedRecords: 23445,           // IBM SA average breach size assumed by the rater's breach cost
+};
+export const HEALTHCARE_CONDITIONS = [
+  'Multifactor Authentication (MFA) must be implemented on all privileged accounts as a condition of cover.',
+  'VPN and MFA must be implemented on all remote logins into the network as a condition of cover.',
+];
+
+export function isHealthcare(industryIndex) {
+  if (industryIndex < 0 || industryIndex >= INDUSTRIES.length) return false;
+  return INDUSTRIES[industryIndex].main === 'Healthcare';
+}
+
+/** null for non-healthcare; otherwise { eligible, reason }. */
+export function healthcareSmeStatus(industryIndex, actualTurnover) {
+  if (!isHealthcare(industryIndex)) return null;
+  if (actualTurnover >= HEALTHCARE_SME.maxTurnover) {
+    return { eligible: false, reason: 'Healthcare at R15M turnover or more is corporate only. Refer for underwriting.' };
+  }
+  return { eligible: true, reason: 'Healthcare below R15M: SME with the healthcare loadings and conditions.' };
+}
+
+/** Sensitive-records loading factor on the base premium (1 = none). */
+export function healthcareRecordsLoading(sensitiveRecords) {
+  const declared = Number(sensitiveRecords) || 0;
+  const expected = HEALTHCARE_SME.expectedRecords;
+  if (!(declared > expected)) return { factor: 1, declared, expected, ratio: declared / expected };
+  const ratio = declared / expected;
+  const recordsFactor = 1 + Math.log10(ratio);
+  return { factor: 1 + HEALTHCARE_SME.recordsShare * (recordsFactor - 1), recordsFactor, declared, expected, ratio };
 }
 
 /* ===== Industry Modifier Lookup ===== */
@@ -150,6 +200,17 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
   const breakdown = [];
   let basePremium = 0;
   let isMicro = false;
+  const hc = isHealthcare(s.industryIndex);
+  const rec = hc ? healthcareRecordsLoading(s.sensitiveRecords) : null;
+  const hcFields = hc ? {
+    healthcare: true,
+    healthcareLoading: HEALTHCARE_SME.dataSubjectLoading,
+    recordsLoading: +rec.factor.toFixed(6),
+    sensitiveRecords: rec.declared,
+    expectedRecords: rec.expected,
+  } : {};
+  const recordsDesc = () => `Sensitive records loading (+${((rec.factor - 1) * 100).toFixed(1)}%: ${Math.round(rec.declared).toLocaleString('en-ZA')} records vs ${rec.expected.toLocaleString('en-ZA')} expected, 1 + log10 on Third Party Claims and Data Restoration share)`;
+  const hcDesc = () => `Healthcare data-subject loading (+${Math.round(HEALTHCARE_SME.dataSubjectLoading * 100)}% on full premium incl. Funds Protect)`;
 
   // 1. Check Micro SME
   if (checkMicroSME(s.industryIndex, bandIndex, coverIndex)) {
@@ -170,6 +231,10 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
       adjustedBase *= (1 + uwLoad);
       breakdown.push({ step: 3, desc: `UW loading (+${Math.round(uwLoad * 100)}%)`, value: adjustedBase });
     }
+    if (hc && rec.factor > 1) {
+      adjustedBase *= rec.factor;
+      breakdown.push({ step: 3, desc: recordsDesc(), value: adjustedBase });
+    }
 
     // FP cost — use selected FP or base
     let selectedFPCost = fpCost;
@@ -185,6 +250,11 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
 
     let totalPremium = adjustedBase + selectedFPCost;
     let annualExFP = adjustedBase;
+    if (hc) {
+      totalPremium *= (1 + HEALTHCARE_SME.dataSubjectLoading);
+      annualExFP *= (1 + HEALTHCARE_SME.dataSubjectLoading);
+      breakdown.push({ step: 4, desc: hcDesc(), value: totalPremium });
+    }
     breakdown.push({ step: 5, desc: 'Total before discounts', value: totalPremium });
 
     // Apply discounts (to both total and ex-FP)
@@ -213,6 +283,7 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
       discretionaryDisc: discretionaryD,
       isMicro: true,
       breakdown,
+      ...hcFields,
     };
   }
 
@@ -256,6 +327,12 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
     breakdown.push({ step: 3, desc: `UW loading (+${Math.round(uwLoad * 100)}%)`, value: adjustedBase });
   }
 
+  // 4b. Healthcare: sensitive-records loading on the base premium
+  if (hc && rec.factor > 1) {
+    adjustedBase *= rec.factor;
+    breakdown.push({ step: 3, desc: recordsDesc(), value: adjustedBase });
+  }
+
   // 5. FP cost
   let selectedFPCost = getBaseFPCost(coverKey);
   const stdFpIdx = (optionOverrides && optionOverrides.fpIndex !== undefined) ? optionOverrides.fpIndex
@@ -270,6 +347,11 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
 
   let totalPremium = adjustedBase + selectedFPCost;
   let annualExFP = adjustedBase;
+  if (hc) {
+    totalPremium *= (1 + HEALTHCARE_SME.dataSubjectLoading);
+    annualExFP *= (1 + HEALTHCARE_SME.dataSubjectLoading);
+    breakdown.push({ step: 4, desc: hcDesc(), value: totalPremium });
+  }
   breakdown.push({ step: 5, desc: 'Total before discounts', value: totalPremium });
 
   // 6. Discounts (applied to both total and ex-FP)
@@ -298,6 +380,7 @@ export function calculatePremium(coverIndex, overrideState, optionOverrides) {
     discretionaryDisc: discretionaryD,
     isMicro: false,
     breakdown,
+    ...hcFields,
   };
 }
 

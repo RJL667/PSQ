@@ -3,7 +3,7 @@ import { initialState, reducer } from './state.js';
 import { INDUSTRIES, REVENUE_BANDS } from './rating-data.js';
 import {
   calcActualTurnover, findRevenueBand, evaluateUnderwriting, calculatePremium,
-  buildCoverRecommendations,
+  buildCoverRecommendations, healthcareSmeStatus, healthcareRecordsLoading, HEALTHCARE_CONDITIONS,
 } from './rating-engine.js';
 import { parseCurrency } from './lib/format.js';
 import Step1Client from './steps/Step1Client.jsx';
@@ -28,13 +28,21 @@ function computeDerived(state) {
   const revenueBandIndex = over200 ? -1 : actualTurnover > 0 ? findRevenueBand(actualTurnover) : -1;
   const bandLabel = revenueBandIndex >= 0 ? REVENUE_BANDS[revenueBandIndex].label : '';
   const industry = state.industryIndex >= 0 ? INDUSTRIES[state.industryIndex] : null;
-  const uw = evaluateUnderwriting(state.uwAnswers, {
+  const uwBase = evaluateUnderwriting(state.uwAnswers, {
     quoteType: state.quoteType, priorClaim: state.priorClaim, fpOver250k: state.fpOver250k,
   });
+  // Healthcare below R15M is rated on SME with its own loadings and conditions.
+  const healthcare = healthcareSmeStatus(state.industryIndex, actualTurnover);
+  const sensitiveRecords = parseCurrency(state.sensitiveRecords);
+  const recordsLoading = healthcare ? healthcareRecordsLoading(sensitiveRecords) : null;
+  const uw = healthcare && healthcare.eligible
+    ? { ...uwBase, hcConditions: HEALTHCARE_CONDITIONS, allConditions: [...uwBase.allConditions, ...HEALTHCARE_CONDITIONS] }
+    : uwBase;
 
   let blocked = false;
   let blockReason = '';
-  if (industry && industry.referForUW) { blocked = true; blockReason = `${industry.main} requires referral for underwriting.`; }
+  if (healthcare && !healthcare.eligible && actualTurnover > 0) { blocked = true; blockReason = healthcare.reason; }
+  else if (industry && industry.referForUW && !healthcare) { blocked = true; blockReason = `${industry.main} requires referral for underwriting.`; }
   else if (over200) { blocked = true; blockReason = 'Turnover exceeds R200M. Refer for Underwriting.'; }
   else if (uw.outcome === 'decline') { blocked = true; blockReason = 'Underwriting declined: minimum security requirements not met.'; }
   else if (uw.outcome === 'refer') { blocked = true; blockReason = 'This risk does not meet standard acceptance criteria. Please refer to a senior underwriter.'; }
@@ -53,6 +61,7 @@ function computeDerived(state) {
   const engineBase = {
     revenueBandIndex, industryIndex: state.industryIndex, actualTurnover,
     uwLoadingPct: uw.loadingPct, fpSelections: {}, postureDiscount: 0, discretionaryDiscount: 0,
+    sensitiveRecords,
   };
   const reco = buildCoverRecommendations({
     ...engineBase, quoteType: state.quoteType,
@@ -86,6 +95,7 @@ function computeDerived(state) {
 
   return {
     prev, current, actualTurnover, over200, revenueBandIndex, bandLabel, industry, uw,
+    healthcare, sensitiveRecords, recordsLoading,
     blocked, blockReason, canNext1, ticker, tickerCount, engineBase, reco, optionCalcs, isMulti,
     renewalPremiumNum, renewalFPNum,
   };
